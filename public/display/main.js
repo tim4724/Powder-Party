@@ -227,7 +227,7 @@ scene.onFrame = (dt) => {
       net.sendTo(s.id, {
         type: MSG.PLAYER_STATE,
         position: s.position, of: s.of, progress: s.progress,
-        airborne: s.airborne, charge: s.charge, finished: s.finished,
+        airborne: s.airborne, finished: s.finished,
       });
     }
   }

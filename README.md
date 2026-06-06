@@ -13,12 +13,13 @@ hand:
 |---|---|
 | **Tilt** the phone left/right | **Carve** left/right (gyro roll) |
 | **Swipe down & hold** | **Tuck** — squat for speed (but you can't carve hard while tucked) |
-| **Release the tuck** at a ramp lip | **Jump** — a charged crouch-release pop |
-| **Swipe up** | Quick **hop** |
+| **Release the tuck** / **swipe up** at a ramp lip | **Jump** — a timed lip pop for a launch + bonus |
+| **Swipe up** on open snow | Quick **hop** (clears a tree) |
 
 The core loop: **tuck the steep straights** to build speed, **stand up to carve** the bends
-and dodge the trees, and **charge into the ramps** to launch clean air. First skier to the
-bottom wins. Short-handed lobbies are topped up with CPU skiers so a solo player still races.
+and dodge the trees, and **pop right at the ramp lips** for the biggest air (just rolling over a
+ramp still launches you, only smaller). First skier to the bottom wins. Short-handed lobbies are
+topped up with CPU skiers so a solo player still races.
 
 ## Architecture
 

@@ -20,7 +20,7 @@ export function runControllerScenario(opts) {
   const show = (name) => { for (const k of Object.keys(screens)) screens[k].classList.toggle('hidden', k !== name); };
 
   // Apply the player's livery (the --car custom property tints the HUD, the play
-  // surface glow, the carve/charge fills, and the skier-picker tiles).
+  // surface glow, the carve fill, and the skier-picker tiles).
   const myColor = COLORS[color % COLORS.length];
   document.documentElement.style.setProperty('--car', myColor);
 
@@ -55,7 +55,6 @@ export function runControllerScenario(opts) {
   const setLatency = (halfMs, fastlane) => applyLatencyChip(el('latency'), halfMs, fastlane);
 
   const setCarve = (v) => { const f = el('carve-fill'); if (f) f.style.transform = `translateX(${v * 50}%)`; };
-  const setCharge = (v) => { const f = el('charge-fill'); if (f) f.style.transform = `scaleY(${v})`; };
   function setHud(pos, finished, airborne) {
     el('pos').textContent = finished ? `Done P${pos}` : `P${pos}`;
     el('pos').classList.toggle('leader', pos === 1);
@@ -106,7 +105,7 @@ export function runControllerScenario(opts) {
       // No countdown on the controller — the full HUD is up from the first beat
       // (the 3..2..1..GO lives on the display). Same as 'playing' but pre-fastlane.
       showDriveHud();
-      setCarve(0); setCharge(0);
+      setCarve(0);
       setHud(1, false, false);
       setLatency(24, false);   // pre-fastlane: WS reading, no bolt
       break;
@@ -114,28 +113,24 @@ export function runControllerScenario(opts) {
     case 'playing':
       showDriveHud();
       setCarve(0.4);  // mid-right lean, so the carve bar reads off-centre
-      setCharge(0.15);
       setHud(2, false, false);
       setLatency(16, true);    // fastlane up: low RTT + bolt
       break;
 
     case 'tuck':
-      // Mid-tuck: the charge meter is well filled and the play glyph is in its
-      // "ready to pop" (up-chevron) state. Eyeball the new eyes-free surface.
+      // Mid-tuck: the play glyph is in its "ready to pop" (up-chevron) state.
+      // Eyeball the new eyes-free surface.
       showDriveHud();
       setCarve(-0.2);
-      setCharge(0.72);
-      el('charge').classList.add('charging');
       el('play-glyph').classList.add('tucking');
       setHud(2, false, false);
       setLatency(15, true);
       break;
 
     case 'air':
-      // Airborne after a big release — the AIR badge pulses, charge spent.
+      // Airborne after a ramp pop — the AIR badge pulses.
       showDriveHud();
       setCarve(0.1);
-      setCharge(0);
       setHud(1, false, true);
       setLatency(17, true);
       break;
@@ -154,7 +149,7 @@ export function runControllerScenario(opts) {
 
     case 'paused':
       showDriveHud();
-      setCarve(0.2); setCharge(0);
+      setCarve(0.2);
       setHud(2, false, false);
       setLatency(18, true);
       el('pause-btn').classList.remove('hidden');

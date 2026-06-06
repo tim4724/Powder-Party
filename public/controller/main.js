@@ -1,6 +1,6 @@
 // Controller entry — name → lobby → run. Tilt to CARVE, swipe-down-and-hold to
 // TUCK, release (or swipe up) to JUMP, all streamed as CONTROL {s,t,j} to the
-// display; a light position/air/charge HUD comes back over PLAYER_STATE.
+// display; a light position/air HUD comes back over PLAYER_STATE.
 import { ControllerNet } from './Net.js';
 import { TiltInput } from './TiltInput.js';
 import { SwipeInput } from './SwipeInput.js';
@@ -31,8 +31,8 @@ function show(name) {
 const buzz = (p) => { try { if (navigator.vibrate) navigator.vibrate(p); } catch (_) {} };
 
 // Tuck rumble: a *continuous*-feeling LIGHT buzz for as long as the TUCK is held —
-// the player's eyes-free confirmation they're charging (they're watching the skier
-// on the main display). navigator.vibrate has no intensity control, so "light" is
+// the player's eyes-free confirmation the tuck is engaged (squatting for speed) while
+// they watch the skier on the main display. navigator.vibrate has no intensity control, so "light" is
 // faked with duty cycle: a short on-pulse at a fast cycle = low average motor power
 // (faint) AND pulses too quick to feel apart (they blend into one smooth hum, not
 // taps). It also has no native loop, so we play a long pattern and renew it just
@@ -94,9 +94,8 @@ function updateLatency(halfMs, viaFastlane) { applyLatencyChip(latencyEl, halfMs
 // latest-wins safe (s/t continuous + idempotent, j a wrapping one-shot counter).
 const swipe = new SwipeInput({
   surface: el('game'),
-  onTuckStart: () => { buzz(15); startTuckRumble(); el('charge').classList.add('charging'); el('play-glyph').classList.add('tucking'); },
-  onCharge: (c) => { el('charge-fill').style.transform = `scaleY(${c})`; },
-  onTuckEnd: (c) => { stopTuckRumble(); buzz([0, 40 + Math.round(c * 60)]); el('charge').classList.remove('charging'); el('charge-fill').style.transform = 'scaleY(0)'; el('play-glyph').classList.remove('tucking'); flashJump(); }
+  onTuckStart: () => { buzz(15); startTuckRumble(); el('play-glyph').classList.add('tucking'); },
+  onTuckEnd: () => { stopTuckRumble(); buzz([0, 55]); el('play-glyph').classList.remove('tucking'); flashJump(); }
 });
 const tilt = new TiltInput({
   surface: el('game'),
@@ -159,16 +158,10 @@ function handleMessage(data) {
       break;
     case MSG.PLAYER_STATE:
       if (inResults) break;            // finished → results overlay owns the screen now
-      // Light HUD feed (~10Hz): {position, of, progress, airborne, charge, finished}
+      // Light HUD feed (~10Hz): {position, of, progress, airborne, finished}
       el('pos').textContent = data.finished ? `Done P${data.position}` : `P${data.position}`;
       el('pos').classList.toggle('leader', data.position === 1);
       el('air').classList.toggle('hidden', !data.airborne);
-      // The display's authoritative charge drives the meter while grounded; while
-      // tucking, the local swipe estimate (rendered live in onCharge) already owns
-      // it, so only adopt the server value when we're not actively tucking.
-      if (swipe.state.t === 0 && typeof data.charge === 'number') {
-        el('charge-fill').style.transform = `scaleY(${Math.max(0, Math.min(1, data.charge))})`;
-      }
       break;
     case MSG.STANDINGS: {
       // Live finish board. Refresh who's host (may have shifted if someone left)
@@ -295,8 +288,6 @@ function stopDriving() {
   tilt.stop();
   swipe.stop();
   stopTuckRumble(); // never leave the motor humming if a tuck was held at run end
-  el('charge').classList.remove('charging');
-  el('charge-fill').style.transform = 'scaleY(0)';
   el('air').classList.add('hidden');
   el('play-glyph').classList.remove('tucking');
   if (carveRaf) cancelAnimationFrame(carveRaf);

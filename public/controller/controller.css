@@ -128,7 +128,7 @@ input[type=text]:disabled { opacity: 0.6; }
 .play__center { display: flex; flex-direction: column; align-items: center; gap: 0.9rem; z-index: 1; }
 
 /* a big down-chevron that reads "swipe down here". It flips to a thick up-pop
-   while tucking (charged + ready to jump) and flares on release. */
+   while tucking (squatting for speed) and flares on release. */
 .play__glyph {
   width: 4.4rem; height: 4.4rem; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
@@ -147,25 +147,6 @@ input[type=text]:disabled { opacity: 0.6; }
 @keyframes jumpPop { 0% { transform: translateY(-0.8rem) scale(1.18); } 100% { transform: none; } }
 
 .play__hint { color: var(--ink-2); font-weight: 800; font-size: 0.95rem; text-align: center; max-width: 16rem; }
-
-/* charge meter — a vertical fill on the right edge of the play surface that grows
-   from the bottom while tucking. Mirrors the display's charge read; the live fill
-   is driven by the local swipe estimate, falling back to the server charge. */
-.charge {
-  position: absolute; top: 0.7rem; right: 0.7rem; bottom: 0.7rem; width: 0.95rem;
-  border-radius: var(--r-pill); overflow: hidden;
-  background: color-mix(in srgb, var(--hairline), #fff 30%);
-  box-shadow: inset 0 1px 3px rgba(40, 80, 120, 0.18);
-  z-index: 2;
-}
-.charge__fill {
-  position: absolute; left: 0; right: 0; bottom: 0; height: 100%;
-  transform: scaleY(0); transform-origin: bottom;
-  background: linear-gradient(180deg, var(--accent), var(--car));
-  border-radius: var(--r-pill);
-  transition: transform 0.06s linear;
-}
-.charge.charging { box-shadow: inset 0 1px 3px rgba(40, 80, 120, 0.18), 0 0 0 2px color-mix(in srgb, var(--car), #fff 50%); }
 
 /* carve indicator — a centre-anchored bar that slides with the lean. Sits at the
    bottom of the play surface so a glance reads "which way am I carving". */

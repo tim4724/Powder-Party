@@ -41,7 +41,7 @@ var MSG = {
   // Display -> specific controller
   WELCOME: 'welcome',                 // {peerIndex, colorIndex, hostPeerIndex, roomState, players}
   LOBBY_UPDATE: 'lobby_update',       // roster/host snapshot
-  PLAYER_STATE: 'player_state',       // {position, of, progress[0..1], airborne, charge[0..1], finished} — light HUD feed (~10Hz)
+  PLAYER_STATE: 'player_state',       // {position, of, progress[0..1], airborne, finished} — light HUD feed (~10Hz)
   PONG: 'pong',
 
   // Display -> all controllers (broadcast)

@@ -346,9 +346,10 @@ export class SceneRenderer {
 
   _addRamp(cl, r) {
     const f = cl.sampleAt(r.s);
-    // A kicker: a wedge rising toward the lip. Built as a box, tilted so its top
-    // face ramps up along the slope tangent.
-    const w = (r.width || 2.4), len = 3.2, h = 1.1;
+    // A LOW kicker, sized to the air scale (launch apex ~0.9u) so the skier
+    // clears it instead of driving through a too-tall box. Built as a box, tilted
+    // so its top face ramps up along the slope tangent.
+    const w = (r.width || 2.4), len = 3.0, h = 0.5;
     const geo = new THREE.BoxGeometry(w, h, len);
     // shear the top forward by translating top verts — simpler: just a tilted box
     const ramp = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x7fc4ec, roughness: 0.8 }));

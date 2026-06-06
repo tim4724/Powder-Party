@@ -67,12 +67,11 @@ const SPIN_DRAG = 9.0;      // u/s² speed bleed while wiping out (coasts to a n
 const SPIN_TURNS = 2;       // cosmetic whole turns over CRASH_TIME (multiple of 2π → lands on 0)
 
 // ---- Jump / air ---------------------------------------------------------
-const CHARGE_TIME = 0.75;   // seconds of held tuck to fully charge a pop (0→1)
 const GRAV_AIR = 30.0;      // u/s² pulling you back to the snow while airborne
-const POP_BASE = 3.2;       // u/s upward from a flat crouch-release (charge=1) or swipe-up
-const POP_CHARGE = 4.0;     // extra u/s up scaled by charge at release
-const RAMP_POP = 5.5;       // u/s up from hitting a ramp at full speed (auto-launch, ∝ speed)
-const RAMP_CHARGE_BONUS = 5.5; // extra ramp pop if you release a full charge AT the lip (the reward)
+const POP_BASE = 4.0;       // u/s upward from a swipe-up / tuck-release hop on open snow (clears a tree)
+const RAMP_POP = 7.5;       // u/s up from hitting a ramp at full speed (auto-launch, ∝ speed → ~0.9u apex)
+const RAMP_JUMP_BONUS = 4.5; // extra pop for firing a jump AT the ramp lip — the timing reward
+const RAMP_LIP_REACH = 1.2; // small anticipation reach BEFORE a ramp's leading edge still counts as a lip pop (units)
 const LAND_CLEAN_ACROSS = 0.42; // |across| under this on touchdown = clean landing (keep speed + boost)
 const LAND_BOOST = 1.18;    // clean big-air landing multiplies speed briefly
 const LAND_BOOST_MIN_AIR = 1.2; // …only if the jump cleared at least this height
@@ -147,7 +146,6 @@ export class SkiEngine {
         tuck: 0,         // input t (0|1)
         jumpSeq: -1,     // last-seen j (dedup the wrapping counter)
         wantJump: false, // a fresh release/hop edge queued for this frame
-        charge: 0,       // 0..1 jump charge, builds while tucking on the snow
         airborne: false,
         air: 0,          // height above the slope surface (world units)
         vAir: 0,         // vertical velocity while airborne
@@ -226,38 +224,41 @@ export class SkiEngine {
         if (this._enterObstacle(c) && !spinning) {
           c.spinT = c.spinDur = CRASH_TIME / c.control;   // better control = quicker recovery
           c.spin = 0; spinning = true;
-          c.charge = 0; c.tuck = 0;
+          c.tuck = 0;
           c.boostT = 0; c.boostMul = 1;
           this.onEvent({ type: 'crash', id: c.id });
         }
       }
 
       // --- JUMP / AIR ------------------------------------------------------
-      const tucking = c.tuck === 1 && !spinning;
-      // Charge builds while tucking on the snow; bleeds when not.
-      if (!c.airborne) {
-        if (tucking) c.charge = Math.min(1, c.charge + dt / CHARGE_TIME);
-        else c.charge = Math.max(0, c.charge - dt / (CHARGE_TIME * 0.6));
-      }
-      // Hitting a ramp lip on the snow auto-launches (scaled by speed), with a
-      // big bonus if you release a full charge right at the lip.
+      // No charge meter: TUCK is purely a speed mode now. Air comes from ramps,
+      // plus a small hop to clear an obstacle. Firing a jump AT a ramp lip is the
+      // reward — a base launch (∝ speed) PLUS a timing bonus.
       let launch = 0;
-      if (!c.finished && !c.airborne && !spinning && this._enterRamp(c)) {
-        launch += RAMP_POP * (0.45 + 0.55 * (c.v / c.vmax)) + RAMP_CHARGE_BONUS * c.charge;
-      }
-      // Crouch-release (or swipe-up hop): pop scaled by charge. On the snow only.
+      let popped = false; // player fired a jump this frame → suppress the ramp auto-launch
       if (c.wantJump) {
         c.wantJump = false;
         if (!c.airborne && !spinning && !c.finished) {
-          launch += POP_BASE * (0.35 + 0.65 * c.charge) + POP_CHARGE * c.charge;
+          popped = true;
+          if (this._nearRamp(c)) {
+            launch += RAMP_POP * (0.45 + 0.55 * (c.v / c.vmax)) + RAMP_JUMP_BONUS;
+          } else {
+            launch += POP_BASE; // a small hop on open snow (enough to clear a tree)
+          }
         }
+      }
+      // A ramp lip auto-launches anyone who DIDN'T pop it themselves — you always
+      // catch some air off a kicker (∝ speed), you just miss the timing bonus. The
+      // `popped` guard keeps the two sources mutually exclusive (no double launch:
+      // a self-pop already went airborne below, so it can't also auto-launch).
+      if (!popped && !c.finished && !c.airborne && !spinning && this._enterRamp(c)) {
+        launch += RAMP_POP * (0.45 + 0.55 * (c.v / c.vmax));
       }
       if (launch > 0) {
         c.airborne = true;
         c.vAir = launch;
         c.air = 0.0001;
         c.airPeak = 0;
-        c.charge = 0;
         this.onEvent({ type: 'jump', id: c.id, power: launch });
       }
       // Integrate the ballistic arc.
@@ -352,7 +353,7 @@ export class SkiEngine {
       if (!c.finished && prevTotal < this.length && c.totalS >= this.length) {
         c.finished = true;
         c.finishTime = this.elapsed;
-        c.tuck = 0; c.charge = 0;
+        c.tuck = 0;
         // settle out of any jump so the post-finish coast can't crash-land or
         // emit spurious land/crash events for a skier whose run is decided.
         c.airborne = false; c.air = 0; c.vAir = 0;
@@ -378,6 +379,20 @@ export class SkiEngine {
       else c.rampIn.delete(i);
     }
     return entered;
+  }
+
+  // Is the skier ON or just SHORT OF a ramp lip — close enough that a jump input
+  // counts as a "pop at the lip"? A LEVEL check (not _enterRamp's rising edge)
+  // with a little forward reach, so an anticipatory release still earns the bonus.
+  _nearRamp(c) {
+    for (let i = 0; i < this.ramps.length; i++) {
+      const r = this.ramps[i];
+      const ds = r.s - c.totalS;                 // >0 = ramp still ahead
+      const dl = c.lat - r.lat;
+      // on/just-short-of the lip (small forward reach), within the kicker's footprint
+      if (ds >= -r.radius && ds <= r.radius + RAMP_LIP_REACH && Math.abs(dl) <= r.radius) return true;
+    }
+    return false;
   }
 
   // Rising-edge overlap of a tree/rock (footprint = skier radius + obstacle radius).
@@ -425,7 +440,7 @@ export class SkiEngine {
         // leans the body the right way without knowing STEER_SIGN); carveInput
         // is the raw phone input (drives the on-screen carve bar).
         carve: STEER_SIGN * c.carve, carveInput: c.carve,
-        tuck: c.tuck, charge: c.charge,
+        tuck: c.tuck,
         airborne: c.airborne, air: c.air,
         spin: c.spin, crashed: c.spinT > 0, offPiste: !!c.offPiste,
         boostActive: c.boostT > 0
