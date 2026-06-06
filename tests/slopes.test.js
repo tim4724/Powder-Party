@@ -75,7 +75,10 @@ test('start + finish stay clear; obstacles are spaced and on/near the piste', as
       assert.ok(o.kind === 'tree' || o.kind === 'rock', `seed ${seed}: valid obstacle kind`);
     }
     for (let i = 1; i < obs.length; i++) {
-      assert.ok(obs[i].at - obs[i - 1].at >= 0.034, `seed ${seed}: obstacles min-spaced`);
+      // Generator guarantees ≥ 0.035 spacing, but subtracting two r3-rounded `at`
+      // values can land a hair under in float (e.g. 0.29 − 0.255 = 0.0349999…976),
+      // so compare to 0.035 with a tiny epsilon — NOT a bare `>= 0.035` (flaky).
+      assert.ok(obs[i].at - obs[i - 1].at >= 0.035 - 1e-9, `seed ${seed}: obstacles min-spaced`);
     }
   }
 });

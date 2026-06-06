@@ -141,8 +141,8 @@ export function generateSlope(seed, opts = {}) {
     if (addCarve) {
       let sign = -lastSign;
       // occasional sweeping repeat (same direction) for variety, only if it stays
-      // clear of the yaw cap…
-      if (rnd() < 0.25 && Math.abs(psi + lastSign * 47) < YAW_CAP) sign = lastSign;
+      // clear of the yaw cap even at the MAX turn magnitude (58°)…
+      if (rnd() < 0.25 && Math.abs(psi + lastSign * 58) < YAW_CAP) sign = lastSign;
       // …and a hard turn-back once we drift too far off the fall line.
       if (Math.abs(psi) > YAW_CAP) sign = -Math.sign(psi) || 1;
       lastSign = sign;
