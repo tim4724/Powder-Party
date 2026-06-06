@@ -19,7 +19,11 @@ const AI_PREFIX = 'ai-';
 const HUD_HZ_MS = 150;              // PLAYER_STATE / HUD throttle (~6.5 Hz)
 
 const el = (id) => document.getElementById(id);
-const slope = buildSlopeById(DEFAULT_SLOPE);
+// `?slope=<id>` picks the slope (used by the gallery's Slopes page); unknown
+// ids fall back to the first slope inside buildSlopeById. There's only one
+// slope today, so this just future-proofs the catalogue.
+const params = new URLSearchParams(location.search);
+const slope = buildSlopeById(params.get('slope') || DEFAULT_SLOPE);
 
 // ---- renderer + audio ----------------------------------------------------
 const scene = new SceneRenderer(el('scene'), SKIER_COLORS);
@@ -27,7 +31,7 @@ scene.orbit = true;
 const audio = new SlopeAudio();
 let sceneReady = false;
 const scenePromise = scene.load().then(() => {
-  scene.setTrack(slope, { debug: new URLSearchParams(location.search).get('centerline') === '1' });
+  scene.setTrack(slope, { debug: params.get('centerline') === '1' });
   sceneReady = true;
   scene.start();
 });
@@ -345,7 +349,6 @@ window.addEventListener('keydown', (e) => {
 });
 
 // ---- boot: test harness (no relay) OR live play --------------------------
-const params = new URLSearchParams(location.search);
 const scenario = params.get('scenario');
 if (params.get('test') === '1' || scenario) {
   import('./TestHarness.js').then(({ runDisplayScenario }) => runDisplayScenario(

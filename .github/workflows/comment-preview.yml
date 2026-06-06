@@ -29,6 +29,9 @@ jobs:
               '### Preview',
               `- Display: ${base}`,
               `- Controller (phone): ${base}/controller/index.html`,
+              `- Display gallery: ${base}/gallery.html`,
+              `- Phone gallery: ${base}/gallery-controller.html`,
+              `- Slope gallery: ${base}/gallery-slopes.html`,
               marker,
             ].join('\n');
 

@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex,nofollow">
+<title>Display Gallery — Powder Party</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/gallery.css?v=__APP_V__">
+</head>
+<body>
+<header>
+  <h1>POWDER · DISPLAY</h1>
+
+  <div class="group">
+    <select id="display-ar">
+      <option value="16x9" selected>AR 16:9</option>
+      <option value="21x9">AR 21:9</option>
+      <option value="4x3">AR 4:3</option>
+      <option value="1x1">AR 1:1</option>
+    </select>
+  </div>
+
+  <div class="group">
+    <select id="player-count">
+      <option value="1">1 Skier</option>
+      <option value="2">2 Skiers</option>
+      <option value="3">3 Skiers</option>
+      <option value="4" selected>4 Skiers</option>
+    </select>
+  </div>
+
+  <div class="group">
+    <select id="cards-per-row">
+      <option value="1">1 column</option>
+      <option value="2">2 columns</option>
+      <option value="3" selected>3 columns</option>
+      <option value="4">4 columns</option>
+      <option value="5">5 columns</option>
+    </select>
+  </div>
+
+  <button class="ctrl options-toggle" id="options-toggle" aria-expanded="false" aria-label="Options">⚙</button>
+
+  <nav>
+    <a href="/gallery.html" class="active">Display</a>
+    <a href="/gallery-controller.html">Phone</a>
+    <a href="/gallery-slopes.html">Slopes</a>
+  </nav>
+</header>
+
+<section class="rail">
+  <div id="display-rows"></div>
+</section>
+
+<script src="/gallery-common.js"></script>
+<script src="/gallery-display.js"></script>
+</body>
+</html>

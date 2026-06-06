@@ -8,6 +8,7 @@
 //   /?test=1&scenario=paused              — mid-run, frozen + pause overlay
 //   /?test=1&scenario=results             — results board
 //   /?test=1&scenario=lobby               — orbiting slope preview + fake roster
+//   /?test=1&scenario=slope               — clean orbiting slope preview, CPU field (endless)
 
 const el = (id) => document.getElementById(id);
 
@@ -47,10 +48,14 @@ export async function runDisplayScenario(cfg, ctx) {
     return;
   }
 
-  scene.orbit = false;
+  // `slope` is a clean turntable preview: orbit camera, no lobby/run overlays,
+  // and skiers share the world with no split-screen cells. Every other scenario
+  // below is a chase-cam split-screen run.
+  const orbitPreview = scn === 'slope';
+  scene.orbit = orbitPreview;
   el('lobby') && el('lobby').classList.add('hidden');
-  el('race') && el('race').classList.remove('hidden');
-  for (const p of field) scene.addSkier(p.peerIndex, p.colorIndex, p.name, { cell: true });
+  el('race') && el('race').classList.toggle('hidden', orbitPreview);
+  for (const p of field) scene.addSkier(p.peerIndex, p.colorIndex, p.name, { cell: !orbitPreview });
 
   let session = newSession();
   function newSession() {
@@ -81,7 +86,7 @@ export async function runDisplayScenario(cfg, ctx) {
       if (s.pose) scene.setSkierPose(s.id, s.pose.pos, s.pose.forward, s.pose.up, s.carve, s.v, s.airborne, s.tuck, s.air, s.spin, s.crashed);
       scene.setSkierHud(s.id, s);
     }
-    if (scn === 'running' && session.engine.raceOver) {
+    if ((scn === 'running' || scn === 'slope') && session.engine.raceOver) {
       session.dispose();
       session = newSession();
       session.startCountdown(1);
@@ -100,7 +105,7 @@ export async function runDisplayScenario(cfg, ctx) {
     driveBots(session);
     session.fastForwardToEnd(() => driveBots(session));
     showResults(session.getResults(), field, SKIER_COLORS);
-  } else { // running (default)
+  } else { // running / slope (default) — start the run, onFrame loops it
     session.startCountdown(1);
   }
 }
