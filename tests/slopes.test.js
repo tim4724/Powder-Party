@@ -48,7 +48,7 @@ test('total run length lands in the ~1-minute target window', async () => {
   const { generateSlope } = await load();
   for (let seed = 0; seed < 150; seed++) {
     const { length } = measure(generateSlope(seed));
-    assert.ok(length >= 800 && length <= 1000, `seed ${seed}: length ${length} ~880u`);
+    assert.ok(length >= 900 && length <= 1000, `seed ${seed}: length ${length} ~940u`);
   }
 });
 

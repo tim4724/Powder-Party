@@ -496,6 +496,7 @@ export class SceneRenderer {
           cone.position.y = 1.4 + c * 0.85; tree.add(cone);
         }
         tree.scale.setScalar(0.8 + rnd() * 1.9);
+        tree.rotation.y = rnd() * Math.PI * 2; // random yaw so the bank trees don't all face the same way
         tree.position.copy(s.pos).addScaledVector(s.lateral, off).addScaledVector(worldUp, this._riseAt(Math.abs(off), edgeLat));
         this.slopeGroup.add(tree);
       }
