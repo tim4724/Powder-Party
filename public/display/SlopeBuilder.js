@@ -10,6 +10,12 @@ import { SLOPES, generateSlope } from '../shared/slopes.js';
 
 const DEG = Math.PI / 180;
 const STEP = 2.0; // arclength between centerline samples (Catmull-Rom smooths between)
+// Flat run-out appended to the centerline PAST the finish line. The finish is no
+// wall: a skier crosses it and coasts onto this level apron, braking to a stop
+// (see SkiEngine FINISH_BRAKE). Without real geometry here, sampleAt() clamps at
+// the finish frame and the skier slams into an invisible wall. Long enough that
+// even a fast finisher stops well before the centerline's clamp at the apron end.
+const FINISH_APRON = 48;
 
 // Walk one piece, appending samples. Mutates the cursor {pos, psi} in place and
 // returns the new running arclength `s`.
@@ -47,6 +53,30 @@ function walkPiece(piece, cursor, s, out) {
   return s;
 }
 
+// Append the flat finish apron (see FINISH_APRON): level the run off from the last
+// frame, continuing the run's horizontal heading at constant elevation. Returns
+// the apron's end arclength. The renderer flattens the same way (SceneRenderer),
+// so a finished skier stays glued to the visible piste through the level-off.
+function appendOutrun(samples, fromS) {
+  const fE = samples[samples.length - 1];
+  const flatT = new THREE.Vector3(fE.tangent.x, 0, fE.tangent.z);
+  if (flatT.lengthSq() < 1e-6) flatT.set(0, 0, 1);
+  flatT.normalize();
+  const up = new THREE.Vector3(0, 1, 0);
+  const lateral = flatT.clone().cross(up).normalize();
+  if (lateral.dot(fE.lateral) < 0) lateral.negate(); // keep the run's side → no twist at the join
+  const steps = Math.max(2, Math.round(FINISH_APRON / STEP));
+  for (let k = 1; k <= steps; k++) {
+    const d = (FINISH_APRON * k) / steps;
+    samples.push({
+      pos: new THREE.Vector3(fE.pos.x + flatT.x * d, fE.pos.y, fE.pos.z + flatT.z * d),
+      tangent: flatT.clone(), up: up.clone(), lateral: lateral.clone(),
+      s: fromS + d,
+    });
+  }
+  return fromS + FINISH_APRON;
+}
+
 export function buildSlope(def) {
   const samples = [];
   const cursor = { pos: new THREE.Vector3(0, 0, 0), psi: 0 };
@@ -64,9 +94,13 @@ export function buildSlope(def) {
 
   let s = 0;
   for (const piece of def.pieces) s = walkPiece(piece, cursor, s, samples);
-  const length = s;
+  const length = s; // FINISH LINE: end of the authored run (race distance, banner, features)
 
-  const centerline = new Centerline(samples, length);
+  // Extend the geometry with a flat apron PAST the finish so the run-out is real
+  // ground, not a clamp. `length` (the finish) is unchanged; the centerline's own
+  // length (the clamp bound) becomes the apron end.
+  const apronEnd = appendOutrun(samples, length);
+  const centerline = new Centerline(samples, apronEnd);
 
   let minY = Infinity;
   for (const sm of samples) minY = Math.min(minY, sm.pos.y);

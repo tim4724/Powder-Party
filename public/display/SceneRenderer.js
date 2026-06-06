@@ -205,11 +205,11 @@ export class SceneRenderer {
       }
     }
 
-    // Flat finish OUTRUN: level the run off into a flat apron past the finish
-    // line, so it ends on a believable flat area instead of the ribbon edge
-    // dropping into the sky. Renderer-only (the physics centerline is unchanged);
-    // because every strip below is built from meshSamples, the groomed piste +
-    // shoulders + valley walls all continue onto this flat.
+    // Flat finish OUTRUN: the physics centerline now levels off into a flat apron
+    // past the finish (SlopeBuilder appends it), so the groomed piste + shoulders +
+    // valley walls already continue onto it via these samples. Extend a little
+    // further still — renderer-only — so the ground never terminates exactly where
+    // a skier can coast to, leaving the apron edge in view.
     {
       const fE = samples[samples.length - 1];
       const flatT = new THREE.Vector3(fE.tangent.x, 0, fE.tangent.z);
@@ -218,7 +218,7 @@ export class SceneRenderer {
       const up = new THREE.Vector3(0, 1, 0);
       const lateral = flatT.clone().cross(up).normalize();
       if (lateral.dot(fE.lateral) < 0) lateral.negate(); // align with the run's side → no twist at the join
-      const OUT = 46, STEPS = 9;
+      const OUT = 18, STEPS = 4;
       for (let k = 1; k <= STEPS; k++) {
         const d = (OUT * k) / STEPS;
         meshSamples.push({

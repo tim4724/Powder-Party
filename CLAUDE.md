@@ -32,7 +32,8 @@ No browser/E2E suite. Preview the display without phones via `/?test=1&scenario=
   AIR a back-flip fallback for non-analog inputs; `f` `{n,a,m}` wrapping ANALOG air-trick flick
   (`a` = angle rad, up=+π/2: up→back, down→front, sides→spin, diagonals→cork; `m` = strength 0..1 →
   spin rate; air-only). Air tricks resolve from the display's authoritative air state.
-- Browser code is ES modules; the engine imports only `../AiDriver.js`. Three.js is vendored
+- Browser code is ES modules; the engine is import-free (fully dependency/THREE-free, so the
+  Node tests can load it on a lightweight centerline stub). Three.js is vendored
   under `vendor/three/` and served via `/vendor/`, imported through an inline importmap (the
   one script needing a CSP nonce).
 - Relay/STUN URLs + the message vocabulary live in `public/shared/protocol.js` (game-side

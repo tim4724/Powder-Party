@@ -16,8 +16,6 @@
 // returns, so it loads identically in the browser and the Node test runner
 // (the tests feed a lightweight centerline whose frames implement those ops).
 
-import { pursue } from '../AiDriver.js';
-
 // ---- Speed model (gravity + tuck + edge-scrub) --------------------------
 // Target-speed + approach model (same envelope as the reference kart engine,
 // which is stable and easy to tune). targetV is set by slope steepness, tuck,
@@ -41,6 +39,10 @@ const ACCEL_TUCK    = 16.0; // u/s² building speed while squatting (gravity + a
 const ACCEL_UPRIGHT = 10.0; // u/s² upright — you build speed more lazily
 const DECEL_TUCK    = 3.0;  // u/s² tuck glide: barely bleeds speed (carries momentum)
 const DECEL_UPRIGHT = 7.0;  // u/s² stand up = the air brake (still gentler than before)
+// Past the finish line: the skier stands up and snowplows to a stop on the flat
+// run-out (the finish is no wall — see SlopeBuilder FINISH_APRON). A firm-but-tidy
+// scrub that fully stops a fast finisher well within the apron.
+const FINISH_BRAKE  = 7.0;  // u/s² speed bleed to a standstill after the finish
 
 // ---- Carving (ribbon steering) ------------------------------------------
 const TURN_RATE = 1.45;     // rad/s edge rate at full carve for the benchmark (the "edge" stat scales this)
@@ -196,10 +198,14 @@ export class SkiEngine {
 
   processInput(id, msg) {
     const c = this.skiers.get(id);
-    if (!c || c.finished) return;
+    if (!c) return;
     // Validate FINITENESS, not just type — `typeof NaN === 'number'`, and one
     // bad packet (NaN/Infinity) would propagate through every later arithmetic
     // op and permanently corrupt the skier. The phone is an untrusted boundary.
+    // Past the finish the run is decided: the phone can still STEER a little as
+    // the skier coasts to a stop on the run-out, but tuck/jump/tricks are locked
+    // out (no speeding up, no air) — "steer a bit, nothing more".
+    if (c.finished) { if (Number.isFinite(msg.s)) c.carve = clamp(msg.s, -1, 1); return; }
     if (Number.isFinite(msg.s)) c.carve = clamp(msg.s, -1, 1);
     if (typeof msg.t === 'number') c.tuck = msg.t > 0.5 ? 1 : 0;
     else if (typeof msg.t === 'boolean') c.tuck = msg.t ? 1 : 0;
@@ -237,10 +243,12 @@ export class SkiEngine {
       // off-piste = past the groomed edge → deep snow slows you (no walls)
       c.offPiste = Math.abs(c.lat) > this.pisteHalf;
 
-      // A finished skier coasts the racing line to the runout on autopilot so
-      // the scene stays alive; its phone no longer drives it. Tucked = a quick,
-      // tidy schuss-out (default-fast, same as a hands-off live skier).
-      if (c.finished) { c.carve = pursue(c, this.centerline); c.tuck = 1; }
+      // Past the finish the run is decided: stand up (no tuck) and scrub to a stop
+      // on the flat run-out (the brake lives in the longitudinal block below). The
+      // phone can still steer a little, but with nothing else to do, let the carve
+      // relax toward straight so a finished skier — a bot, or a hands-off phone —
+      // coasts straight to a halt instead of drifting off on a stale input.
+      if (c.finished) { c.tuck = 0; c.carve *= Math.max(0, 1 - 6 * dt); }
 
       // --- WIPEOUT TICK (tree/rock spin-out) -------------------------------
       let spinning = c.spinT > 0;
@@ -362,6 +370,15 @@ export class SkiEngine {
       } else if (c.airborne) {
         // No snow contact: hold speed (a hair of air drag).
         c.v = Math.max(0, c.v - 0.4 * dt);
+      } else if (c.finished) {
+        // Flat run-out past the line: stand up and scrub to a standstill. Brake at
+        // FINISH_BRAKE normally, but firm up if a fast finisher would otherwise run
+        // out of apron — so we ALWAYS halt before the centerline clamps (the whole
+        // point: the finish is no wall, and neither is the apron's end).
+        const room = this.centerline.length - c.totalS - 1.0; // aim to stop ~1u short of the clamp
+        const need = room > 0.1 ? (c.v * c.v) / (2 * room) : Infinity;
+        const brake = Math.min(40, Math.max(FINISH_BRAKE, need));
+        c.v = Math.max(0, c.v - brake * dt);
       } else {
         const tuckMul = c.tuck ? TUCK_CAP : NOTUCK_CAP;
         const edgeMul = 1 - EDGE_SCRUB * across;
