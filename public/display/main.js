@@ -4,8 +4,8 @@
 // reference kart display main.js — same orchestration shape, ski game logic.
 import { DisplayNet, fetchQR, renderQR, renderJoinUrl } from './Net.js';
 import { SceneRenderer } from './SceneRenderer.js';
-import { buildSlopeById } from './SlopeBuilder.js';
-import { DEFAULT_SLOPE } from '../shared/slopes.js';
+import { buildSlopeById, buildGeneratedSlope } from './SlopeBuilder.js';
+import { SLOPES } from '../shared/slopes.js';
 import { RunSession } from './RunSession.js';
 import { AiController, AI_PERSONALITIES } from './AiDriver.js';
 import { SlopeAudio } from './Audio.js';
@@ -19,14 +19,30 @@ const AI_PREFIX = 'ai-';
 const HUD_HZ_MS = 150;              // PLAYER_STATE / HUD throttle (~6.5 Hz)
 
 const el = (id) => document.getElementById(id);
-// `?slope=<id>` picks the slope (used by the gallery's Slopes page); unknown
-// ids fall back to the first slope inside buildSlopeById. The `tricks` test
-// scenario defaults to the straight `trick-lab` practice run (overridable with
-// an explicit ?slope=).
 const params = new URLSearchParams(location.search);
-const slope = buildSlopeById(
-  params.get('slope') || (params.get('scenario') === 'tricks' ? 'trick-lab' : DEFAULT_SLOPE)
-);
+// Test/scenario mode (gallery cards, snapshots) wants a STABLE slope; live play
+// wants a fresh random one per run. (`scenario`/`test` are also read at boot below.)
+const testMode = params.get('test') === '1' || !!params.get('scenario');
+
+// Build the slope for the NEXT run. Precedence: an explicit catalog id (the
+// gallery's Slopes page / the `powder-bowl` reference) → the `tricks` scenario's
+// straight `trick-lab` practice run → an explicit `?seed` (deterministic repro +
+// tests) → a fixed seed in test mode (stable gallery + snapshots) → a fresh
+// random seed (live play, a new mountain every run).
+function makeSlope() {
+  const id = params.get('slope');
+  if (id && SLOPES[id]) return buildSlopeById(id);
+  if (params.get('scenario') === 'tricks') return buildSlopeById('trick-lab');
+  const seedParam = params.get('seed');
+  if (seedParam != null && seedParam !== '') {
+    const n = parseInt(seedParam, 10);
+    if (Number.isNaN(n)) console.warn(`[powder] non-numeric ?seed=${seedParam} — using seed 0`);
+    return buildGeneratedSlope(n >>> 0);
+  }
+  if (testMode) return buildGeneratedSlope(1);
+  return buildGeneratedSlope((Math.random() * 0xffffffff) >>> 0);
+}
+let slope = makeSlope();
 
 // ---- renderer + audio ----------------------------------------------------
 const scene = new SceneRenderer(el('scene'), SKIER_COLORS);
@@ -305,6 +321,11 @@ function returnToLobby() {
   currentField = []; aiBots = new Map(); humanIds = new Set();
   raceEnded = false; paused = false;
   audio.stopWind();
+  // Roll a fresh slope for the next run so the lobby orbit previews the very hill
+  // you're about to ski (live play only — test mode pins a stable seed).
+  slope = makeSlope();
+  window.__slope = slope;
+  if (sceneReady) scene.setTrack(slope, { debug: params.get('centerline') === '1' });
   net.flow.transitionTo(ROOM_STATE.LOBBY);
   net.broadcast({ type: MSG.GAME_END, results: null });
   scene.orbit = true;

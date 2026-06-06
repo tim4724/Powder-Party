@@ -5,7 +5,9 @@
 // the method names + `racing` flag are kept so main.js wiring is unchanged.)
 import { SkiEngine } from './engine/SkiEngine.js';
 
-const MAX_RUN_MS = 90_000; // hard ceiling — a downhill is short; failsafe ends a stuck run
+const MAX_RUN_MS = 120_000; // hard ceiling — failsafe ends a STUCK run. Generous of
+                            // the ~1-min target so a slow/crashing human isn't cut off
+                            // (normal runs still end the instant everyone finishes).
 
 export class RunSession {
   constructor(players, track, opts = {}) {

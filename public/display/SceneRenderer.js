@@ -10,6 +10,17 @@
 // setTrack(track,{debug}), addSkier(id,colorIndex,name,opts), removeSkier(id),
 // setSkierPose(...), setSkierHud(id,info), start(), stop(), onFrame, orbit.
 import * as THREE from 'three';
+import { mulberry32 } from '../shared/slopes.js';
+
+// FNV-1a hash of a slope's `def.id` → a uint32 seed, so the decorative forest is
+// deterministic per slope (same hill → same trees) instead of re-randomised on
+// every setTrack. (Gameplay geometry is already seed-deterministic; this makes
+// the cosmetic scatter match it.)
+function _hashStr(s) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return h >>> 0;
+}
 
 // ---- camera + feel constants (starting values) --------------------------
 const CHASE_DIST = 7.4;     // how far behind the skier the cam sits
@@ -121,6 +132,10 @@ export class SceneRenderer {
 
     this.slopeGroup = new THREE.Group(); scene.add(this.slopeGroup);
     this.propGroup = new THREE.Group(); scene.add(this.propGroup);
+    // Lobby-only decoration (instanced flank forest). Shown under the single
+    // overview camera, hidden the moment skiers render in split-screen — so the
+    // race (up to 4 viewports) never pays for it. See _loop / _addOuterTrees.
+    this.lobbyGroup = new THREE.Group(); scene.add(this.lobbyGroup);
 
     this.overview = new THREE.PerspectiveCamera(52, this._aspect(), 0.1, 1200);
     this.overview.position.set(30, 28, 30);
@@ -163,6 +178,7 @@ export class SceneRenderer {
   setTrack(track, opts = {}) {
     this._disposeGroup(this.slopeGroup);
     this._disposeGroup(this.propGroup);
+    this._disposeGroup(this.lobbyGroup);
 
     const samples = track.centerline.samples;
     const sw = track.slopeWidth || 11;
@@ -188,6 +204,30 @@ export class SceneRenderer {
       }
     }
 
+    // Flat finish OUTRUN: level the run off into a flat apron past the finish
+    // line, so it ends on a believable flat area instead of the ribbon edge
+    // dropping into the sky. Renderer-only (the physics centerline is unchanged);
+    // because every strip below is built from meshSamples, the groomed piste +
+    // shoulders + valley walls all continue onto this flat.
+    {
+      const fE = samples[samples.length - 1];
+      const flatT = new THREE.Vector3(fE.tangent.x, 0, fE.tangent.z);
+      if (flatT.lengthSq() < 1e-6) flatT.set(0, 0, 1);
+      flatT.normalize();
+      const up = new THREE.Vector3(0, 1, 0);
+      const lateral = flatT.clone().cross(up).normalize();
+      if (lateral.dot(fE.lateral) < 0) lateral.negate(); // align with the run's side → no twist at the join
+      const OUT = 46, STEPS = 9;
+      for (let k = 1; k <= STEPS; k++) {
+        const d = (OUT * k) / STEPS;
+        meshSamples.push({
+          pos: new THREE.Vector3(fE.pos.x + flatT.x * d, fE.pos.y, fE.pos.z + flatT.z * d),
+          tangent: flatT.clone(), up: up.clone(), lateral: lateral.clone(),
+          s: fE.s + d,
+        });
+      }
+    }
+
     // Two-tone snow ribbon: 4 verts per sample at [-edge, -piste, +piste, +edge].
     // The middle band (±piste) is bright groomed snow; the outer bands fade to a
     // colder, deeper powder — a clear visual "you've left the run" without a wall.
@@ -209,6 +249,12 @@ export class SceneRenderer {
     this._addSlopeStrip(meshSamples, -(edgeLat + 72), -(edgeLat + 26), 48, 14, WALL);
     this._addSlopeStrip(meshSamples, edgeLat, edgeLat + 26, 0, 14, WALL);
     this._addSlopeStrip(meshSamples, edgeLat + 26, edgeLat + 72, 14, 48, WALL);
+    // Mountainside FLANKS: sweep from the valley-wall tops outward and DOWN to the
+    // valley floor on both sides, so the elevated run sits on a solid massif
+    // instead of a thin ribbon floating over the flat ground — which the rotating
+    // lobby camera exposed from the side. The outer edge meets the ground plane
+    // (groundY) exactly, so the whole mountain reads as one piece.
+    this._addFlanks(meshSamples, edgeLat, (track.groundY != null ? track.groundY : -2));
 
     // Edge markers (alternating poles) along the GROOMED edge (±pisteHalf) — they
     // mark where the deep snow starts and double as depth/speed cues.
@@ -234,8 +280,6 @@ export class SceneRenderer {
     this._addBanner(cl, 0.2, 0x2bb673, 'start');
     this._addBanner(cl, track.length - 0.2, 0xf2b134, 'finish');
 
-    this.ground.position.y = (track.groundY != null ? track.groundY : -2);
-
     // Overview framing for the lobby turntable + size the shadow camera.
     const box = new THREE.Box3();
     for (const s of samples) box.expandByPoint(s.pos);
@@ -251,6 +295,14 @@ export class SceneRenderer {
     this._ovHeight = ovOff.y;
     this._orbitAngle = Math.atan2(ovOff.z, ovOff.x); // start the orbit where the static frame sits (no first-frame snap)
 
+    // Valley floor: centre the snow plane UNDER the whole run and grow it to cover
+    // out past the peaks. (The default 1200² plane at the origin didn't even reach
+    // the lower end of a long slope, leaving a void the flanks now drape into.) It
+    // sits at the finish elevation so the flanks meet it seamlessly.
+    const groundSpan = Math.max(size.x, size.z) + this._ovRadius * 3;
+    this.ground.position.set(this._trackCenter.x, (track.groundY != null ? track.groundY : -2), this._trackCenter.z);
+    this.ground.scale.set(groundSpan / 1200, groundSpan / 1200, 1);
+
     const half = Math.max(size.x, size.y, size.z) * 0.5 + 6;
     const k = this._key;
     k.target.position.copy(this._trackCenter); k.target.updateMatrixWorld();
@@ -261,9 +313,30 @@ export class SceneRenderer {
     sc.updateProjectionMatrix();
     k.shadow.needsUpdate = true;
 
+    // Scale fog + the overview far-plane to the ACTUAL track size. The slope is
+    // procedural now — a long, tall descent — so the old fixed distances (tuned
+    // for the ~300u hill) fogged the whole run AND every distant peak to flat
+    // white, which is what made the lobby orbit look broken/incomplete. Key it
+    // off the lobby orbit radius so the encircling peaks stay crisp up close and
+    // only haze out in the far distance.
+    const R = this._ovRadius || 200;
+    this.scene.fog.near = R * 0.55;
+    this.scene.fog.far = R * 2.9;
+    this._camFar = Math.max(1200, R * 4.4);
+    this.overview.far = this._camFar;
+    this.overview.updateProjectionMatrix();
+    // Per-skier chase cams must reach as far as the overview, or the distant
+    // peaks/flanks clip out of the gameplay view on a tall slope. Update any that
+    // already exist (skiers are normally added after setTrack, but be safe).
+    for (const c of this.skiers.values()) { if (c.cam) { c.cam.far = this._camFar; c.cam.updateProjectionMatrix(); } }
+
     // distant snow peaks + an alpine pine forest on the banks → a snowy mountain
     this._addPeaks(this._trackCenter, size);
-    this._addScenery(samples, edgeLat);
+    // Seed the decorative scatter off the slope id so the SAME hill always grows
+    // the SAME forest (two independent streams so tweaking one doesn't shift the other).
+    const sceneSeed = _hashStr(track.def && track.def.id ? track.def.id : 'slope');
+    this._addScenery(samples, edgeLat, mulberry32(sceneSeed));
+    this._addOuterTrees(samples, edgeLat, (track.groundY != null ? track.groundY : -2), mulberry32(sceneSeed ^ 0x9e3779b9));
   }
 
   // One snow strip from lateral offset offA→offB, optionally rising in world-Y
@@ -289,6 +362,87 @@ export class SceneRenderer {
     return m;
   }
 
+  // Mountainside flanks: a strip per side from the outer wall ring (lateral
+  // ±(edgeLat+72), world-Y = sample + 48 — matching the top wall strip) sweeping
+  // out and DOWN to the valley floor (absolute groundY). Closes the sky-gap under
+  // the elevated run so it reads as a solid mountain from every orbit angle.
+  _addFlanks(samples, edgeLat, groundY) {
+    const offInner = edgeLat + 72, riseInner = 48, offOuter = edgeLat + 240;
+    const mat = new THREE.MeshStandardMaterial({ color: 0xeef3f9, side: THREE.DoubleSide, roughness: 1, metalness: 0 });
+    const n = samples.length;
+    for (const sign of [-1, 1]) {
+      const oi = sign * offInner, oo = sign * offOuter;
+      const pos = new Float32Array(n * 2 * 3);
+      for (let i = 0; i < n; i++) {
+        const s = samples[i], a = i * 6;
+        pos[a] = s.pos.x + s.lateral.x * oi; pos[a + 1] = s.pos.y + s.lateral.y * oi + riseInner; pos[a + 2] = s.pos.z + s.lateral.z * oi;
+        pos[a + 3] = s.pos.x + s.lateral.x * oo; pos[a + 4] = groundY; pos[a + 5] = s.pos.z + s.lateral.z * oo;
+      }
+      const idx = [];
+      for (let i = 0; i < n - 1; i++) { const p = i * 2; idx.push(p, p + 1, p + 2, p + 1, p + 3, p + 2); }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      g.setIndex(idx);
+      g.computeVertexNormals();
+      const m = new THREE.Mesh(g, mat);
+      m.receiveShadow = true;
+      this.slopeGroup.add(m);
+    }
+  }
+
+  // Lobby-only flank forest: trees on the OUTER mountainside (between the valley
+  // walls and the floor). INSTANCED — the whole forest is 4 draw calls no matter
+  // the count, lives in lobbyGroup (hidden during the race → zero cost in the
+  // split-screen passes), and casts no shadow. Density falls off where the flank
+  // is steep (bare cliffs near the top of the run, forest lower down) for a
+  // natural treeline.
+  _addOuterTrees(samples, edgeLat, groundY, rnd) {
+    const offInner = edgeLat + 72, riseInner = 48, span = (edgeLat + 240) - offInner; // matches _addFlanks
+    const place = [];
+    const n = samples.length;
+    for (let i = 4; i < n - 4; i += 2) {
+      const s = samples[i];
+      const steep = ((s.pos.y + riseInner) - groundY) / span;   // flank height / width here
+      const density = Math.max(0, 1 - steep / 2.1);             // sparse on steep upper flanks
+      for (const sign of [-1, 1]) {
+        if (rnd() > density * 0.8) continue;
+        const t = 0.34 + 0.62 * rnd();                         // bias to the outer (gentler) flank, off the lip
+        const off = sign * (offInner + t * span);
+        place.push({
+          x: s.pos.x + s.lateral.x * off,
+          y: (s.pos.y + riseInner) + t * (groundY - (s.pos.y + riseInner)),
+          z: s.pos.z + s.lateral.z * off,
+          rotY: rnd() * Math.PI * 2,
+          scl: 0.85 + rnd() * 1.7,
+        });
+      }
+    }
+    if (!place.length) return;
+
+    const N = place.length;
+    const bark = new THREE.MeshStandardMaterial({ color: 0x6b4a2f, roughness: 1 });
+    const foliage = new THREE.MeshStandardMaterial({ color: 0x2f7d52, roughness: 1, flatShading: true });
+    // one InstancedMesh per tree part, all sharing the per-tree transforms.
+    const parts = [new THREE.InstancedMesh(new THREE.CylinderGeometry(0.18, 0.24, 1.2, 6).translate(0, 0.6, 0), bark, N)];
+    for (let c = 0; c < 3; c++) {
+      parts.push(new THREE.InstancedMesh(new THREE.ConeGeometry(1.3 - c * 0.32, 1.5, 7).translate(0, 1.4 + c * 0.85, 0), foliage, N));
+    }
+    const up = new THREE.Vector3(0, 1, 0), q = new THREE.Quaternion();
+    const p = new THREE.Vector3(), sc = new THREE.Vector3(), m4 = new THREE.Matrix4();
+    for (let k = 0; k < N; k++) {
+      const t = place[k];
+      q.setFromAxisAngle(up, t.rotY); p.set(t.x, t.y, t.z); sc.setScalar(t.scl);
+      m4.compose(p, q, sc);
+      for (const im of parts) im.setMatrixAt(k, m4);
+    }
+    for (const im of parts) {
+      im.instanceMatrix.needsUpdate = true;
+      im.castShadow = false; im.receiveShadow = false;
+      im.frustumCulled = false; // instances span the whole mountain; the origin-centred bound would wrongly cull
+      this.lobbyGroup.add(im);
+    }
+  }
+
   // World-Y height of the mountainside at a lateral distance |off| from centre
   // (matches the wall strips built in setTrack), for sitting trees on the banks.
   _riseAt(absO, edgeLat) {
@@ -297,31 +451,34 @@ export class SceneRenderer {
     return 14 + 34 * Math.min(1, (absO - edgeLat - 26) / 46);
   }
 
-  // Big low-poly snow peaks ringing the run, set well back and partly in the fog
-  // so they read as a distant range. The single biggest "we're on a mountain" cue.
+  // A FULL ring of big low-poly snow peaks encircling the run — the distant
+  // range that frames the lobby orbit from every angle. (The old sparse 8-cone
+  // arc, sized for the small hill, left gaps the rotating camera exposed and sat
+  // inside the new orbit radius.) Placed safely beyond the orbit and BASED ON THE
+  // VALLEY FLOOR so they tower like real mountains rather than float as chips.
   _addPeaks(center, size) {
-    const baseR = Math.max(size.x, size.z) * 0.5 + 95;
-    const peaks = [
-      { ang: 0.5, d: 1.0, h: 115, r: 72 }, { ang: 1.15, d: 1.4, h: 165, r: 100 },
-      { ang: 1.95, d: 1.05, h: 95, r: 62 }, { ang: 2.7, d: 1.3, h: 140, r: 90 },
-      { ang: -0.35, d: 1.25, h: 125, r: 82 }, { ang: -1.25, d: 1.05, h: 105, r: 68 },
-      { ang: 3.5, d: 1.15, h: 110, r: 72 }, { ang: 4.4, d: 1.35, h: 150, r: 95 },
-    ];
+    const R = (this._ovRadius || 200) * 1.45;     // ring radius — well outside the camera orbit
+    const floor = this.ground.position.y;         // valley floor (finish level)
     // emissive lifts the shaded faces toward a cool snowy white (distant peaks are
     // hazy/bright), so they read as snow mountains rather than dark grey pyramids.
     const snow = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xc6d2e0, emissiveIntensity: 0.18, roughness: 1, flatShading: true });
-    for (const p of peaks) {
-      const dist = baseR * p.d;
-      const cone = new THREE.Mesh(new THREE.ConeGeometry(p.r, p.h, 5, 1), snow);
-      cone.position.set(center.x + Math.cos(p.ang) * dist, center.y - 60 + p.h / 2, center.z + Math.sin(p.ang) * dist);
-      cone.rotation.y = p.ang * 1.7;
+    const N = 16;
+    for (let i = 0; i < N; i++) {
+      // even spacing + alternating jitter → organic but never a gap.
+      const ang = (i / N) * Math.PI * 2 + (i % 2 ? 0.17 : -0.13);
+      const dist = R * (0.92 + (i % 3) * 0.16);
+      const h = 210 + (i % 4) * 50 + (i % 2) * 44;  // ~210..390
+      const r = h * 0.62;
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(r, h, 5, 1), snow);
+      cone.position.set(center.x + Math.cos(ang) * dist, floor + h / 2, center.z + Math.sin(ang) * dist);
+      cone.rotation.y = ang * 1.7;
       this.slopeGroup.add(cone);
     }
   }
 
   // Scatter an alpine pine forest over the mountainside banks (decorative, not
   // collidable — the engine's obstacles are separate).
-  _addScenery(samples, edgeLat) {
+  _addScenery(samples, edgeLat, rnd) {
     const n = samples.length;
     const foliage = new THREE.MeshStandardMaterial({ color: 0x2f7d52, roughness: 1, flatShading: true });
     const bark = new THREE.MeshStandardMaterial({ color: 0x6b4a2f });
@@ -329,8 +486,8 @@ export class SceneRenderer {
     for (let i = 4; i < n - 4; i += 3) {
       const s = samples[i];
       for (const side of [-1, 1]) {
-        if (Math.random() < 0.5) continue;
-        const off = side * (edgeLat + 3 + Math.random() * 58);
+        if (rnd() < 0.5) continue;
+        const off = side * (edgeLat + 3 + rnd() * 58);
         const tree = new THREE.Group();
         const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.24, 1.2, 6), bark);
         trunk.position.y = 0.6; tree.add(trunk);
@@ -338,7 +495,8 @@ export class SceneRenderer {
           const cone = new THREE.Mesh(new THREE.ConeGeometry(1.3 - c * 0.32, 1.5, 7), foliage);
           cone.position.y = 1.4 + c * 0.85; tree.add(cone);
         }
-        tree.scale.setScalar(0.8 + Math.random() * 1.9);
+        tree.scale.setScalar(0.8 + rnd() * 1.9);
+        tree.rotation.y = rnd() * Math.PI * 2; // random yaw so the bank trees don't all face the same way
         tree.position.copy(s.pos).addScaledVector(s.lateral, off).addScaledVector(worldUp, this._riseAt(Math.abs(off), edgeLat));
         this.slopeGroup.add(tree);
       }
@@ -452,7 +610,7 @@ export class SceneRenderer {
     const hat = new THREE.Mesh(new THREE.SphereGeometry(0.21, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), suit);
     hat.position.y = 0.85; body.add(hat);
 
-    const cam = new THREE.PerspectiveCamera(BASE_FOV, 1, 0.1, 1200);
+    const cam = new THREE.PerspectiveCamera(BASE_FOV, 1, 0.1, this._camFar || 1200);
 
     // soft contact shadow — a faded sprite laid flush on the slope each frame
     // (oriented in setSkierPose so it can't clip through the tilted surface)
@@ -598,6 +756,11 @@ export class SceneRenderer {
     if (this._key) this._key.shadow.needsUpdate = true;
 
     const ids = this._order.filter((id) => this.skiers.has(id));
+    // Flank forest renders only under the single overview camera (lobby + the
+    // all-CPU preview) — `_order` is empty when there are no human/celled skiers.
+    // The moment humans render in split-screen chase cams it's hidden, so the
+    // race pays nothing. `visible=false` skips it entirely in render traversal.
+    this.lobbyGroup.visible = ids.length === 0;
     if (ids.length === 0) {
       // lobby / attract: single overview camera, slow orbit
       this.overview.aspect = W / H; this.overview.updateProjectionMatrix();
@@ -638,11 +801,17 @@ export class SceneRenderer {
   }
 
   _disposeGroup(g) {
+    // Dedupe: geometries (e.g. the shared pole geo) and materials (shared across
+    // peaks / flanks / the instanced forest) are reused by many meshes — dispose
+    // each exactly once so we don't fire redundant 'dispose' events at the renderer.
+    const geos = new Set(), mats = new Set();
+    const disposeMat = (x) => { if (x && !mats.has(x)) { mats.add(x); x.dispose(); } };
     for (let i = g.children.length - 1; i >= 0; i--) {
       const o = g.children[i];
       o.traverse((m) => {
-        if (m.geometry) m.geometry.dispose();
-        if (m.material) { Array.isArray(m.material) ? m.material.forEach((x) => x.dispose()) : m.material.dispose(); }
+        if (m.geometry && !geos.has(m.geometry)) { geos.add(m.geometry); m.geometry.dispose(); }
+        if (m.material) { Array.isArray(m.material) ? m.material.forEach(disposeMat) : disposeMat(m.material); }
+        if (m.isInstancedMesh && m.dispose) m.dispose(); // free the GPU instance buffer
       });
       g.remove(o);
     }
