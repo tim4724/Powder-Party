@@ -204,6 +204,74 @@ test('a ramp auto-launches a skier crossing it on the snow', async () => {
   assert.ok(airSeen, 'crossing the ramp should put the skier in the air');
 });
 
+test('an air flip lands clean and banks a trick boost', async () => {
+  const events = [];
+  const e = await makeEngine([1], track({ length: 300 }), { onEvent: (ev) => events.push(ev) });
+  run(e, 1.0, () => e.processInput(1, { s: 0, t: 1, j: 0 })); // get moving, straight line
+  // a generous pop — plenty of air to finish a 0.45s flip
+  const sk = [...e.skiers.values()][0];
+  sk.airborne = true; sk.vAir = 12; sk.air = 0.01; sk.airPeak = 0; sk.trickCount = 0;
+  let flipSent = false, sawAxis = false;
+  run(e, 1.4, () => {
+    const s = e.getSnapshot().skiers[0];
+    if (s.airborne && s.air > 0.6 && !flipSent) { e.processInput(1, { s: 0, t: 1, j: 1 }); flipSent = true; } // up-flick in the air → back flip
+    if (s.trickAxis === 'back') sawAxis = true;
+  });
+  assert.ok(sawAxis, 'an up-flick mid-air spins a back flip');
+  assert.ok(events.some((ev) => ev.type === 'trick_done'), 'the flip completed before touchdown');
+  const land = events.filter((ev) => ev.type === 'land').pop();
+  assert.ok(land && land.tricks > 0, `a clean landing credits the flip (saw tricks=${land && land.tricks})`);
+  assert.ok(e.getSnapshot().skiers[0].boostActive, 'a landed flip banks a speed boost');
+});
+
+test('landing mid-flip washes you out', async () => {
+  const events = [];
+  const e = await makeEngine([1], track({ length: 300 }), { onEvent: (ev) => events.push(ev) });
+  run(e, 1.0, () => e.processInput(1, { s: 0, t: 1, j: 0 }));
+  // at the apex with little airtime left — a 0.45s flip can't finish before the snow
+  const sk = [...e.skiers.values()][0];
+  sk.airborne = true; sk.vAir = 0; sk.air = 0.6; sk.airPeak = 0.6; sk.trickCount = 0;
+  e.processInput(1, { s: 0, t: 1, j: 1 }); // flick now (already above the arm gate)
+  let crashed = false;
+  run(e, 1.5, () => { if (e.getSnapshot().skiers[0].crashed) crashed = true; });
+  assert.ok(events.some((ev) => ev.type === 'crash' && ev.trick), 'a flip caught by the ground crashes');
+  assert.ok(crashed, 'skier is in the spin-out after a botched flip');
+  assert.ok(!e.getSnapshot().skiers[0].boostActive, 'a botched flip banks no boost');
+});
+
+test('a tiny hop is too low to arm a flip (no accidental crash)', async () => {
+  const events = [];
+  const e = await makeEngine([1], track({ length: 300 }), { onEvent: (ev) => events.push(ev) });
+  run(e, 1.0, () => e.processInput(1, { s: 0, t: 1, j: 0 }));
+  // apex ≈ vAir²/2g ≈ 0.1u, well under TRICK_MIN_AIR (0.55)
+  const sk = [...e.skiers.values()][0];
+  sk.airborne = true; sk.vAir = 2.5; sk.air = 0.01; sk.airPeak = 0; sk.trickCount = 0;
+  let n = 1, sawAxis = false;
+  run(e, 1.0, () => {
+    const s = e.getSnapshot().skiers[0];
+    if (s.airborne) e.processInput(1, { s: 0, t: 1, j: n++ }); // spam up-flicks the whole hop
+    if (s.trickAxis) sawAxis = true;
+  });
+  assert.ok(!sawAxis, 'a sub-threshold hop never arms a flip');
+  assert.ok(!events.some((ev) => ev.type === 'trick_start'), 'no flip started');
+  assert.ok(!events.some((ev) => ev.type === 'crash'), 'so it cannot crash you');
+});
+
+test('a side-flick spins a side flip, not a jump', async () => {
+  const e = await makeEngine([1], track({ length: 300 }), {});
+  run(e, 1.0, () => e.processInput(1, { s: 0, t: 1, j: 0 }));
+  const sk = [...e.skiers.values()][0];
+  sk.airborne = true; sk.vAir = 12; sk.air = 0.01; sk.airPeak = 0; sk.trickCount = 0;
+  let sent = false, axis = 0, sign = 0;
+  run(e, 1.4, () => {
+    const s = e.getSnapshot().skiers[0];
+    if (s.airborne && s.air > 0.6 && !sent) { e.processInput(1, { s: 0, t: 1, f: { n: 1, d: 'left' } }); sent = true; }
+    if (s.trickAxis === 'side') { axis = s.trickAxis; sign = s.trickSign; }
+  });
+  assert.equal(axis, 'side', 'a left-flick in the air spins a side flip');
+  assert.equal(sign, -1, 'left rolls the opposite way to right');
+});
+
 test('results rank finished skiers by time, then by distance', async () => {
   const e = await makeEngine([1, 2], track({ length: 150 }), {});
   // skier 1 tucks (faster), skier 2 upright (slower) → 1 finishes first

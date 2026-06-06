@@ -73,6 +73,8 @@ export class SlopeAudio {
   countdown(n) { if (n > 0) this._tone(440, 0.18, 0.3, 'square'); else this._tone(880, 0.5, 0.4, 'sawtooth'); }
   finish() { [523, 659, 784, 1047].forEach((f, i) => this._tone(f, 0.3, 0.35, 'triangle', i * 0.12)); }
   jump() { this._tone(300, 0.28, 0.28, 'sine', 0, 760); }          // rising woosh
+  trick() { this._tone(520, 0.22, 0.22, 'triangle', 0, 240); }     // falling whoosh as a flip kicks off
+  trickLand() { this._tone(660, 0.12, 0.26, 'triangle', 0, 990); } // bright pop per completed rotation
   land(clean) { this._tone(clean ? 150 : 110, 0.16, 0.3, clean ? 'sine' : 'square'); } // thud
 
   // carve scrape: short band-passed noise burst, throttled so it doesn't machine-gun.

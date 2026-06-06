@@ -27,32 +27,10 @@ function show(name) {
 }
 
 // haptics — vibrate the phone (ignored where unsupported). The player's eyes are
-// on the main display, not the phone, so a buzz is how a gesture confirms it landed.
+// on the main display, not the phone, so a short buzz is how each recognized
+// input (brake / jump / flip) confirms it landed. Tucked-and-fast is the silent
+// default — the motor only speaks when you act.
 const buzz = (p) => { try { if (navigator.vibrate) navigator.vibrate(p); } catch (_) {} };
-
-// Tuck rumble: a *continuous*-feeling LIGHT buzz for as long as the TUCK is held —
-// the player's eyes-free confirmation the tuck is engaged (squatting for speed) while
-// they watch the skier on the main display. navigator.vibrate has no intensity control, so "light" is
-// faked with duty cycle: a short on-pulse at a fast cycle = low average motor power
-// (faint) AND pulses too quick to feel apart (they blend into one smooth hum, not
-// taps). It also has no native loop, so we play a long pattern and renew it just
-// before it ends — the motor never falls silent.
-// Tune: raise the 8 (on-time) for a stronger rumble; raise the 22 (off-time) for
-// fainter. Keep the cycle (8+22=30ms) short or the pulses stop blending.
-const TUCK_PULSE = [8, 22];                              // 30ms cycle, ~27% duty: a light hum
-const TUCK_PATTERN = Array(60).fill(TUCK_PULSE).flat();  // ~1.8s of rumble
-const TUCK_RENEW_MS = 1500;                              // renew before it ends (1.8s > 1.5s, no gap)
-let _tuckTimer = null;
-function startTuckRumble() {
-  if (_tuckTimer) return;
-  buzz(TUCK_PATTERN);
-  _tuckTimer = setInterval(() => buzz(TUCK_PATTERN), TUCK_RENEW_MS);
-}
-function stopTuckRumble() {
-  if (!_tuckTimer) return;
-  clearInterval(_tuckTimer); _tuckTimer = null;
-  buzz(0); // cancel any residual vibration immediately
-}
 
 let myColorIndex = null;
 let myName = '';           // this player's name, shown at the top of the lobby
@@ -94,12 +72,13 @@ function updateLatency(halfMs, viaFastlane) { applyLatencyChip(latencyEl, halfMs
 // latest-wins safe (s/t continuous + idempotent, j a wrapping one-shot counter).
 const swipe = new SwipeInput({
   surface: el('game'),
-  onTuckStart: () => { buzz(15); startTuckRumble(); el('play-glyph').classList.add('tucking'); },
-  onTuckEnd: () => { stopTuckRumble(); buzz([0, 55]); el('play-glyph').classList.remove('tucking'); flashJump(); }
+  onBrakeStart: () => { buzz(15); el('play-glyph').classList.add('braking'); },
+  onBrakeEnd: () => { el('play-glyph').classList.remove('braking'); },
+  onFlick: (dir) => { buzz(15); flashFlick(dir); }
 });
 const tilt = new TiltInput({
   surface: el('game'),
-  onCarve: (s) => { const sw = swipe.state; net.send(MSG.CONTROL, { s, t: sw.t, j: sw.j }); }
+  onCarve: (s) => { const sw = swipe.state; net.send(MSG.CONTROL, { s, t: sw.t, j: sw.j, f: sw.f }); }
 });
 
 function setStatus(t) { el('name-status').textContent = t; }
@@ -176,7 +155,6 @@ function handleMessage(data) {
     }
     case MSG.GAME_PAUSED:
       if (inResults) break;            // finished skiers watch results, not the pause overlay
-      stopTuckRumble();                // the overlay covers the surface — don't hum through the pause
       setPauseOverlay(true);
       break;
     case MSG.GAME_RESUMED:
@@ -287,15 +265,15 @@ function startDriving() {
 function stopDriving() {
   tilt.stop();
   swipe.stop();
-  stopTuckRumble(); // never leave the motor humming if a tuck was held at run end
   el('air').classList.add('hidden');
-  el('play-glyph').classList.remove('tucking');
+  el('play-glyph').classList.remove('braking', 'jumped');
   if (carveRaf) cancelAnimationFrame(carveRaf);
   carveRaf = null;
 }
 
-// brief pop on the play glyph each time a jump fires (eyes-on confirmation).
-function flashJump() {
+// brief pop on the play glyph each time a flick (jump / flip) fires. Eyes-free
+// the buzz is the real confirmation; this is the eyes-on echo for a glance down.
+function flashFlick(dir) {
   const g = el('play-glyph');
   g.classList.remove('jumped'); void g.offsetWidth; g.classList.add('jumped');
 }

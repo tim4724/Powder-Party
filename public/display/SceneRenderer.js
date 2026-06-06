@@ -29,6 +29,7 @@ const TUCK_SHRINK = 0.3;    // squat: body shrinks toward the feet when tucked (
 
 const _up = new THREE.Vector3(0, 1, 0);
 const _zAxis = new THREE.Vector3(0, 0, 1);
+const _TAU = Math.PI * 2;       // one full flip rotation
 
 function bestGrid(n, W, H) {
   let best = { cols: 1, rows: n, cost: Infinity };
@@ -423,12 +424,15 @@ export class SceneRenderer {
     const color = new THREE.Color(this.colors[colorIndex % this.colors.length] || '#2d9cdb');
     const group = new THREE.Group();
 
-    // skis
+    // skis. The skier casts NO hard sun-shadow — only the soft contact blob below
+    // (added further down) marks its position. A cast shadow would somersault and
+    // detach during a flip, reading as a confusing second shadow; the blob stays a
+    // clean disc on the snow and shows height via its size/fade. (Props + terrain
+    // keep their cast shadows for scene depth.)
     const skiMat = new THREE.MeshStandardMaterial({ color: 0x26313f, roughness: 0.6 });
     for (const sx of [-0.16, 0.16]) {
       const ski = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 1.5), skiMat);
       ski.position.set(sx, 0.03, 0.15);
-      ski.castShadow = true;
       group.add(ski);
     }
     // body pivot (banks + tucks)
@@ -442,9 +446,9 @@ export class SceneRenderer {
     // skis. The body-group origin sits at the feet, so banking + the squat shrink
     // pivot around the base and the body never dips through the snow.
     const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.24, 0.28, 5, 12), suit);
-    torso.position.y = 0.41; torso.castShadow = true; body.add(torso); // base ≈ y=0.03
+    torso.position.y = 0.41; body.add(torso); // base ≈ y=0.03 (no cast shadow — see skis above)
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.19, 14, 12), skin);
-    head.position.y = 0.8; head.castShadow = true; body.add(head);
+    head.position.y = 0.8; body.add(head);
     const hat = new THREE.Mesh(new THREE.SphereGeometry(0.21, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), suit);
     hat.position.y = 0.85; body.add(hat);
 
@@ -492,7 +496,7 @@ export class SceneRenderer {
     if (i >= 0) this._order.splice(i, 1);
   }
 
-  setSkierPose(id, pos, forward, up, carve = 0, spd = 0, airborne = false, tuck = 0, air = 0, spin = 0, crashed = false) {
+  setSkierPose(id, pos, forward, up, carve = 0, spd = 0, airborne = false, tuck = 0, air = 0, spin = 0, crashed = false, trickAxis = 0, trickPhase = 0, trickSign = 1) {
     const c = this.skiers.get(id);
     if (!c) return;
     c.spd = spd; c.airborne = airborne;
@@ -509,6 +513,12 @@ export class SceneRenderer {
     c.group.quaternion.setFromRotationMatrix(this._sBasis.makeBasis(x, y, z));
     // wipeout spin about the slope normal (cosmetic)
     if (spin) c.group.rotateY(spin);
+    // air trick: somersault the WHOLE skier — pitch (local x) for front/back,
+    // roll (local z) for side. The chase cam tracks pose.forward, not the group,
+    // so the view holds steady while the skier flips.
+    if (trickAxis === 'front') c.group.rotateX(trickPhase * _TAU);
+    else if (trickAxis === 'back') c.group.rotateX(-trickPhase * _TAU);
+    else if (trickAxis === 'side') c.group.rotateZ(trickSign * trickPhase * _TAU);
 
     // body: bank INTO the carve (negated — +carve is turn-aligned, and a positive
     // local-Z roll tilts the torso the opposite way), crouch + pitch when tucking
@@ -539,7 +549,12 @@ export class SceneRenderer {
       stat.textContent = `P${info.position} · ${info.finishTime ? info.finishTime.toFixed(1) + 's' : 'done'}`;
       c.label.classList.add('is-finished');
     } else {
-      stat.textContent = `P${info.position}/${info.of}` + (info.airborne ? ' · AIR' : (info.tuck ? ' · TUCK' : ''));
+      // Tucked is the default now, so don't tag it — flag only the active states:
+      // a flip / airborne, or a deliberate brake (tuck released).
+      let tag = '';
+      if (info.airborne) tag = info.trickAxis ? ' · FLIP' : ' · AIR';
+      else if (!info.tuck) tag = ' · BRAKE';
+      stat.textContent = `P${info.position}/${info.of}` + tag;
     }
   }
 

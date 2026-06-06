@@ -9,17 +9,20 @@ The big screen renders the mountain; each player joins by scanning a QR code wit
 phone and races down the piste. Everything is **eyes-free** — you watch the TV, not your
 hand:
 
+You're **tucked and fast by default** — you only touch the pad to do something deliberate:
+
 | Input | Action |
 |---|---|
 | **Tilt** the phone left/right | **Carve** left/right (gyro roll) |
-| **Swipe down & hold** | **Tuck** — squat for speed (but you can't carve hard while tucked) |
-| **Release the tuck** / **swipe up** at a ramp lip | **Jump** — a timed lip pop for a launch + bonus |
-| **Swipe up** on open snow | Quick **hop** (clears a tree) |
+| *(rest — nothing)* | **Tuck** — the default: squat for speed (soft steering) |
+| **Hold down** | **Brake** — sit up to scrub speed and carve hard (corners, trees) |
+| **Flick up** | **Jump** — bigger off a ramp lip; a back **flip** if you're already in the air |
+| **Flick in the air** (up/down/left/right) | A **flip** — back / front / side. Land it for a small boost; land mid-flip and you wash out |
 
-The core loop: **tuck the steep straights** to build speed, **stand up to carve** the bends
-and dodge the trees, and **pop right at the ramp lips** for the biggest air (just rolling over a
-ramp still launches you, only smaller). First skier to the bottom wins. Short-handed lobbies are
-topped up with CPU skiers so a solo player still races.
+The core loop: **rip the straights** tucked, **hold to brake** into the bends and around the
+trees, **flick up at the ramp lips** for the biggest air, and **flip** off the big jumps for a
+boost — but only if you have the air to finish the rotation. First skier to the bottom wins.
+Short-handed lobbies are topped up with CPU skiers so a solo player still races.
 
 ## Architecture
 
@@ -28,7 +31,7 @@ the **display browser runs the authoritative simulation** and renders it with Th
 Node server only serves static files + a QR/JSON API (no game logic, no WebSocket). Phones are
 thin controllers. Game events flow display → relay → controllers over a
 [Party-Sockets](https://github.com/tim4654/Party-Sockets) WebSocket relay; the hot-path
-`CONTROL` input (`{s: carve, t: tuck, j: jumpSeq}`) rides a low-latency WebRTC fastlane with
+`CONTROL` input (`{s: carve, t: tuck/brake, j: up-flick edge, f: air-flick edge}`) rides a low-latency WebRTC fastlane with
 relay fallback. The transport kit (`partyplug/`) and Three.js (`vendor/`) are reused verbatim
 from the sibling games.
 
@@ -42,11 +45,12 @@ npm start            # http://localhost:4000  (PORT env overrides)
 1. Open the display URL on a big screen.
 2. Players scan the QR code with their phones to join.
 3. The first player to join is the host and starts the run from their phone.
-4. Tilt to carve, swipe down to tuck, release at a ramp to jump. First to the bottom wins.
+4. Tilt to carve, hold to brake, flick up to jump, flick in the air to flip. First to the bottom wins.
 
 > Phones need **HTTPS** for the tilt sensors — front the server with a tunnel or TLS cert when
 > testing on real devices. The display works over plain HTTP, and desktop keyboard fallback
-> (A/D carve · S tuck · ↑/Space jump) lets you test without a phone.
+> (A/D carve · hold S brake · ↑/Space jump · ↓ front flip · Q/E side flip) lets you test
+> without a phone.
 
 ### No-phone preview
 
@@ -56,6 +60,8 @@ The display page drives itself from fake data with `?test=1&scenario=…` (no re
 - `/?test=1&scenario=results` — the results board
 - `/?test=1&scenario=lobby` — orbiting slope preview + fake roster
 - `/?test=1&scenario=slope` — clean orbiting slope preview, CPU field (no overlays)
+- `/?test=1&scenario=tricks` — **drive skier 0 from the keyboard** beside the ramps to feel the
+  brake/jump/flip loop (A/D carve · hold S brake · ↑/Space jump · ↓ front · Q/E side flip)
 - `/?test=1&scenario=countdown` · `…&scenario=paused`
 
 The phone controller previews a single screen the same way, off the relay:
@@ -95,7 +101,7 @@ public/
     TestHarness.js         #   no-relay preview scenarios
   controller/              # the phone (tilt + swipe)
     TiltInput.js           #   gyro → carve
-    SwipeInput.js          #   swipe-down-hold → tuck, release → jump
+    SwipeInput.js          #   hold → brake, flick up → jump, flick in air → flip
     Net.js, main.js, ui.js
   gallery*.{html,js}       # no-relay preview gallery (Display / Phone / Slopes tabs)
   gallery.css              #   shared gallery chrome
@@ -112,7 +118,8 @@ npm test     # node:test — SkiEngine physics + partyplug transport
 
 The engine is THREE-free so the unit tests feed it a lightweight centerline stub and assert on
 the physics: gravity descent + finish, the tuck speed gain, carve-scrub, tree wipeouts,
-crouch-release jumps, ramp auto-launch, ranking, and skier removal.
+jumps + ramp auto-launch, air flips (land clean for a boost, land mid-flip and wash out, the
+min-air gate), ranking, and skier removal.
 
 ## Tuning
 

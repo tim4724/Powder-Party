@@ -37,14 +37,14 @@
       <span id="me-dot" class="dot"></span>
       <span id="me-name" class="lobby-me__name"></span>
     </div>
-    <p class="lobby-tip">Tilt to carve · swipe down &amp; hold to tuck · release at a ramp to jump</p>
+    <p class="lobby-tip">You're tucked and fast. Tilt to carve · hold to brake · flick up to jump · flick in the air to flip.</p>
     <button id="start-btn" class="btn btn--brand hidden">Start run</button>
     <div id="wait-host" class="hidden">Waiting for the host to start…</div>
   </section>
 
-  <!-- Game: tilt to CARVE · swipe down + hold to TUCK · release to JUMP.
-       The whole #play surface is the eyes-free gesture target — the player
-       watches the big screen, not the phone. -->
+  <!-- Game: tucked-and-fast is the default. Tilt to CARVE · hold to BRAKE ·
+       flick up to JUMP · flick in the air to FLIP. The whole #play surface is the
+       eyes-free gesture target — the player watches the big screen, not the phone. -->
   <section id="game" class="hidden">
     <button id="pause-btn" class="icon-btn hidden" aria-label="Pause"><span class="pause-glyph"></span></button>
     <div id="drive-hud" class="hidden">
@@ -59,7 +59,7 @@
           <div id="play-glyph" class="play__glyph" aria-hidden="true">
             <span class="play__arrow"></span>
           </div>
-          <div class="play__hint">tuck for speed · jump at a ramp lip for big air</div>
+          <div class="play__hint">hold to brake · flick up to jump</div>
         </div>
         <div class="carve">
           <div class="carve__track"><div id="carve-fill"></div></div>

@@ -20,10 +20,13 @@ const HUD_HZ_MS = 150;              // PLAYER_STATE / HUD throttle (~6.5 Hz)
 
 const el = (id) => document.getElementById(id);
 // `?slope=<id>` picks the slope (used by the gallery's Slopes page); unknown
-// ids fall back to the first slope inside buildSlopeById. There's only one
-// slope today, so this just future-proofs the catalogue.
+// ids fall back to the first slope inside buildSlopeById. The `tricks` test
+// scenario defaults to the straight `trick-lab` practice run (overridable with
+// an explicit ?slope=).
 const params = new URLSearchParams(location.search);
-const slope = buildSlopeById(params.get('slope') || DEFAULT_SLOPE);
+const slope = buildSlopeById(
+  params.get('slope') || (params.get('scenario') === 'tricks' ? 'trick-lab' : DEFAULT_SLOPE)
+);
 
 // ---- renderer + audio ----------------------------------------------------
 const scene = new SceneRenderer(el('scene'), SKIER_COLORS);
@@ -210,7 +213,7 @@ scene.onFrame = (dt) => {
   const snap = session.getSnapshot();
   let packSpd = 0;
   for (const s of snap.skiers) {
-    if (s.pose) scene.setSkierPose(s.id, s.pose.pos, s.pose.forward, s.pose.up, s.carve, s.v, s.airborne, s.tuck, s.air, s.spin, s.crashed);
+    if (s.pose) scene.setSkierPose(s.id, s.pose.pos, s.pose.forward, s.pose.up, s.carve, s.v, s.airborne, s.tuck, s.air, s.spin, s.crashed, s.trickAxis, s.trickPhase, s.trickSign);
     packSpd = Math.max(packSpd, s.v);
     if (s.offPiste || (s.crashed && s.spin)) audio.scrape(0.8); // deep-snow hiss / wipeout
   }
@@ -239,6 +242,8 @@ function onRaceEvent(e) {
   if (fastForwarding) return;
   if (e.type === 'finish') broadcastStandings(false);
   else if (e.type === 'jump') audio.jump();
+  else if (e.type === 'trick_start') audio.trick();             // whoosh as the flip kicks off
+  else if (e.type === 'trick_done') audio.trickLand();          // chime per completed rotation
   else if (e.type === 'land') audio.land(!!e.clean);
   else if (e.type === 'crash') audio.scrape(1);
   else if (e.type === 'reset') audio.land(false); // ski-patrol plop back onto the piste
@@ -352,7 +357,8 @@ window.addEventListener('keydown', (e) => {
 const scenario = params.get('scenario');
 if (params.get('test') === '1' || scenario) {
   import('./TestHarness.js').then(({ runDisplayScenario }) => runDisplayScenario(
-    { scenario: scenario || 'running', players: parseInt(params.get('players'), 10) || 4, host: parseInt(params.get('host'), 10) || 0 },
+    // tricks defaults to a single full-screen skier (just you, drilling flips); add ?players=N for a CPU field
+    { scenario: scenario || 'running', players: parseInt(params.get('players'), 10) || (scenario === 'tricks' ? 1 : 4), host: parseInt(params.get('host'), 10) || 0 },
     { scene, slope, scenePromise, SKIER_COLORS, AiController, AI_PERSONALITIES, RunSession }
   ));
 } else {

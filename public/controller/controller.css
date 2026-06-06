@@ -127,22 +127,25 @@ input[type=text]:disabled { opacity: 0.6; }
 }
 .play__center { display: flex; flex-direction: column; align-items: center; gap: 0.9rem; z-index: 1; }
 
-/* a big down-chevron that reads "swipe down here". It flips to a thick up-pop
-   while tucking (squatting for speed) and flares on release. */
+/* A soft status DISC (deliberately not a button — no raised ledge — so it reads
+   as a state light, not a key to press; the whole surface is the target). The
+   down-chevron reads "tucked and diving"; it flips up while braking (sitting up)
+   and flares on a jump/flip flick. */
 .play__glyph {
   width: 4.4rem; height: 4.4rem; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   background: color-mix(in srgb, var(--car), #fff 70%);
-  box-shadow: var(--inset-hi), 0 4px 0 color-mix(in srgb, var(--car), #000 14%);
+  box-shadow: var(--inset-hi), 0 2px 12px rgba(40, 80, 120, 0.10);
   transition: transform 0.12s ease, background 0.12s ease;
 }
 .play__arrow {
   width: 1.5rem; height: 1.5rem; border-right: 0.42rem solid var(--car); border-bottom: 0.42rem solid var(--car);
-  transform: rotate(45deg) translate(-0.12rem, -0.12rem);  /* down-chevron */
+  transform: rotate(45deg) translate(-0.12rem, -0.12rem);  /* down-chevron: tucked/diving */
   transition: transform 0.12s ease, border-color 0.12s ease;
 }
-.play__glyph.tucking { transform: translateY(0.5rem) scale(0.92); background: color-mix(in srgb, var(--car), #fff 45%); }
-.play__glyph.tucking .play__arrow { transform: rotate(-135deg) translate(-0.12rem, -0.12rem); }  /* up-chevron: ready to pop */
+/* braking = stand up: the disc lifts a touch and the chevron flips to point up */
+.play__glyph.braking { transform: translateY(-0.28rem) scale(1.03); background: color-mix(in srgb, var(--car), #fff 50%); }
+.play__glyph.braking .play__arrow { transform: rotate(-135deg) translate(-0.12rem, -0.12rem); }  /* up-chevron */
 .play__glyph.jumped { animation: jumpPop 0.32s ease-out; }
 @keyframes jumpPop { 0% { transform: translateY(-0.8rem) scale(1.18); } 100% { transform: none; } }
 
