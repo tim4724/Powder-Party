@@ -22,15 +22,15 @@ export const SLOPES = {
     chips: ['Blue', 'Jumps', 'Trees'],
     width: 11,
     pieces: [
-      { kind: 'straight', len: 30, pitch: 15 },           // gentle launch — build speed
-      { kind: 'carve',    len: 34, pitch: 17, turn:  48 }, // right sweeper
-      { kind: 'straight', len: 38, pitch: 24 },            // steep schuss — TUCK (ramp at the end)
-      { kind: 'carve',    len: 36, pitch: 18, turn: -56 }, // left
-      { kind: 'straight', len: 28, pitch: 20 },
-      { kind: 'carve',    len: 34, pitch: 19, turn:  52 }, // right
-      { kind: 'straight', len: 40, pitch: 26 },            // steepest — big tuck straight (ramp)
-      { kind: 'carve',    len: 30, pitch: 16, turn: -42 }, // left into the runout
-      { kind: 'straight', len: 32, pitch: 11 },            // flattening runout to the finish
+      { kind: 'straight', len: 30, pitch: 19 },           // gentle launch — build speed
+      { kind: 'carve',    len: 34, pitch: 21, turn:  48 }, // right sweeper
+      { kind: 'straight', len: 38, pitch: 28 },            // steep schuss — TUCK (ramp at the end)
+      { kind: 'carve',    len: 36, pitch: 22, turn: -56 }, // left
+      { kind: 'straight', len: 28, pitch: 24 },
+      { kind: 'carve',    len: 34, pitch: 23, turn:  52 }, // right
+      { kind: 'straight', len: 40, pitch: 30 },            // steepest — big tuck straight (ramp)
+      { kind: 'carve',    len: 30, pitch: 21, turn: -42 }, // left into the runout
+      { kind: 'straight', len: 32, pitch: 14 },            // flattening runout to the finish
     ],
     ramps: [
       { at: 0.335, lat: 0, radius: 2.4 },
@@ -69,6 +69,26 @@ export const SLOPES = {
       { at: 0.70, lat: 0, radius: 2.6 },
       { at: 0.84, lat: 0, radius: 2.6 },
     ],
+    obstacles: [],
+  },
+
+  // Bump Lab — a WIDE, straight, tree-free, kicker-free run for feeling out
+  // skier-vs-skier contact in isolation (no ramps to fling the pack apart, no
+  // trees to confound a wipeout). Used by the `bump` test scenario, which drops a
+  // keyboard skier into a tight pack of lane-bias-zeroed bots so soft bumps,
+  // blocking, and T-bones all happen on demand (see TestHarness).
+  'bump-lab': {
+    id: 'bump-lab',
+    name: 'Bump Lab',
+    chips: ['Test', 'Straight', 'Contact'],
+    test: true,
+    width: 18,                                          // wide + forgiving — room to scrum without fighting off-piste
+    pieces: [
+      { kind: 'straight', len: 20, pitch: 16 },         // gentle ease-in
+      { kind: 'straight', len: 170, pitch: 24 },        // long steep straight — the pack jostles down it at speed
+      { kind: 'straight', len: 30, pitch: 12 },         // mellow runout to the finish
+    ],
+    ramps: [],
     obstacles: [],
   },
 };
@@ -126,7 +146,7 @@ export function generateSlope(seed, opts = {}) {
 
   const pieces = [];
   // 1) gentle launch straight — clean build-up (kept obstacle-free below).
-  let prevPitch = rng(14, 17);
+  let prevPitch = rng(17, 21);
   pieces.push({ kind: 'straight', len: Math.round(rng(28, 34)), pitch: Math.round(prevPitch) });
   let total = pieces[0].len;
 
@@ -137,7 +157,7 @@ export function generateSlope(seed, opts = {}) {
   let lastSign = rnd() < 0.5 ? 1 : -1;
   while (total < target - RUNOUT) {
     const addCarve = pieces[pieces.length - 1].kind === 'straight'; // alternate straight ↔ carve
-    let pitch = _clamp(prevPitch + rng(-4, 4), 13, 24);
+    let pitch = _clamp(prevPitch + rng(-4, 4), 17, 30);
     if (addCarve) {
       let sign = -lastSign;
       // occasional sweeping repeat (same direction) for variety, only if it stays
@@ -152,7 +172,7 @@ export function generateSlope(seed, opts = {}) {
       pieces.push({ kind: 'carve', len, pitch: Math.round(pitch), turn });
       total += len;
     } else {
-      if (rnd() < 0.3) pitch = _clamp(pitch + rng(2, 4), 13, 26); // occasional steep tuck schuss
+      if (rnd() < 0.3) pitch = _clamp(pitch + rng(2, 4), 17, 32); // occasional steep tuck schuss
       const len = Math.round(rng(28, 42));
       pieces.push({ kind: 'straight', len, pitch: Math.round(pitch) });
       total += len;
@@ -160,7 +180,7 @@ export function generateSlope(seed, opts = {}) {
     prevPitch = pitch;
   }
   // 3) flattening runout to the finish line.
-  pieces.push({ kind: 'straight', len: RUNOUT, pitch: Math.round(rng(10, 13)) });
+  pieces.push({ kind: 'straight', len: RUNOUT, pitch: Math.round(rng(12, 15)) });
   total += RUNOUT;
   const length = total;
 

@@ -38,7 +38,7 @@ test('every piece descends within a sane pitch band', async () => {
     for (const p of def.pieces) {
       assert.ok(p.kind === 'straight' || p.kind === 'carve', `seed ${seed}: valid kind`);
       assert.ok(p.len > 0, `seed ${seed}: positive length`);
-      assert.ok(p.pitch >= 10 && p.pitch <= 26, `seed ${seed}: pitch ${p.pitch} in band (descends, no cliff)`);
+      assert.ok(p.pitch >= 10 && p.pitch <= 32, `seed ${seed}: pitch ${p.pitch} in band (descends, no cliff)`);
       if (p.kind === 'carve') assert.ok(Number.isFinite(p.turn) && p.turn !== 0, `seed ${seed}: carve has a turn`);
     }
   }

@@ -15,6 +15,10 @@
 //          A / D (or ← / →) carve · hold S brake · Space / ↑ jump (back flip in air)
 //          ↓ front flip · Q spin-left · E spin-right · Z / C corks (off-axis)
 //        (add &players=4 for a CPU field, or &slope=powder-bowl for the real run)
+//   /?test=1&scenario=bump                — BUMP LAB: a KEYBOARD skier dropped into a tight
+//        pack of CPU bots (lane-bias zeroed so they converge and jostle) on a wide, straight,
+//        tree/kicker-free run — for feeling skier-vs-skier contact: soft bumps + blocking
+//        happen on their own; carve hard across the pack (A/D) at speed to land a T-bone.
 
 const el = (id) => document.getElementById(id);
 
@@ -65,10 +69,10 @@ export async function runDisplayScenario(cfg, ctx) {
 
   const N = Math.max(1, Math.min(4, cfg.players || 4));
   const scn = cfg.scenario || 'running';
-  const human = scn === 'tricks';        // skier 0 is keyboard-driven, the rest CPU
+  const human = scn === 'tricks' || scn === 'bump'; // skier 0 is keyboard-driven, the rest CPU
   const kb = human ? keyboardDriver() : null;
 
-  // build the field — CPU, except skier 0 when a human drives (the `tricks` lab)
+  // build the field — CPU, except skier 0 when a human drives (the `tricks`/`bump` labs)
   const field = [];
   const bots = new Map();
   for (let i = 0; i < N; i++) {
@@ -76,7 +80,9 @@ export async function runDisplayScenario(cfg, ctx) {
     const persona = AI_PERSONALITIES[i % AI_PERSONALITIES.length];
     const id = 'cpu-' + i;
     field.push({ peerIndex: id, name: persona.name, colorIndex: i, ai: true });
-    bots.set(id, new AiController(persona));
+    // `bump` zeroes laneBias so the bots all converge on the fall line and pile up
+    // (their normal fanned-out lanes exist precisely to AVOID contact).
+    bots.set(id, new AiController(scn === 'bump' ? { ...persona, laneBias: 0 } : persona));
   }
 
   // Drop the keyboard skier in just above the first ramp so the launch is a
@@ -90,6 +96,20 @@ export async function runDisplayScenario(cfg, ctx) {
     // jump right off the line. Bombing straight down then hits every ramp in turn.
     if (me) { me.lat = 0; me.heading = 0; }
   }
+  // `bump` lab: pack the whole field into ONE tight cluster just below the gate so
+  // they're already overlapping (lanes ~0.8u apart < the ~1.1u contact footprint)
+  // and start jostling the instant the run begins — no waiting for a chance scrum.
+  function seedCluster(sess) {
+    const ids = field.map((p) => p.peerIndex);
+    ids.forEach((id, i) => {
+      const sk = sess.engine.skiers.get(id);
+      if (!sk) return;
+      sk.totalS = 6;
+      sk.lat = (i - (ids.length - 1) / 2) * 0.8; // symmetric about the fall line
+      sk.heading = 0; sk.v = 0;
+    });
+  }
+  const seedField = (sess) => (scn === 'bump' ? seedCluster(sess) : seedHuman(sess));
 
   if (scn === 'lobby' || scn === 'welcome') {
     scene.orbit = true;
@@ -120,7 +140,7 @@ export async function runDisplayScenario(cfg, ctx) {
   for (const p of field) scene.addSkier(p.peerIndex, p.colorIndex, p.name, { cell: !orbitPreview });
 
   let session = newSession();
-  seedHuman(session);
+  seedField(session);
   window.__harness = () => session;       // current session (reassigned on restart) — for automated checks
   function newSession() {
     const s = new RunSession(field, slope, {
@@ -134,11 +154,26 @@ export async function runDisplayScenario(cfg, ctx) {
     });
     return s;
   }
+  // `bump` lab: stable per-bot phase so the cross-sweep is deterministic.
+  const bumpIdx = new Map();
+  field.filter((p) => p.peerIndex !== 'me').forEach((p, i) => bumpIdx.set(p.peerIndex, i));
   function driveBots(sess) {
     for (const [id, bot] of bots) {
       const sk = sess.engine.skiers.get(id);
       if (!sk || sk.finished) continue;
-      sess.processInput(id, bot.drive(sk, slope.centerline));
+      if (scn === 'bump') {
+        // DEMOLITION DERBY: sweep the target lane back and forth across the piste,
+        // out of phase per bot (alternating bots mirror each other so they meet at
+        // the fall line from opposite sides). Running straight can never build the
+        // ~9u/s lateral closing a T-bone needs; slicing ACROSS at speed does — and
+        // the lateral motion also keeps them from knotting up in a mutual block.
+        const idx = bumpIdx.get(id) || 0;
+        const dir = idx % 2 ? 1 : -1;
+        bot.laneBias = dir * 4.5 * Math.sin(1.3 * sess.engine.elapsed + idx * 0.7);
+        sess.processInput(id, bot.drive(sk, slope.centerline)); // stays tucked/fast → matches a tucking human
+      } else {
+        sess.processInput(id, bot.drive(sk, slope.centerline));
+      }
     }
   }
 
@@ -151,11 +186,11 @@ export async function runDisplayScenario(cfg, ctx) {
       if (s.pose) scene.setSkierPose(s.id, s.pose.pos, s.pose.forward, s.pose.up, s.carve, s.v, s.airborne, s.tuck, s.air, s.spin, s.crashed, s.trickActive, s.trickAngle, s.trickPhase, s.carveInput);
       scene.setSkierHud(s.id, s);
     }
-    if ((scn === 'running' || scn === 'slope' || scn === 'tricks') && session.engine.raceOver) {
+    if ((scn === 'running' || scn === 'slope' || scn === 'tricks' || scn === 'bump') && session.engine.raceOver) {
       session.dispose();
       scene.clearTrails(); // fresh snow when the preview loops the run
       session = newSession();
-      seedHuman(session);
+      seedField(session);
       session.startCountdown(1);
     }
   };

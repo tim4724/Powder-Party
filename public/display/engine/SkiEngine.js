@@ -24,7 +24,8 @@
 const VMAX = 20;            // baseline top schuss speed (u/s) for the Racer benchmark
 const SIN_REF = 0.31;       // sin(18°) — the "reference pitch" steepNorm is 1.0 at
 const STEEP_MIN = 0.40;     // speed-cap floor on a near-flat runout (still glides out)
-const STEEP_MAX = 1.55;     // speed-cap ceiling on the steepest pitch
+const STEEP_MAX = 1.85;     // speed-cap ceiling on the steepest pitch (~35° tops out;
+                            // the slopes now run steeper, so the ceiling is raised to match → more speed)
 const NOTUCK_CAP = 0.78;    // upright, you only reach 78% of the pitch's top speed…
 const TUCK_CAP = 1.00;      // …tuck (squat) to unlock the full speed. THE core gain.
 const EDGE_SCRUB = 0.42;    // hard carving scrubs up to 42% off the target (sharp turn = slow)
@@ -67,6 +68,22 @@ const RESET_SPEED_FRAC = 0.4; // speed kept after a ski-patrol reset
 const CRASH_TIME = 1.1;     // seconds of lost control per wipeout (benchmark)
 const SPIN_DRAG = 9.0;      // u/s² speed bleed while wiping out (coasts to a near-stop)
 const SPIN_TURNS = 2;       // cosmetic whole turns over CRASH_TIME (multiple of 2π → lands on 0)
+
+// ---- Skier-vs-skier contact ---------------------------------------------
+// Skiers are SOFT bumpers, not hazards. Overlapping in the (s,lat) plane shoves
+// them apart LATERALLY (never along s — that would teleport race progress and is
+// exploitable) and a trailing skier can't tunnel through the one ahead: it tucks
+// in behind (the draft/pack feel). Contact bleeds a little speed from both. Only
+// a FAST, side-on hit (a T-bone) actually wipes out — and then BOTH skiers on the
+// snow spin out (it's a tangle); a plain rear-end just blocks. Air is a separate
+// dimension, so a skier clearing the field overhead passes clean through.
+// STARTING VALUES — tune by feel.
+const BUMP_PUSH = 0.5;      // share of the lateral overlap each skier is pushed out per frame
+const BUMP_EPS = 0.12;      // min lateral split (u) to unstack a dead nose-to-tail jam (ndl≈0)
+const BUMP_DAMP = 0.25;     // fraction of the closing speed bled from BOTH skiers on contact
+const TBONE_LATERAL = 0.5;  // contact normal must be at least this sideways (|ndl|) to count as a T-bone vs a rear-end
+const TBONE_CLOSING = 6.0;  // lateral closing speed (u/s) above which a side-on hit wipes BOTH skiers out
+                            // (well clear of the ~2u/s of incidental jostle, so light side-by-side contact stays a soft bump)
 
 // ---- Jump / air ---------------------------------------------------------
 const GRAV_AIR = 22.0;      // u/s² pulling you back to the snow while airborne (lower = more hang time for tricks)
@@ -180,6 +197,7 @@ export class SkiEngine {
         boostMul: 1,     // current speed-ceiling multiplier from a landing boost
         rampIn: new Set(),
         obsIn: new Set(),
+        contactIn: new Set(), // ids of skiers overlapped LAST frame (rising-edge `bump` events)
         offPiste: false,
         finished: false,
         finishTime: null,
@@ -447,8 +465,89 @@ export class SkiEngine {
       }
     }
 
+    this._resolveContacts();
     this._recomputePoses();
     this._rank();
+  }
+
+  // Skier-vs-skier soft contact: one relaxation pass over all pairs (N is tiny,
+  // so O(N²) is free), run AFTER every skier has integrated this frame so it acts
+  // on settled positions. Pushes overlapping skiers apart laterally, blocks a
+  // trailing skier from tunnelling through the one ahead, bleeds a little speed,
+  // and spins BOTH skiers out on a fast side-on hit (T-bone). Never moves anyone
+  // along s. See the contact constants above.
+  _resolveContacts() {
+    const arr = [...this.skiers.values()];
+    // Build this frame's contact sets fresh; `bump` events fire on the rising
+    // edge (first frame of an overlap) so persistent contact can't spam audio.
+    const next = new Map(arr.map((c) => [c.id, new Set()]));
+    for (let i = 0; i < arr.length; i++) {
+      const a = arr[i];
+      if (a.finished) continue;               // finished skiers coast the runout on autopilot — don't jostle them
+      for (let j = i + 1; j < arr.length; j++) {
+        const b = arr[j];
+        if (b.finished) continue;
+        const rr = a.radius + b.radius;
+        if (Math.abs(a.air - b.air) > rr) continue;   // one is flying clean over the other
+        const ds = a.totalS - b.totalS, dl = a.lat - b.lat;
+        const dist2 = ds * ds + dl * dl;
+        if (dist2 >= rr * rr) continue;               // no overlap
+        const dist = Math.sqrt(dist2) || 1e-4;
+        const nds = ds / dist, ndl = dl / dist;       // contact normal, pointing b → a
+        const pen = rr - dist;
+        next.get(a.id).add(b.id); next.get(b.id).add(a.id);
+
+        // (s,lat) velocities — the same decomposition update() integrates with.
+        const aSV = a.v * Math.cos(a.heading), aLatV = -a.v * Math.sin(a.heading);
+        const bSV = b.v * Math.cos(b.heading), bLatV = -b.v * Math.sin(b.heading);
+
+        // --- LATERAL separation (never touch s) ----------------------------
+        // Split the overlap's lateral share between the pair. If they're nearly
+        // dead-stacked in one lane (ndl≈0) the lateral push vanishes, so add a
+        // fixed nudge to unstack them — they ease apart over the next few frames.
+        let dLat = BUMP_PUSH * pen * ndl;
+        if (Math.abs(ndl) < 0.2) dLat += BUMP_EPS * (a.id < b.id ? 1 : -1);
+        a.lat += dLat; b.lat -= dLat;
+
+        // --- LONGITUDINAL block (the draft / pack feel) --------------------
+        // The trailing skier can't pass THROUGH the one ahead: clamp its speed to
+        // the leader's so it tucks in behind instead of tunnelling past.
+        if (ds > 0) { if (b.v > a.v) b.v = a.v; }     // a leads, b trails
+        else { if (a.v > b.v) a.v = b.v; }            // b leads, a trails
+
+        // --- SPEED scrub on contact ----------------------------------------
+        // Bleed a share of the closing speed from both (an inelastic-ish bump).
+        const closing = Math.max(0, (bSV - aSV) * nds + (bLatV - aLatV) * ndl);
+        const scrub = BUMP_DAMP * closing;
+        a.v = Math.max(0, a.v - scrub);
+        b.v = Math.max(0, b.v - scrub);
+
+        // --- T-BONE wipeout -------------------------------------------------
+        // A fast, side-on hit is a tangle: BOTH skiers spin out (only those on the
+        // snow — you can't wipe out someone clearing you in the air). A rear-end
+        // (mostly-longitudinal normal) just blocks/drafts, no crash.
+        const aInto = -Math.sign(dl || 1) * aLatV;    // a's lateral speed toward b (>0 = closing)
+        const bInto = Math.sign(dl || 1) * bLatV;     // b's lateral speed toward a
+        const latClose = Math.max(0, aInto) + Math.max(0, bInto);
+        if (Math.abs(ndl) >= TBONE_LATERAL && latClose >= TBONE_CLOSING) {
+          // Spin out every grounded skier in the tangle FIRST, then announce — so
+          // each crash event reflects the final state (both already down).
+          const downed = [];
+          for (const c of [a, b]) {
+            if (!c.airborne && c.spinT <= 0) {
+              c.spinT = c.spinDur = CRASH_TIME / c.control;
+              c.spin = 0; c.tuck = 0;
+              c.boostT = 0; c.boostMul = 1;
+              downed.push(c);
+            }
+          }
+          for (const c of downed) this.onEvent({ type: 'crash', id: c.id, tbone: true, with: (c === a ? b : a).id });
+        } else if (!a.contactIn.has(b.id)) {
+          this.onEvent({ type: 'bump', a: a.id, b: b.id, force: closing });
+        }
+      }
+    }
+    for (const c of arr) c.contactIn = next.get(c.id);
   }
 
   // Rising-edge overlap of a ramp (open run → no lap wrap on ds).

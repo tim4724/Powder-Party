@@ -33,6 +33,7 @@ function makeSlope() {
   const id = params.get('slope');
   if (id && SLOPES[id]) return buildSlopeById(id);
   if (params.get('scenario') === 'tricks') return buildSlopeById('trick-lab');
+  if (params.get('scenario') === 'bump') return buildSlopeById('bump-lab');
   const seedParam = params.get('seed');
   if (seedParam != null && seedParam !== '') {
     const n = parseInt(seedParam, 10);
@@ -263,6 +264,7 @@ function onRaceEvent(e) {
   else if (e.type === 'trick_done') audio.trickLand();          // chime per completed rotation
   else if (e.type === 'land') audio.land(!!e.clean);
   else if (e.type === 'crash') audio.scrape(1);
+  else if (e.type === 'bump') audio.bump();       // soft skier-on-skier contact
   else if (e.type === 'reset') audio.land(false); // ski-patrol plop back onto the piste
 }
 

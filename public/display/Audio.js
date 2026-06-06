@@ -76,6 +76,7 @@ export class SlopeAudio {
   trick() { this._tone(520, 0.22, 0.22, 'triangle', 0, 240); }     // falling whoosh as a flip kicks off
   trickLand() { this._tone(660, 0.12, 0.26, 'triangle', 0, 990); } // bright pop per completed rotation
   land(clean) { this._tone(clean ? 150 : 110, 0.16, 0.3, clean ? 'sine' : 'square'); } // thud
+  bump() { this._tone(90, 0.07, 0.14, 'square'); }                 // low, short body-check thud
 
   // carve scrape: short band-passed noise burst, throttled so it doesn't machine-gun.
   scrape(intensity = 1) {

@@ -310,3 +310,62 @@ test('removeCar drops a skier and recomputes raceOver', async () => {
   assert.equal(e.getSnapshot().skiers.length, 1);
   assert.ok(!e.removeCar(99), 'removeCar returns false for an unknown id');
 });
+
+// --- skier-vs-skier contact ----------------------------------------------
+// These reach into `e.skiers` to place the pair precisely (the start grid keeps
+// them well apart), then step the engine and read the resolved state.
+test('overlapping skiers are pushed apart laterally without wiping out', async () => {
+  const events = [];
+  const e = await makeEngine([1, 2], track({ length: 300, width: 20 }), { onEvent: (ev) => events.push(ev) });
+  const a = e.skiers.get(1), b = e.skiers.get(2);
+  a.totalS = 20; a.lat = 0.3; a.heading = 0; a.v = 8;
+  b.totalS = 20; b.lat = -0.3; b.heading = 0; b.v = 8;
+  const gap0 = Math.abs(a.lat - b.lat);                 // 0.6 < combined radius (1.1) → overlapping
+  run(e, 0.2, () => { e.processInput(1, { s: 0, t: 1, j: 0 }); e.processInput(2, { s: 0, t: 1, j: 0 }); });
+  const gap1 = Math.abs(a.lat - b.lat);
+  assert.ok(gap1 > gap0 + 0.3, `contact spreads the pair laterally (${gap0.toFixed(2)} → ${gap1.toFixed(2)})`);
+  assert.ok(!a.spinT && !b.spinT, 'a soft side-by-side bump does NOT wipe anyone out');
+  assert.ok(events.some((ev) => ev.type === 'bump'), 'a bump event fires on first contact');
+  assert.ok(!events.some((ev) => ev.type === 'crash'), 'no crash from a soft bump');
+});
+
+test('a trailing skier is blocked, not allowed to tunnel through the leader', async () => {
+  const e = await makeEngine([1, 2], track({ length: 300, width: 20 }), {});
+  const lead = e.skiers.get(1), trail = e.skiers.get(2);
+  lead.totalS = 30.8; lead.lat = 0; lead.heading = 0; lead.v = 4;   // slow leader
+  trail.totalS = 30; trail.lat = 0; trail.heading = 0; trail.v = 16; // fast straggler right behind, same lane
+  let passed = false;
+  run(e, 0.25, () => {
+    e.processInput(1, { s: 0, t: 1, j: 0 }); e.processInput(2, { s: 0, t: 1, j: 0 });
+    if (trail.totalS > lead.totalS) passed = true;
+  });
+  assert.ok(!passed, 'the trailing skier never tunnels past the leader while in contact');
+  assert.ok(trail.totalS < lead.totalS, 'it stays behind the leader');
+});
+
+test('a fast side-on hit (T-bone) spins BOTH skiers out', async () => {
+  const events = [];
+  const e = await makeEngine([1, 2], track({ length: 300, width: 20 }), { onEvent: (ev) => events.push(ev) });
+  const victim = e.skiers.get(1), aggressor = e.skiers.get(2);
+  victim.totalS = 40; victim.lat = 0; victim.heading = 0; victim.v = 10;       // holding a straight line
+  aggressor.totalS = 40; aggressor.lat = 1.0; aggressor.heading = 0.6; aggressor.v = 18; // carving hard across into them
+  e.update(1000 / 60);
+  const tbones = events.filter((ev) => ev.type === 'crash' && ev.tbone);
+  assert.ok(tbones.length >= 1, 'a fast side-on hit fires a T-bone crash');
+  assert.ok(victim.spinT > 0, 'the skier run into spins out');
+  assert.ok(aggressor.spinT > 0, 'the aggressor goes down too — a T-bone is a tangle, both crash');
+  const crashedIds = new Set(tbones.map((t) => t.id));
+  assert.ok(crashedIds.has(1) && crashedIds.has(2), 'both skiers are reported in the crash');
+});
+
+test('a skier in the air passes clean over one on the snow', async () => {
+  const events = [];
+  const e = await makeEngine([1, 2], track({ length: 300, width: 20 }), { onEvent: (ev) => events.push(ev) });
+  const flyer = e.skiers.get(1), ground = e.skiers.get(2);
+  flyer.totalS = 40; flyer.lat = 0; flyer.heading = 0; flyer.v = 12;
+  flyer.airborne = true; flyer.air = 2.0; flyer.vAir = 2;        // sailing well overhead
+  ground.totalS = 40; ground.lat = 0; ground.heading = 0; ground.v = 12; // directly below
+  e.update(1000 / 60);
+  assert.ok(!events.some((ev) => ev.type === 'bump' || ev.type === 'crash'),
+    'no contact while one skier clears the other in the air');
+});
