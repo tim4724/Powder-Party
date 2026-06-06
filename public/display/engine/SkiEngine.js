@@ -30,8 +30,17 @@ const STEEP_MAX = 1.55;     // speed-cap ceiling on the steepest pitch
 const NOTUCK_CAP = 0.78;    // upright, you only reach 78% of the pitch's top speed…
 const TUCK_CAP = 1.00;      // …tuck (squat) to unlock the full speed. THE core gain.
 const EDGE_SCRUB = 0.42;    // hard carving scrubs up to 42% off the target (sharp turn = slow)
-const ACCEL = 16.0;         // u/s² easing UP toward target (gravity pulling you on)
-const DRAG_DECEL = 9.0;     // u/s² easing DOWN when over target (stand up / carve = slow)
+// Approach rates depend on SQUAT (tuck) state — the core "tuck to carry speed,
+// stand up to scrub it" feel, separate from the target-speed CEILING above.
+// Tucked you're slippery + aero: gravity wins fast (high accel) and you barely
+// shed speed (low decel → momentum carries across flats and runouts). Standing
+// up trades that away — you build speed lazily and the wind/edges brake you.
+// Decel is deliberately gentle so speed reads as momentum, not a snapped ceiling.
+// STARTING VALUES — tune in playtest.
+const ACCEL_TUCK    = 16.0; // u/s² building speed while squatting (gravity + aero)
+const ACCEL_UPRIGHT = 10.0; // u/s² upright — you build speed more lazily
+const DECEL_TUCK    = 3.0;  // u/s² tuck glide: barely bleeds speed (carries momentum)
+const DECEL_UPRIGHT = 7.0;  // u/s² stand up = the air brake (still gentler than before)
 
 // ---- Carving (ribbon steering) ------------------------------------------
 const TURN_RATE = 1.45;     // rad/s edge rate at full carve for the benchmark (the "edge" stat scales this)
@@ -285,10 +294,13 @@ export class SkiEngine {
         const edgeMul = 1 - EDGE_SCRUB * across;
         const scrub = c.landScrubT > 0 ? LAND_SLOPPY_SCRUB : 1;
         let targetV = c.vmax * c.boostMul * steepNorm * tuckMul * edgeMul * scrub;
-        let decel = DRAG_DECEL;
-        // Deep snow off-piste: hard speed cap + a heavy bog-down drag.
+        // Squat state sets HOW FAST you approach the target, not just the ceiling.
+        let accel = c.tuck ? ACCEL_TUCK : ACCEL_UPRIGHT;
+        let decel = c.tuck ? DECEL_TUCK : DECEL_UPRIGHT;
+        // Deep snow off-piste: hard speed cap + a heavy bog-down drag (tuck can't save you).
         if (c.offPiste) { targetV = Math.min(targetV, c.vmax * DEEP_SNOW_SPEED); decel = DEEP_SNOW_DRAG; }
-        if (c.v < targetV) c.v = Math.min(targetV, c.v + ACCEL * (0.4 + 0.6 * steepNorm) * dt);
+        // Accel still scales with steepness (gravity pulls harder on a steep pitch).
+        if (c.v < targetV) c.v = Math.min(targetV, c.v + accel * (0.4 + 0.6 * steepNorm) * dt);
         else c.v = Math.max(targetV, c.v - decel * dt);
       }
 
