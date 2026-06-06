@@ -166,6 +166,7 @@ function startRun() {
   humanIds = new Set(currentField.filter((p) => !p.ai).map((p) => p.peerIndex));
 
   // add skier meshes (humans get a split-screen cell; CPU share the world)
+  scene.clearTrails(); // fresh snow for each run
   for (const p of currentField) scene.addSkier(p.peerIndex, p.colorIndex, p.name, { cell: !p.ai });
 
   session = new RunSession(currentField, slope, {

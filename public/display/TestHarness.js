@@ -153,6 +153,7 @@ export async function runDisplayScenario(cfg, ctx) {
     }
     if ((scn === 'running' || scn === 'slope' || scn === 'tricks') && session.engine.raceOver) {
       session.dispose();
+      scene.clearTrails(); // fresh snow when the preview loops the run
       session = newSession();
       seedHuman(session);
       session.startCountdown(1);

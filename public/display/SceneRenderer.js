@@ -11,6 +11,7 @@
 // setSkierPose(...), setSkierHud(id,info), start(), stop(), onFrame, orbit.
 import * as THREE from 'three';
 import { mulberry32 } from '../shared/slopes.js';
+import { SkiTrails } from './SkiTrails.js';
 
 // FNV-1a hash of a slope's `def.id` → a uint32 seed, so the decorative forest is
 // deterministic per slope (same hill → same trees) instead of re-randomised on
@@ -142,6 +143,10 @@ export class SceneRenderer {
     this.overview.position.set(30, 28, 30);
     this._ovTarget = new THREE.Vector3();
     this._orbitAngle = Math.atan2(0.9, 0.6);
+
+    // Ski tracks carved into the snow behind every skier (cosmetic; fed from
+    // setSkierPose, cleared on setTrack + at the start of each run).
+    this.trails = new SkiTrails(scene);
   }
 
   _initOverlay() {
@@ -180,6 +185,7 @@ export class SceneRenderer {
     this._disposeGroup(this.slopeGroup);
     this._disposeGroup(this.propGroup);
     this._disposeGroup(this.lobbyGroup);
+    if (this.trails) this.trails.clear();
 
     const samples = track.centerline.samples;
     const sw = track.slopeWidth || 11;
@@ -714,7 +720,14 @@ export class SceneRenderer {
     // on-screen steer bar: mirror the player's RAW carve input (the way they tilt),
     // not the turn-aligned value — same convention as the phone's carve bar.
     if (c.steerFill) c.steerFill.style.transform = `translateX(${(carveInput * 50).toFixed(1)}%)`;
+
+    // ski tracks: carve a groove into the snow under the skis (no-op while
+    // airborne — fed the already-normalised pose basis, surface point when grounded).
+    if (this.trails) this.trails.addPoint(id, pos, c.pose.forward, c.pose.up, airborne);
   }
+
+  // Wipe all tracks (called at the start of each run so a fresh race starts clean).
+  clearTrails() { if (this.trails) this.trails.clear(); }
 
   setSkierHud(id, info) {
     const c = this.skiers.get(id);
