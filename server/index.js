@@ -28,6 +28,11 @@ const IS_PROD = APP_ENV === 'production';
 
 function getShortSha(sha) { return sha ? sha.slice(0, 7) : null; }
 const VERSION_LABEL = APP_VERSION + (!IS_PROD && getShortSha(GIT_SHA) ? ' (#' + getShortSha(GIT_SHA) + ')' : '');
+// Visible build stamp — ONLY on a preview deployment (non-prod AND a GIT_SHA is
+// set). Empty for local dev (no sha) and production, so the `.build-badge`
+// element it fills is :empty and hides itself. Inputs are trusted (package.json
+// version + the CI-provided commit sha), so no escaping needed.
+const VERSION_BADGE = (!IS_PROD && getShortSha(GIT_SHA)) ? (APP_VERSION + ' · #' + getShortSha(GIT_SHA)) : '';
 
 const MIME_TYPES = {
   '.html': 'text/html',
@@ -171,6 +176,7 @@ const server = http.createServer((req, res) => {
       let text = data.toString('utf8');
       text = text.replace(/__APP_VERSION__/g, VERSION_LABEL)
                  .replace(/__APP_V__/g, APP_VERSION)
+                 .replace(/__VERSION_BADGE__/g, VERSION_BADGE)
                  .replace(/__CSP_NONCE__/g, nonce);
       data = Buffer.from(text);
       const iframeable = urlPath === '/display/index.html' || urlPath === '/controller/index.html';

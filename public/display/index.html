@@ -50,7 +50,7 @@
         <div class="seat seat--open"><span class="seat__open">Open</span></div>
         <div class="seat seat--open"><span class="seat__open">Open</span></div>
       </div>
-      <div class="lobby__hint">Tilt to carve · swipe down &amp; hold to tuck · release at a ramp to jump</div>
+      <div class="lobby__hint">Tilt to carve · hold to brake · flick up to jump · flick in the air to flip</div>
     </div>
     <div class="lobby__right">
       <div class="qr-card"><canvas id="qr"></canvas></div>
@@ -78,6 +78,9 @@
       </div>
     </div>
   </section>
+
+  <!-- Build stamp — populated by the server only on a preview deployment; :empty (hidden) otherwise. -->
+  <div class="build-badge" role="status" aria-label="build version">__VERSION_BADGE__</div>
 
   <script type="module" src="/display/main.js?v=__APP_V__"></script>
 </body>

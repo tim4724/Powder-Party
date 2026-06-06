@@ -203,6 +203,25 @@ body {
   color: var(--ink-3);
 }
 
+/* Build badge — a tiny fixed version + commit stamp the SERVER fills (via the
+   __VERSION_BADGE__ placeholder) only on a PREVIEW deployment. It's :empty on
+   local dev / production and hides itself, so the markup can live on every page.
+   Bottom-LEFT to stay clear of the controller's bottom-right latency chip. */
+.build-badge {
+  position: fixed;
+  left: calc(0.5rem + env(safe-area-inset-left));
+  bottom: calc(0.5rem + env(safe-area-inset-bottom));
+  z-index: 40;
+  padding: 0.22rem 0.5rem;
+  font-family: var(--font-body); font-weight: 800; font-size: 0.66rem;
+  letter-spacing: 0.02em; line-height: 1; font-variant-numeric: tabular-nums;
+  color: #fff;
+  background: color-mix(in srgb, var(--ink) 70%, transparent);
+  border-radius: var(--r-pill);
+  opacity: 0.62; pointer-events: none; user-select: none;
+}
+.build-badge:empty { display: none; }
+
 /* Field — a sunken input/value box. */
 .field {
   background: var(--surface-2);
