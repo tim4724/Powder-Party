@@ -26,6 +26,8 @@ test('generateSlope is deterministic per seed and varies across seeds', async ()
   const { generateSlope } = await load();
   assert.deepStrictEqual(generateSlope(42), generateSlope(42), 'same seed → identical def');
   assert.notDeepStrictEqual(generateSlope(1), generateSlope(2), 'different seeds → different defs');
+  // seed 0 must not alias to seed 1 (compare layout, since `id` always differs).
+  assert.notDeepStrictEqual(generateSlope(0).pieces, generateSlope(1).pieces, 'seed 0 ≠ seed 1');
 });
 
 test('every piece descends within a sane pitch band', async () => {
@@ -73,7 +75,7 @@ test('start + finish stay clear; obstacles are spaced and on/near the piste', as
       assert.ok(o.kind === 'tree' || o.kind === 'rock', `seed ${seed}: valid obstacle kind`);
     }
     for (let i = 1; i < obs.length; i++) {
-      assert.ok(obs[i].at - obs[i - 1].at >= 0.03, `seed ${seed}: obstacles min-spaced`);
+      assert.ok(obs[i].at - obs[i - 1].at >= 0.034, `seed ${seed}: obstacles min-spaced`);
     }
   }
 });

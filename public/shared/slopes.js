@@ -89,8 +89,10 @@ export const DEFAULT_SLOPE = 'powder-bowl';
 // the gallery alike.
 
 // mulberry32 — tiny, fast, well-distributed 32-bit PRNG (one uint32 of state).
+// Seed it directly (no `|| 1` guard — that would alias seed 0 to seed 1; the
+// first +constant step lifts a 0 seed off the degenerate state on its own).
 export function mulberry32(seed) {
-  let a = (seed >>> 0) || 1;
+  let a = seed >>> 0;
   return function () {
     a |= 0; a = (a + 0x6d2b79f5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
@@ -134,9 +136,9 @@ export function generateSlope(seed, opts = {}) {
   let psi = 0;
   let lastSign = rnd() < 0.5 ? 1 : -1;
   while (total < target - RUNOUT) {
-    const carve = pieces[pieces.length - 1].kind === 'straight';
+    const addCarve = pieces[pieces.length - 1].kind === 'straight'; // alternate straight ↔ carve
     let pitch = _clamp(prevPitch + rng(-4, 4), 13, 24);
-    if (carve) {
+    if (addCarve) {
       let sign = -lastSign;
       // occasional sweeping repeat (same direction) for variety, only if it stays
       // clear of the yaw cap…

@@ -356,7 +356,7 @@ export class SceneRenderer {
       const pos = new Float32Array(n * 2 * 3);
       for (let i = 0; i < n; i++) {
         const s = samples[i], a = i * 6;
-        pos[a] = s.pos.x + s.lateral.x * oi; pos[a + 1] = s.pos.y + riseInner; pos[a + 2] = s.pos.z + s.lateral.z * oi;
+        pos[a] = s.pos.x + s.lateral.x * oi; pos[a + 1] = s.pos.y + s.lateral.y * oi + riseInner; pos[a + 2] = s.pos.z + s.lateral.z * oi;
         pos[a + 3] = s.pos.x + s.lateral.x * oo; pos[a + 4] = groundY; pos[a + 5] = s.pos.z + s.lateral.z * oo;
       }
       const idx = [];
@@ -736,9 +736,10 @@ export class SceneRenderer {
     if (this._key) this._key.shadow.needsUpdate = true;
 
     const ids = this._order.filter((id) => this.skiers.has(id));
-    // Flank forest is lobby-only: visible under the single overview camera,
-    // hidden once we're rendering split-screen chase cams (so the race pays
-    // nothing for it). `visible=false` skips it entirely in render traversal.
+    // Flank forest renders only under the single overview camera (lobby + the
+    // all-CPU preview) — `_order` is empty when there are no human/celled skiers.
+    // The moment humans render in split-screen chase cams it's hidden, so the
+    // race pays nothing. `visible=false` skips it entirely in render traversal.
     this.lobbyGroup.visible = ids.length === 0;
     if (ids.length === 0) {
       // lobby / attract: single overview camera, slow orbit
@@ -780,11 +781,16 @@ export class SceneRenderer {
   }
 
   _disposeGroup(g) {
+    // Dedupe: geometries (e.g. the shared pole geo) and materials (shared across
+    // peaks / flanks / the instanced forest) are reused by many meshes — dispose
+    // each exactly once so we don't fire redundant 'dispose' events at the renderer.
+    const geos = new Set(), mats = new Set();
+    const disposeMat = (x) => { if (x && !mats.has(x)) { mats.add(x); x.dispose(); } };
     for (let i = g.children.length - 1; i >= 0; i--) {
       const o = g.children[i];
       o.traverse((m) => {
-        if (m.geometry) m.geometry.dispose();
-        if (m.material) { Array.isArray(m.material) ? m.material.forEach((x) => x.dispose()) : m.material.dispose(); }
+        if (m.geometry && !geos.has(m.geometry)) { geos.add(m.geometry); m.geometry.dispose(); }
+        if (m.material) { Array.isArray(m.material) ? m.material.forEach(disposeMat) : disposeMat(m.material); }
         if (m.isInstancedMesh && m.dispose) m.dispose(); // free the GPU instance buffer
       });
       g.remove(o);
