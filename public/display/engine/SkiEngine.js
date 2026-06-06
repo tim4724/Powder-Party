@@ -124,16 +124,22 @@ export class SkiEngine {
       s: o.s, lat: o.lat || 0, radius: o.radius || 0.7, kind: o.kind || 'tree'
     }));
 
+    // Start line: spread the field evenly across the groomed piste in DISTINCT
+    // lanes, symmetric about the centerline, all on ONE line just behind the gate
+    // so everyone starts level and crosses s=0 together. The outermost lane sits
+    // at 60% of the half-width — well separated, but clear of the deep snow.
+    // (A single negative totalS clamps to the s=0 frame for the pose, so a depth
+    // stagger would collapse skiers onto the same top frame — the LATERAL spread
+    // is what keeps the grid visibly distinct.)
+    const N = playerIds.length;
+    const laneSpread = this.pisteHalf * 0.6;
     playerIds.forEach((desc, i) => {
       const id = (desc && typeof desc === 'object') ? desc.id : desc;
       const st = normStats(desc && typeof desc === 'object' ? desc.stats : null);
-      // Staggered start grid BEHIND the gate (s < 0), alternating lanes, so
-      // skiers don't spawn on top of each other and all cross s=0 fairly.
-      const row = Math.floor(i / 2);
-      const lane = (i % 2 === 0 ? -1 : 1) * Math.min(this.pisteHalf * 0.5, 1.6);
+      const lane = N > 1 ? ((i / (N - 1)) * 2 - 1) * laneSpread : 0;
       this.skiers.set(id, {
         id,
-        totalS: -1.2 - row * 2.2,
+        totalS: -1.0,
         lat: lane,
         v: 0,
         heading: 0,

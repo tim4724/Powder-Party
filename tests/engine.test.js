@@ -120,8 +120,8 @@ test('hard carving scrubs speed and moves laterally', async () => {
 });
 
 test('hitting a tree wipes you out (spin + speed loss)', async () => {
-  // The lone skier starts at lat = -1.6 (lane 0); put a tree on that line.
-  const e = await makeEngine([1], track({ length: 200, obstacles: [{ s: 28, lat: -1.6, radius: 0.7 }] }), {});
+  // A lone skier starts dead center (lat 0); put a tree on the fall line.
+  const e = await makeEngine([1], track({ length: 200, obstacles: [{ s: 28, lat: 0, radius: 0.7 }] }), {});
   let crashedSeen = false, vBefore = 0;
   run(e, 8, () => {
     const s = e.getSnapshot().skiers[0];
@@ -148,7 +148,7 @@ test('crouch-release launches the skier into the air, then lands', async () => {
 });
 
 test('a ramp auto-launches a skier crossing it on the snow', async () => {
-  const e = await makeEngine([1], track({ length: 200, ramps: [{ s: 40, lat: -1.6, radius: 1.6 }] }), {});
+  const e = await makeEngine([1], track({ length: 200, ramps: [{ s: 40, lat: 0, radius: 1.6 }] }), {});
   let airSeen = false;
   run(e, 8, () => { if (e.getSnapshot().skiers[0].airborne) airSeen = true; });
   assert.ok(airSeen, 'crossing the ramp should put the skier in the air');
