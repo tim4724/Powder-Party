@@ -121,6 +121,10 @@ export class SceneRenderer {
 
     this.slopeGroup = new THREE.Group(); scene.add(this.slopeGroup);
     this.propGroup = new THREE.Group(); scene.add(this.propGroup);
+    // Lobby-only decoration (instanced flank forest). Shown under the single
+    // overview camera, hidden the moment skiers render in split-screen — so the
+    // race (up to 4 viewports) never pays for it. See _loop / _addOuterTrees.
+    this.lobbyGroup = new THREE.Group(); scene.add(this.lobbyGroup);
 
     this.overview = new THREE.PerspectiveCamera(52, this._aspect(), 0.1, 1200);
     this.overview.position.set(30, 28, 30);
@@ -163,6 +167,7 @@ export class SceneRenderer {
   setTrack(track, opts = {}) {
     this._disposeGroup(this.slopeGroup);
     this._disposeGroup(this.propGroup);
+    this._disposeGroup(this.lobbyGroup);
 
     const samples = track.centerline.samples;
     const sw = track.slopeWidth || 11;
@@ -312,6 +317,7 @@ export class SceneRenderer {
     // distant snow peaks + an alpine pine forest on the banks → a snowy mountain
     this._addPeaks(this._trackCenter, size);
     this._addScenery(samples, edgeLat);
+    this._addOuterTrees(samples, edgeLat, (track.groundY != null ? track.groundY : -2));
   }
 
   // One snow strip from lateral offset offA→offB, optionally rising in world-Y
@@ -362,6 +368,59 @@ export class SceneRenderer {
       const m = new THREE.Mesh(g, mat);
       m.receiveShadow = true;
       this.slopeGroup.add(m);
+    }
+  }
+
+  // Lobby-only flank forest: trees on the OUTER mountainside (between the valley
+  // walls and the floor). INSTANCED — the whole forest is 4 draw calls no matter
+  // the count, lives in lobbyGroup (hidden during the race → zero cost in the
+  // split-screen passes), and casts no shadow. Density falls off where the flank
+  // is steep (bare cliffs near the top of the run, forest lower down) for a
+  // natural treeline.
+  _addOuterTrees(samples, edgeLat, groundY) {
+    const offInner = edgeLat + 72, riseInner = 48, span = (edgeLat + 240) - offInner; // matches _addFlanks
+    const place = [];
+    const n = samples.length;
+    for (let i = 4; i < n - 4; i += 2) {
+      const s = samples[i];
+      const steep = ((s.pos.y + riseInner) - groundY) / span;   // flank height / width here
+      const density = Math.max(0, 1 - steep / 2.1);             // sparse on steep upper flanks
+      for (const sign of [-1, 1]) {
+        if (Math.random() > density * 0.8) continue;
+        const t = 0.34 + 0.62 * Math.random();                 // bias to the outer (gentler) flank, off the lip
+        const off = sign * (offInner + t * span);
+        place.push({
+          x: s.pos.x + s.lateral.x * off,
+          y: (s.pos.y + riseInner) + t * (groundY - (s.pos.y + riseInner)),
+          z: s.pos.z + s.lateral.z * off,
+          rotY: Math.random() * Math.PI * 2,
+          scl: 0.85 + Math.random() * 1.7,
+        });
+      }
+    }
+    if (!place.length) return;
+
+    const N = place.length;
+    const bark = new THREE.MeshStandardMaterial({ color: 0x6b4a2f, roughness: 1 });
+    const foliage = new THREE.MeshStandardMaterial({ color: 0x2f7d52, roughness: 1, flatShading: true });
+    // one InstancedMesh per tree part, all sharing the per-tree transforms.
+    const parts = [new THREE.InstancedMesh(new THREE.CylinderGeometry(0.18, 0.24, 1.2, 6).translate(0, 0.6, 0), bark, N)];
+    for (let c = 0; c < 3; c++) {
+      parts.push(new THREE.InstancedMesh(new THREE.ConeGeometry(1.3 - c * 0.32, 1.5, 7).translate(0, 1.4 + c * 0.85, 0), foliage, N));
+    }
+    const up = new THREE.Vector3(0, 1, 0), q = new THREE.Quaternion();
+    const p = new THREE.Vector3(), sc = new THREE.Vector3(), m4 = new THREE.Matrix4();
+    for (let k = 0; k < N; k++) {
+      const t = place[k];
+      q.setFromAxisAngle(up, t.rotY); p.set(t.x, t.y, t.z); sc.setScalar(t.scl);
+      m4.compose(p, q, sc);
+      for (const im of parts) im.setMatrixAt(k, m4);
+    }
+    for (const im of parts) {
+      im.instanceMatrix.needsUpdate = true;
+      im.castShadow = false; im.receiveShadow = false;
+      im.frustumCulled = false; // instances span the whole mountain; the origin-centred bound would wrongly cull
+      this.lobbyGroup.add(im);
     }
   }
 
@@ -677,6 +736,10 @@ export class SceneRenderer {
     if (this._key) this._key.shadow.needsUpdate = true;
 
     const ids = this._order.filter((id) => this.skiers.has(id));
+    // Flank forest is lobby-only: visible under the single overview camera,
+    // hidden once we're rendering split-screen chase cams (so the race pays
+    // nothing for it). `visible=false` skips it entirely in render traversal.
+    this.lobbyGroup.visible = ids.length === 0;
     if (ids.length === 0) {
       // lobby / attract: single overview camera, slow orbit
       this.overview.aspect = W / H; this.overview.updateProjectionMatrix();
@@ -722,6 +785,7 @@ export class SceneRenderer {
       o.traverse((m) => {
         if (m.geometry) m.geometry.dispose();
         if (m.material) { Array.isArray(m.material) ? m.material.forEach((x) => x.dispose()) : m.material.dispose(); }
+        if (m.isInstancedMesh && m.dispose) m.dispose(); // free the GPU instance buffer
       });
       g.remove(o);
     }
