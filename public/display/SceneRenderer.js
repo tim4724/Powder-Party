@@ -188,6 +188,30 @@ export class SceneRenderer {
       }
     }
 
+    // Flat finish OUTRUN: level the run off into a flat apron past the finish
+    // line, so it ends on a believable flat area instead of the ribbon edge
+    // dropping into the sky. Renderer-only (the physics centerline is unchanged);
+    // because every strip below is built from meshSamples, the groomed piste +
+    // shoulders + valley walls all continue onto this flat.
+    {
+      const fE = samples[samples.length - 1];
+      const flatT = new THREE.Vector3(fE.tangent.x, 0, fE.tangent.z);
+      if (flatT.lengthSq() < 1e-6) flatT.set(0, 0, 1);
+      flatT.normalize();
+      const up = new THREE.Vector3(0, 1, 0);
+      const lateral = flatT.clone().cross(up).normalize();
+      if (lateral.dot(fE.lateral) < 0) lateral.negate(); // align with the run's side → no twist at the join
+      const OUT = 46, STEPS = 9;
+      for (let k = 1; k <= STEPS; k++) {
+        const d = (OUT * k) / STEPS;
+        meshSamples.push({
+          pos: new THREE.Vector3(fE.pos.x + flatT.x * d, fE.pos.y, fE.pos.z + flatT.z * d),
+          tangent: flatT.clone(), up: up.clone(), lateral: lateral.clone(),
+          s: fE.s + d,
+        });
+      }
+    }
+
     // Two-tone snow ribbon: 4 verts per sample at [-edge, -piste, +piste, +edge].
     // The middle band (±piste) is bright groomed snow; the outer bands fade to a
     // colder, deeper powder — a clear visual "you've left the run" without a wall.
@@ -209,6 +233,12 @@ export class SceneRenderer {
     this._addSlopeStrip(meshSamples, -(edgeLat + 72), -(edgeLat + 26), 48, 14, WALL);
     this._addSlopeStrip(meshSamples, edgeLat, edgeLat + 26, 0, 14, WALL);
     this._addSlopeStrip(meshSamples, edgeLat + 26, edgeLat + 72, 14, 48, WALL);
+    // Mountainside FLANKS: sweep from the valley-wall tops outward and DOWN to the
+    // valley floor on both sides, so the elevated run sits on a solid massif
+    // instead of a thin ribbon floating over the flat ground — which the rotating
+    // lobby camera exposed from the side. The outer edge meets the ground plane
+    // (groundY) exactly, so the whole mountain reads as one piece.
+    this._addFlanks(meshSamples, edgeLat, (track.groundY != null ? track.groundY : -2));
 
     // Edge markers (alternating poles) along the GROOMED edge (±pisteHalf) — they
     // mark where the deep snow starts and double as depth/speed cues.
@@ -234,8 +264,6 @@ export class SceneRenderer {
     this._addBanner(cl, 0.2, 0x2bb673, 'start');
     this._addBanner(cl, track.length - 0.2, 0xf2b134, 'finish');
 
-    this.ground.position.y = (track.groundY != null ? track.groundY : -2);
-
     // Overview framing for the lobby turntable + size the shadow camera.
     const box = new THREE.Box3();
     for (const s of samples) box.expandByPoint(s.pos);
@@ -251,6 +279,14 @@ export class SceneRenderer {
     this._ovHeight = ovOff.y;
     this._orbitAngle = Math.atan2(ovOff.z, ovOff.x); // start the orbit where the static frame sits (no first-frame snap)
 
+    // Valley floor: centre the snow plane UNDER the whole run and grow it to cover
+    // out past the peaks. (The default 1200² plane at the origin didn't even reach
+    // the lower end of a long slope, leaving a void the flanks now drape into.) It
+    // sits at the finish elevation so the flanks meet it seamlessly.
+    const groundSpan = Math.max(size.x, size.z) + this._ovRadius * 3;
+    this.ground.position.set(this._trackCenter.x, (track.groundY != null ? track.groundY : -2), this._trackCenter.z);
+    this.ground.scale.set(groundSpan / 1200, groundSpan / 1200, 1);
+
     const half = Math.max(size.x, size.y, size.z) * 0.5 + 6;
     const k = this._key;
     k.target.position.copy(this._trackCenter); k.target.updateMatrixWorld();
@@ -260,6 +296,18 @@ export class SceneRenderer {
     sc.near = half * 0.5; sc.far = half * 4 + 16;
     sc.updateProjectionMatrix();
     k.shadow.needsUpdate = true;
+
+    // Scale fog + the overview far-plane to the ACTUAL track size. The slope is
+    // procedural now — a long, tall descent — so the old fixed distances (tuned
+    // for the ~300u hill) fogged the whole run AND every distant peak to flat
+    // white, which is what made the lobby orbit look broken/incomplete. Key it
+    // off the lobby orbit radius so the encircling peaks stay crisp up close and
+    // only haze out in the far distance.
+    const R = this._ovRadius || 200;
+    this.scene.fog.near = R * 0.55;
+    this.scene.fog.far = R * 2.9;
+    this.overview.far = Math.max(1200, R * 4.4);
+    this.overview.updateProjectionMatrix();
 
     // distant snow peaks + an alpine pine forest on the banks → a snowy mountain
     this._addPeaks(this._trackCenter, size);
@@ -289,6 +337,34 @@ export class SceneRenderer {
     return m;
   }
 
+  // Mountainside flanks: a strip per side from the outer wall ring (lateral
+  // ±(edgeLat+72), world-Y = sample + 48 — matching the top wall strip) sweeping
+  // out and DOWN to the valley floor (absolute groundY). Closes the sky-gap under
+  // the elevated run so it reads as a solid mountain from every orbit angle.
+  _addFlanks(samples, edgeLat, groundY) {
+    const offInner = edgeLat + 72, riseInner = 48, offOuter = edgeLat + 240;
+    const mat = new THREE.MeshStandardMaterial({ color: 0xeef3f9, side: THREE.DoubleSide, roughness: 1, metalness: 0 });
+    const n = samples.length;
+    for (const sign of [-1, 1]) {
+      const oi = sign * offInner, oo = sign * offOuter;
+      const pos = new Float32Array(n * 2 * 3);
+      for (let i = 0; i < n; i++) {
+        const s = samples[i], a = i * 6;
+        pos[a] = s.pos.x + s.lateral.x * oi; pos[a + 1] = s.pos.y + riseInner; pos[a + 2] = s.pos.z + s.lateral.z * oi;
+        pos[a + 3] = s.pos.x + s.lateral.x * oo; pos[a + 4] = groundY; pos[a + 5] = s.pos.z + s.lateral.z * oo;
+      }
+      const idx = [];
+      for (let i = 0; i < n - 1; i++) { const p = i * 2; idx.push(p, p + 1, p + 2, p + 1, p + 3, p + 2); }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      g.setIndex(idx);
+      g.computeVertexNormals();
+      const m = new THREE.Mesh(g, mat);
+      m.receiveShadow = true;
+      this.slopeGroup.add(m);
+    }
+  }
+
   // World-Y height of the mountainside at a lateral distance |off| from centre
   // (matches the wall strips built in setTrack), for sitting trees on the banks.
   _riseAt(absO, edgeLat) {
@@ -297,24 +373,27 @@ export class SceneRenderer {
     return 14 + 34 * Math.min(1, (absO - edgeLat - 26) / 46);
   }
 
-  // Big low-poly snow peaks ringing the run, set well back and partly in the fog
-  // so they read as a distant range. The single biggest "we're on a mountain" cue.
+  // A FULL ring of big low-poly snow peaks encircling the run — the distant
+  // range that frames the lobby orbit from every angle. (The old sparse 8-cone
+  // arc, sized for the small hill, left gaps the rotating camera exposed and sat
+  // inside the new orbit radius.) Placed safely beyond the orbit and BASED ON THE
+  // VALLEY FLOOR so they tower like real mountains rather than float as chips.
   _addPeaks(center, size) {
-    const baseR = Math.max(size.x, size.z) * 0.5 + 95;
-    const peaks = [
-      { ang: 0.5, d: 1.0, h: 115, r: 72 }, { ang: 1.15, d: 1.4, h: 165, r: 100 },
-      { ang: 1.95, d: 1.05, h: 95, r: 62 }, { ang: 2.7, d: 1.3, h: 140, r: 90 },
-      { ang: -0.35, d: 1.25, h: 125, r: 82 }, { ang: -1.25, d: 1.05, h: 105, r: 68 },
-      { ang: 3.5, d: 1.15, h: 110, r: 72 }, { ang: 4.4, d: 1.35, h: 150, r: 95 },
-    ];
+    const R = (this._ovRadius || 200) * 1.45;     // ring radius — well outside the camera orbit
+    const floor = this.ground.position.y;         // valley floor (finish level)
     // emissive lifts the shaded faces toward a cool snowy white (distant peaks are
     // hazy/bright), so they read as snow mountains rather than dark grey pyramids.
     const snow = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xc6d2e0, emissiveIntensity: 0.18, roughness: 1, flatShading: true });
-    for (const p of peaks) {
-      const dist = baseR * p.d;
-      const cone = new THREE.Mesh(new THREE.ConeGeometry(p.r, p.h, 5, 1), snow);
-      cone.position.set(center.x + Math.cos(p.ang) * dist, center.y - 60 + p.h / 2, center.z + Math.sin(p.ang) * dist);
-      cone.rotation.y = p.ang * 1.7;
+    const N = 16;
+    for (let i = 0; i < N; i++) {
+      // even spacing + alternating jitter → organic but never a gap.
+      const ang = (i / N) * Math.PI * 2 + (i % 2 ? 0.17 : -0.13);
+      const dist = R * (0.92 + (i % 3) * 0.16);
+      const h = 210 + (i % 4) * 50 + (i % 2) * 44;  // ~210..390
+      const r = h * 0.62;
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(r, h, 5, 1), snow);
+      cone.position.set(center.x + Math.cos(ang) * dist, floor + h / 2, center.z + Math.sin(ang) * dist);
+      cone.rotation.y = ang * 1.7;
       this.slopeGroup.add(cone);
     }
   }
