@@ -28,6 +28,7 @@ const TUCK_PITCH = 0.62;    // forward lean (rad) when fully tucked
 const TUCK_DROP = 0.42;     // how far the body lowers when tucked (world units)
 
 const _up = new THREE.Vector3(0, 1, 0);
+const _zAxis = new THREE.Vector3(0, 0, 1);
 
 function bestGrid(n, W, H) {
   let best = { cols: 1, rows: n, cost: Infinity };
@@ -82,6 +83,7 @@ export class SceneRenderer {
     r.shadowMap.type = THREE.PCFSoftShadowMap;
     this.container.appendChild(r.domElement);
     this.renderer = r;
+    this._blobTex = this._makeBlobTexture(); // soft contact-shadow sprite
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0xbfe3f7);              // bright alpine sky
@@ -131,6 +133,22 @@ export class SceneRenderer {
     o.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:3;';
     this.container.appendChild(o);
     this.overlay = o;
+  }
+
+  // Soft radial blob (dark centre fading to transparent) for a subtle contact
+  // shadow with no hard edge.
+  _makeBlobTexture() {
+    const s = 64;
+    const c = document.createElement('canvas'); c.width = c.height = s;
+    const ctx = c.getContext('2d');
+    const g = ctx.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+    g.addColorStop(0, 'rgba(38,64,92,0.5)');
+    g.addColorStop(0.55, 'rgba(38,64,92,0.22)');
+    g.addColorStop(1, 'rgba(38,64,92,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, s, s);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
   }
 
   _aspect() { return window.innerWidth / Math.max(1, window.innerHeight); }
@@ -411,12 +429,12 @@ export class SceneRenderer {
 
     const cam = new THREE.PerspectiveCamera(BASE_FOV, 1, 0.1, 1200);
 
-    // soft contact shadow blob
+    // soft contact shadow — a faded sprite laid flush on the slope each frame
+    // (oriented in setSkierPose so it can't clip through the tilted surface)
     const blob = new THREE.Mesh(
-      new THREE.CircleGeometry(0.7, 16),
-      new THREE.MeshBasicMaterial({ color: 0x3a5a78, transparent: true, opacity: 0.28, depthWrite: false })
+      new THREE.PlaneGeometry(1.5, 1.5),
+      new THREE.MeshBasicMaterial({ map: this._blobTex, transparent: true, opacity: 0.45, depthWrite: false, toneMapped: false })
     );
-    blob.rotation.x = -Math.PI / 2;
 
     this.scene.add(group);
     this.scene.add(blob);
@@ -480,12 +498,14 @@ export class SceneRenderer {
     c.body.rotation.x = c.tuckAmt * TUCK_PITCH + (airborne ? -0.2 : 0);
     c.body.position.y = -c.tuckAmt * TUCK_DROP;
 
-    // contact shadow on the surface beneath (pose includes air → subtract it)
-    const surf = this._sSurf.copy(pos).addScaledVector(c.pose.up, -air);
-    c.blob.position.set(surf.x, surf.y + 0.02, surf.z);
-    const sh = Math.max(0.25, 1 - air * 0.12);
-    c.blob.scale.set(sh, sh, sh);
-    c.blob.material.opacity = 0.28 * sh;
+    // contact shadow: lay it FLUSH on the (tilted) slope under the skier — normal
+    // = slope up, lifted a hair ALONG that normal so it can't clip through the
+    // surface (pose includes air height → subtract it to find the surface point).
+    c.blob.position.copy(pos).addScaledVector(c.pose.up, -air + 0.04);
+    c.blob.quaternion.setFromUnitVectors(_zAxis, c.pose.up);
+    const sh = Math.max(0.35, 1 - air * 0.09); // shrink + fade with height
+    c.blob.scale.set(sh, sh, 1);
+    c.blob.material.opacity = 0.42 * sh;
   }
 
   setSkierHud(id, info) {
