@@ -1,0 +1,58 @@
+name: Preview Comment
+
+on:
+  pull_request:
+    # synchronize too, so the comment stays current as the branch evolves —
+    # the marker-adopt logic below keeps it a single, updated-in-place comment.
+    types: [opened, reopened, synchronize]
+
+jobs:
+  comment:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/github-script@v8
+        with:
+          script: |
+            const branch = context.payload.pull_request.head.ref;
+            const safeBranch = branch
+              .toLowerCase()
+              .replace(/[^a-z0-9-]/g, '-')
+              .slice(0, 50)
+              .replace(/-+$/, '');
+            const base = `https://powder-${safeBranch}.couch-games.com`;
+            // Hidden marker so re-runs find and update this comment in place,
+            // even if the URL format changes later.
+            const marker = '<!-- powder-preview-comment -->';
+            const commentBody = [
+              '### Preview',
+              `- Display: ${base}`,
+              `- Controller (phone): ${base}/controller`,
+              marker,
+            ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            // Adopt a prior comment by the marker, or by the branch base URL
+            // (covers comments left by the old single-URL template).
+            const existing = comments.find(c => c.body.includes(marker) || c.body.includes(base));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: commentBody,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: commentBody,
+              });
+            }
