@@ -34,7 +34,11 @@ function makeSlope() {
   if (id && SLOPES[id]) return buildSlopeById(id);
   if (params.get('scenario') === 'tricks') return buildSlopeById('trick-lab');
   const seedParam = params.get('seed');
-  if (seedParam != null && seedParam !== '') return buildGeneratedSlope(parseInt(seedParam, 10) >>> 0);
+  if (seedParam != null && seedParam !== '') {
+    const n = parseInt(seedParam, 10);
+    if (Number.isNaN(n)) console.warn(`[powder] non-numeric ?seed=${seedParam} — using seed 0`);
+    return buildGeneratedSlope(n >>> 0);
+  }
   if (testMode) return buildGeneratedSlope(1);
   return buildGeneratedSlope((Math.random() * 0xffffffff) >>> 0);
 }

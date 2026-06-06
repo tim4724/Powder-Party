@@ -10,6 +10,17 @@
 // setTrack(track,{debug}), addSkier(id,colorIndex,name,opts), removeSkier(id),
 // setSkierPose(...), setSkierHud(id,info), start(), stop(), onFrame, orbit.
 import * as THREE from 'three';
+import { mulberry32 } from '../shared/slopes.js';
+
+// FNV-1a hash of a slope's `def.id` → a uint32 seed, so the decorative forest is
+// deterministic per slope (same hill → same trees) instead of re-randomised on
+// every setTrack. (Gameplay geometry is already seed-deterministic; this makes
+// the cosmetic scatter match it.)
+function _hashStr(s) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return h >>> 0;
+}
 
 // ---- camera + feel constants (starting values) --------------------------
 const CHASE_DIST = 7.4;     // how far behind the skier the cam sits
@@ -311,13 +322,21 @@ export class SceneRenderer {
     const R = this._ovRadius || 200;
     this.scene.fog.near = R * 0.55;
     this.scene.fog.far = R * 2.9;
-    this.overview.far = Math.max(1200, R * 4.4);
+    this._camFar = Math.max(1200, R * 4.4);
+    this.overview.far = this._camFar;
     this.overview.updateProjectionMatrix();
+    // Per-skier chase cams must reach as far as the overview, or the distant
+    // peaks/flanks clip out of the gameplay view on a tall slope. Update any that
+    // already exist (skiers are normally added after setTrack, but be safe).
+    for (const c of this.skiers.values()) { if (c.cam) { c.cam.far = this._camFar; c.cam.updateProjectionMatrix(); } }
 
     // distant snow peaks + an alpine pine forest on the banks → a snowy mountain
     this._addPeaks(this._trackCenter, size);
-    this._addScenery(samples, edgeLat);
-    this._addOuterTrees(samples, edgeLat, (track.groundY != null ? track.groundY : -2));
+    // Seed the decorative scatter off the slope id so the SAME hill always grows
+    // the SAME forest (two independent streams so tweaking one doesn't shift the other).
+    const sceneSeed = _hashStr(track.def && track.def.id ? track.def.id : 'slope');
+    this._addScenery(samples, edgeLat, mulberry32(sceneSeed));
+    this._addOuterTrees(samples, edgeLat, (track.groundY != null ? track.groundY : -2), mulberry32(sceneSeed ^ 0x9e3779b9));
   }
 
   // One snow strip from lateral offset offA→offB, optionally rising in world-Y
@@ -377,7 +396,7 @@ export class SceneRenderer {
   // split-screen passes), and casts no shadow. Density falls off where the flank
   // is steep (bare cliffs near the top of the run, forest lower down) for a
   // natural treeline.
-  _addOuterTrees(samples, edgeLat, groundY) {
+  _addOuterTrees(samples, edgeLat, groundY, rnd) {
     const offInner = edgeLat + 72, riseInner = 48, span = (edgeLat + 240) - offInner; // matches _addFlanks
     const place = [];
     const n = samples.length;
@@ -386,15 +405,15 @@ export class SceneRenderer {
       const steep = ((s.pos.y + riseInner) - groundY) / span;   // flank height / width here
       const density = Math.max(0, 1 - steep / 2.1);             // sparse on steep upper flanks
       for (const sign of [-1, 1]) {
-        if (Math.random() > density * 0.8) continue;
-        const t = 0.34 + 0.62 * Math.random();                 // bias to the outer (gentler) flank, off the lip
+        if (rnd() > density * 0.8) continue;
+        const t = 0.34 + 0.62 * rnd();                         // bias to the outer (gentler) flank, off the lip
         const off = sign * (offInner + t * span);
         place.push({
           x: s.pos.x + s.lateral.x * off,
           y: (s.pos.y + riseInner) + t * (groundY - (s.pos.y + riseInner)),
           z: s.pos.z + s.lateral.z * off,
-          rotY: Math.random() * Math.PI * 2,
-          scl: 0.85 + Math.random() * 1.7,
+          rotY: rnd() * Math.PI * 2,
+          scl: 0.85 + rnd() * 1.7,
         });
       }
     }
@@ -459,7 +478,7 @@ export class SceneRenderer {
 
   // Scatter an alpine pine forest over the mountainside banks (decorative, not
   // collidable — the engine's obstacles are separate).
-  _addScenery(samples, edgeLat) {
+  _addScenery(samples, edgeLat, rnd) {
     const n = samples.length;
     const foliage = new THREE.MeshStandardMaterial({ color: 0x2f7d52, roughness: 1, flatShading: true });
     const bark = new THREE.MeshStandardMaterial({ color: 0x6b4a2f });
@@ -467,8 +486,8 @@ export class SceneRenderer {
     for (let i = 4; i < n - 4; i += 3) {
       const s = samples[i];
       for (const side of [-1, 1]) {
-        if (Math.random() < 0.5) continue;
-        const off = side * (edgeLat + 3 + Math.random() * 58);
+        if (rnd() < 0.5) continue;
+        const off = side * (edgeLat + 3 + rnd() * 58);
         const tree = new THREE.Group();
         const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.24, 1.2, 6), bark);
         trunk.position.y = 0.6; tree.add(trunk);
@@ -476,7 +495,7 @@ export class SceneRenderer {
           const cone = new THREE.Mesh(new THREE.ConeGeometry(1.3 - c * 0.32, 1.5, 7), foliage);
           cone.position.y = 1.4 + c * 0.85; tree.add(cone);
         }
-        tree.scale.setScalar(0.8 + Math.random() * 1.9);
+        tree.scale.setScalar(0.8 + rnd() * 1.9);
         tree.position.copy(s.pos).addScaledVector(s.lateral, off).addScaledVector(worldUp, this._riseAt(Math.abs(off), edgeLat));
         this.slopeGroup.add(tree);
       }
@@ -590,7 +609,7 @@ export class SceneRenderer {
     const hat = new THREE.Mesh(new THREE.SphereGeometry(0.21, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), suit);
     hat.position.y = 0.85; body.add(hat);
 
-    const cam = new THREE.PerspectiveCamera(BASE_FOV, 1, 0.1, 1200);
+    const cam = new THREE.PerspectiveCamera(BASE_FOV, 1, 0.1, this._camFar || 1200);
 
     // soft contact shadow — a faded sprite laid flush on the slope each frame
     // (oriented in setSkierPose so it can't clip through the tilted surface)
