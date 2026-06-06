@@ -24,8 +24,8 @@ const AIR_FOV = 6;          // extra FOV while airborne
 const LOBBY_ORBIT_SPEED = 0.12; // rad/s
 
 const BANK_MAX = 0.5;       // body bank (rad) into a full carve
-const TUCK_PITCH = 0.62;    // forward lean (rad) when fully tucked
-const TUCK_DROP = 0.42;     // how far the body lowers when tucked (world units)
+const TUCK_PITCH = 0.72;    // forward lean (rad) when fully tucked
+const TUCK_SHRINK = 0.3;    // squat: body shrinks toward the feet when tucked (0 = none)
 
 const _up = new THREE.Vector3(0, 1, 0);
 const _zAxis = new THREE.Vector3(0, 0, 1);
@@ -168,6 +168,25 @@ export class SceneRenderer {
     const pisteHalf = sw / 2;          // groomed-piste edge (where poles + deep snow begin)
     const edgeLat = sw;                // deep snow extends a half-slope-width past = the reset line
 
+    // Extend the snow ribbon a short way BEHIND the start gate (s<0). The skiers
+    // sit at the clamped s=0 frame, but the chase cam is parked UP-slope of them,
+    // so without this the cam looks past the top edge into the void and the start
+    // grid appears to float on nothing. We extrapolate flat back along the first
+    // sample's up-slope direction (renderer-only — the physics centerline is
+    // unchanged) so the groomed run continues naturally above the gate.
+    const meshSamples = samples.slice();
+    {
+      const f0 = samples[0], BACK = 16, STEPS = 7;
+      for (let k = 1; k <= STEPS; k++) {
+        const d = (BACK * k) / STEPS;
+        meshSamples.unshift({
+          pos: f0.pos.clone().addScaledVector(f0.tangent, -d),
+          tangent: f0.tangent.clone(), up: f0.up.clone(), lateral: f0.lateral.clone(),
+          s: f0.s - d,
+        });
+      }
+    }
+
     // Two-tone snow ribbon: 4 verts per sample at [-edge, -piste, +piste, +edge].
     // The middle band (±piste) is bright groomed snow; the outer bands fade to a
     // colder, deeper powder — a clear visual "you've left the run" without a wall.
@@ -181,14 +200,14 @@ export class SceneRenderer {
     for (let p = 0; p < NB; p++) {      // groomed piste passes
       const a = -pisteHalf + (2 * pisteHalf) * (p / NB);
       const b = -pisteHalf + (2 * pisteHalf) * ((p + 1) / NB);
-      this._addSlopeStrip(samples, a, b, 0, 0, p % 2 === 0 ? PASS : GROOVE);
+      this._addSlopeStrip(meshSamples, a, b, 0, 0, p % 2 === 0 ? PASS : GROOVE);
     }
-    this._addSlopeStrip(samples, -edgeLat, -pisteHalf, 0, 0, DEEP); // deep-snow shoulders
-    this._addSlopeStrip(samples, pisteHalf, edgeLat, 0, 0, DEEP);
-    this._addSlopeStrip(samples, -(edgeLat + 26), -edgeLat, 14, 0, WALL); // mountainside walls
-    this._addSlopeStrip(samples, -(edgeLat + 72), -(edgeLat + 26), 48, 14, WALL);
-    this._addSlopeStrip(samples, edgeLat, edgeLat + 26, 0, 14, WALL);
-    this._addSlopeStrip(samples, edgeLat + 26, edgeLat + 72, 14, 48, WALL);
+    this._addSlopeStrip(meshSamples, -edgeLat, -pisteHalf, 0, 0, DEEP); // deep-snow shoulders
+    this._addSlopeStrip(meshSamples, pisteHalf, edgeLat, 0, 0, DEEP);
+    this._addSlopeStrip(meshSamples, -(edgeLat + 26), -edgeLat, 14, 0, WALL); // mountainside walls
+    this._addSlopeStrip(meshSamples, -(edgeLat + 72), -(edgeLat + 26), 48, 14, WALL);
+    this._addSlopeStrip(meshSamples, edgeLat, edgeLat + 26, 0, 14, WALL);
+    this._addSlopeStrip(meshSamples, edgeLat + 26, edgeLat + 72, 14, 48, WALL);
 
     // Edge markers (alternating poles) along the GROOMED edge (±pisteHalf) — they
     // mark where the deep snow starts and double as depth/speed cues.
@@ -418,14 +437,15 @@ export class SceneRenderer {
 
     const suit = new THREE.MeshStandardMaterial({ color, roughness: 0.7 });
     const skin = new THREE.MeshStandardMaterial({ color: 0xf0c9a0, roughness: 0.8 });
-    const legs = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.5, 0.28), suit);
-    legs.position.y = 0.35; legs.castShadow = true; body.add(legs);
-    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.34, 4, 8), suit);
-    torso.position.y = 0.78; torso.castShadow = true; body.add(torso);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 12, 12), skin);
-    head.position.y = 1.12; head.castShadow = true; body.add(head);
-    const hat = new THREE.Mesh(new THREE.SphereGeometry(0.185, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), suit);
-    hat.position.y = 1.18; body.add(hat);
+    // ONE rounded body (no separate legs) — short + stout, base resting on the
+    // skis. The body-group origin sits at the feet, so banking + the squat shrink
+    // pivot around the base and the body never dips through the snow.
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.24, 0.28, 5, 12), suit);
+    torso.position.y = 0.41; torso.castShadow = true; body.add(torso); // base ≈ y=0.03
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.19, 14, 12), skin);
+    head.position.y = 0.8; head.castShadow = true; body.add(head);
+    const hat = new THREE.Mesh(new THREE.SphereGeometry(0.21, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), suit);
+    hat.position.y = 0.85; body.add(hat);
 
     const cam = new THREE.PerspectiveCamera(BASE_FOV, 1, 0.1, 1200);
 
@@ -496,7 +516,9 @@ export class SceneRenderer {
     c.tuckAmt += ((tuck ? 1 : 0) - c.tuckAmt) * Math.min(1, dt * 10);
     c.body.rotation.z = c.lean;
     c.body.rotation.x = c.tuckAmt * TUCK_PITCH + (airborne ? -0.2 : 0);
-    c.body.position.y = -c.tuckAmt * TUCK_DROP;
+    // squat: shrink toward the feet (pivot is at the base) rather than dropping the
+    // body — keeps the whole skier above the snow, so it can't clip the surface.
+    c.body.scale.setScalar(1 - c.tuckAmt * TUCK_SHRINK);
 
     // contact shadow: lay it FLUSH on the (tilted) slope under the skier — normal
     // = slope up, lifted a hair ALONG that normal so it can't clip through the
