@@ -1,0 +1,93 @@
+/* Powder Party — display (big screen) layout. The theme owns colour/type
+   (shared/theme.css); this file owns layout + the alpine retheme. */
+
+html, body { margin: 0; height: 100%; overflow: hidden; background: #cfeaf8; }
+
+/* Persistent 3D backdrop */
+#scene { position: fixed; inset: 0; z-index: 0; }
+#scene canvas { display: block; }
+#scene::after {       /* soft vignette to reinforce the diorama feel */
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 1;
+  background: radial-gradient(120% 90% at 50% 38%, transparent 55%, rgba(20, 50, 80, 0.28) 100%);
+}
+
+/* ---- Lobby ---- */
+#lobby {
+  position: fixed; inset: 0; z-index: 2;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 4vw; padding: 5vh 6vw; box-sizing: border-box;
+}
+.lobby__left { padding: clamp(1.5rem, 3vw, 3rem); max-width: 46vw; }
+.lobby__left h1 {
+  font-family: var(--font-display); font-weight: 700;
+  font-size: clamp(2.4rem, 5vw, 4.2rem); margin: 0 0 1rem; color: var(--ink);
+}
+.lobby__left h1 span { color: var(--brand); }
+.join { margin-bottom: 1rem; }
+.join__label { font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.8rem; color: var(--ink-3); }
+.join__url { font-family: var(--font-display); font-size: clamp(1.2rem, 2.4vw, 2rem); font-weight: 600; color: var(--ink); word-break: break-all; }
+.join__code { color: var(--accent); }
+#count { color: var(--ink-2); font-weight: 700; margin-bottom: 1.2rem; }
+
+#players { display: grid; gap: 0.6rem; }
+.seat {
+  display: flex; align-items: center; gap: 0.7rem;
+  background: var(--surface-2); border: 2px solid var(--hairline);
+  border-radius: var(--r-sm); padding: 0.7rem 1rem; font-weight: 800; color: var(--ink);
+}
+.seat--open { opacity: 0.5; }
+.seat__open { color: var(--ink-3); font-weight: 700; }
+.seat__name { flex: 1; }
+.seat__host { font-size: 0.7rem; font-weight: 800; letter-spacing: 0.08em; color: #fff; background: var(--brand); border-radius: var(--r-pill); padding: 0.15rem 0.6rem; }
+.seat__skier { font-size: 0.85rem; color: var(--ink-3); font-weight: 700; }
+.lobby__hint { margin-top: 1.4rem; color: var(--ink-2); font-weight: 700; font-size: 0.95rem; }
+
+.lobby__right { flex: none; }
+.qr-card { background: #fff; padding: 1.2rem; border-radius: var(--r-lg); box-shadow: var(--shadow-float); }
+.qr-card canvas { display: block; width: clamp(220px, 26vw, 420px); height: auto; image-rendering: pixelated; }
+
+/* ---- Run overlays ---- */
+#race { position: fixed; inset: 0; z-index: 2; pointer-events: none; }
+#race .btn, #race .icon-btn { pointer-events: auto; }
+
+#pause-btn { position: fixed; top: 1.4rem; right: 1.4rem; z-index: 4; }
+
+#countdown {
+  position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-display); font-weight: 700; font-size: 26vh; color: #fff;
+  text-shadow: 0 6px 30px rgba(20, 50, 80, 0.5); pointer-events: none;
+}
+#countdown.is-go { color: var(--brand); }
+
+#pause-overlay, #results {
+  position: fixed; inset: 0; z-index: 5;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(20, 50, 80, 0.32); backdrop-filter: blur(6px);
+}
+.pause-card, .results-card { padding: clamp(1.5rem, 3vw, 2.6rem); min-width: min(90vw, 420px); text-align: center; }
+.pause-card h2, .results-card h2 { font-family: var(--font-display); margin: 0 0 1.2rem; color: var(--ink); }
+.pause-card__btns { display: flex; gap: 0.8rem; justify-content: center; }
+
+#results-list { list-style: none; margin: 0 0 1.4rem; padding: 0; display: grid; gap: 0.5rem; text-align: left; }
+#results-list li { display: flex; align-items: center; gap: 0.7rem; background: var(--surface-2); border-radius: var(--r-sm); padding: 0.6rem 0.9rem; font-weight: 800; color: var(--ink); }
+.res__rank { width: 1.6rem; font-family: var(--font-display); color: var(--accent); }
+.res__name { flex: 1; }
+.res__cpu { font-size: 0.7rem; color: var(--ink-3); background: var(--hairline); border-radius: var(--r-pill); padding: 0.1rem 0.5rem; }
+.res__time { font-family: var(--font-display); color: var(--ink-2); }
+
+/* ---- Split-screen cell labels (positioned each frame by SceneRenderer) ---- */
+.race-labels { font-family: var(--font-display); }
+.cell-label {
+  position: absolute; display: flex; flex-direction: column; gap: 0.1rem;
+  background: rgba(255, 255, 255, 0.85); border-left: 5px solid var(--c, #2d9cdb);
+  border-radius: 8px; padding: 0.3rem 0.6rem; box-shadow: var(--shadow-pop);
+}
+.cell-label__name { font-weight: 700; color: var(--ink); font-size: 1.05rem; }
+.cell-label__stat { font-weight: 700; color: var(--ink-2); font-size: 0.85rem; }
+.cell-label.is-finished { background: var(--brand); }
+.cell-label.is-finished .cell-label__name, .cell-label.is-finished .cell-label__stat { color: #fff; }
+
+@media (max-width: 860px) {
+  #lobby { flex-direction: column; justify-content: center; gap: 2vh; }
+  .lobby__left { max-width: 90vw; }
+}

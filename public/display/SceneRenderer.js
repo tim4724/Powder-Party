@@ -1,0 +1,592 @@
+// SceneRenderer — Three.js renderer for the downhill slope. Builds a procedural
+// snow ribbon from the centerline, primitive skiers (no GLB assets), per-player
+// split-screen chase cameras, and an orbiting lobby preview. Simplified from the
+// reference kart renderer: it renders each player's viewport DIRECTLY to the
+// canvas (no offscreen MSAA present pipeline) and skips the ground-conform
+// raycast — the procedural ribbon means the engine's poses already sit on the
+// surface (pose.pos already includes lateral offset + air height).
+//
+// Public API (called by main.js): constructor(container, colors), async load(),
+// setTrack(track,{debug}), addSkier(id,colorIndex,name,opts), removeSkier(id),
+// setSkierPose(...), setSkierHud(id,info), start(), stop(), onFrame, orbit.
+import * as THREE from 'three';
+
+// ---- camera + feel constants (starting values) --------------------------
+const CHASE_DIST = 7.4;     // how far behind the skier the cam sits
+const CHASE_HEIGHT = 4.4;   // how far above (raised so the slope ahead reads over the roll)
+const CHASE_LOOK = 11.0;    // how far ahead it looks
+const CHASE_TGT_UP = -0.6;  // aim slightly DOWN-slope (toward the piste ahead, not the horizon)
+const CAM_POS_RATE = 6.0;   // position damping (1-exp(-rate*dt))
+const CAM_TGT_RATE = 11.0;
+const BASE_FOV = 64;
+const FOV_GAIN = 0.45;      // FOV widens with speed (sells velocity)
+const AIR_FOV = 6;          // extra FOV while airborne
+const LOBBY_ORBIT_SPEED = 0.12; // rad/s
+
+const BANK_MAX = 0.5;       // body bank (rad) into a full carve
+const TUCK_PITCH = 0.62;    // forward lean (rad) when fully tucked
+const TUCK_DROP = 0.42;     // how far the body lowers when tucked (world units)
+
+const _up = new THREE.Vector3(0, 1, 0);
+
+function bestGrid(n, W, H) {
+  let best = { cols: 1, rows: n, cost: Infinity };
+  for (let cols = 1; cols <= n; cols++) {
+    const rows = Math.ceil(n / cols);
+    const cellAspect = (W / cols) / (H / rows);
+    const cost = Math.abs(Math.log(cellAspect)) + (cols * rows - n) * 0.4;
+    if (cost < best.cost) best = { cols, rows, cost };
+  }
+  return best;
+}
+
+export class SceneRenderer {
+  constructor(container, colors) {
+    this.container = container;
+    this.colors = colors || [];
+    this.skiers = new Map();
+    this._order = [];          // celled (human) skiers, stable split-screen order
+    this.onFrame = null;
+    this.orbit = false;
+    this._running = false;
+    this._last = 0;
+    this._frameDt = 0;
+
+    // scratch (hot path allocates nothing)
+    this._sx = new THREE.Vector3();
+    this._sy = new THREE.Vector3();
+    this._sz = new THREE.Vector3();
+    this._sBasis = new THREE.Matrix4();
+    this._sWant = new THREE.Vector3();
+    this._sTarget = new THREE.Vector3();
+    this._sSurf = new THREE.Vector3();
+
+    this._initThree();
+    this._initOverlay();
+    window.addEventListener('resize', () => this._onResize());
+  }
+
+  _initThree() {
+    const r = new THREE.WebGLRenderer({ antialias: true });
+    r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    r.setSize(window.innerWidth, window.innerHeight);
+    r.outputColorSpace = THREE.SRGBColorSpace;
+    // Tone mapping rolls bright values off smoothly instead of hard-clipping to
+    // flat white — so bright snow stays white BUT keeps a light→shadow gradient
+    // (the mountain shapes stay readable). Khronos "Neutral" keeps whites neutral
+    // (ACES/Filmic would add the beige cast we don't want).
+    r.toneMapping = THREE.NeutralToneMapping;
+    r.toneMappingExposure = 1.25;
+    r.autoClear = false;                  // we clear once per frame, then render N viewports
+    r.shadowMap.enabled = true;
+    r.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.container.appendChild(r.domElement);
+    this.renderer = r;
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xbfe3f7);              // bright alpine sky
+    scene.fog = new THREE.Fog(0xf1f6fc, 110, 360);            // bright snowy haze (far enough for the peaks)
+    this.scene = scene;
+
+    // Three.js uses physically-based lights: a light of intensity 1 yields only
+    // ~1/π (~0.32) diffuse on a white surface, so modest intensities leave white
+    // snow at flat grey (~0.5–0.6). We push intensities ~π× higher so white snow
+    // actually renders white, with a STRONG sky fill (physically right — snow
+    // bounces ~90% of light, so its shadows stay bright, not grey) and a softer
+    // sun on top for mountainside form.
+    scene.add(new THREE.HemisphereLight(0xffffff, 0xeaf2fb, 1.9)); // sky fill (keeps shadows light, not grey)
+    const key = new THREE.DirectionalLight(0xffffff, 2.7);         // strong neutral sun → shape-defining gradient
+    key.position.set(8, 15, 6);
+    key.castShadow = true;
+    key.shadow.mapSize.set(2048, 2048);
+    key.shadow.autoUpdate = false;        // refreshed once per frame in _loop
+    key.shadow.bias = -0.0005;
+    key.shadow.normalBias = 0.06;
+    scene.add(key); scene.add(key.target);
+    this._key = key;
+
+    // Surrounding snow field (the slope ribbon sits on top of it).
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(1200, 1200),
+      new THREE.MeshStandardMaterial({ color: 0xf4f8fc, roughness: 1 })
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+    this.ground = ground;
+
+    this.slopeGroup = new THREE.Group(); scene.add(this.slopeGroup);
+    this.propGroup = new THREE.Group(); scene.add(this.propGroup);
+
+    this.overview = new THREE.PerspectiveCamera(52, this._aspect(), 0.1, 1200);
+    this.overview.position.set(30, 28, 30);
+    this._ovTarget = new THREE.Vector3();
+    this._orbitAngle = Math.atan2(0.9, 0.6);
+  }
+
+  _initOverlay() {
+    const o = document.createElement('div');
+    o.className = 'race-labels';
+    o.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:3;';
+    this.container.appendChild(o);
+    this.overlay = o;
+  }
+
+  _aspect() { return window.innerWidth / Math.max(1, window.innerHeight); }
+  _onResize() { this.renderer.setSize(window.innerWidth, window.innerHeight); }
+
+  // No GLB assets — resolve immediately. (Kept async so main.js's load().then()
+  // sequence matches the reference.)
+  async load() { return Promise.resolve(); }
+
+  // ---- world geometry --------------------------------------------------
+  setTrack(track, opts = {}) {
+    this._disposeGroup(this.slopeGroup);
+    this._disposeGroup(this.propGroup);
+
+    const samples = track.centerline.samples;
+    const sw = track.slopeWidth || 11;
+    const pisteHalf = sw / 2;          // groomed-piste edge (where poles + deep snow begin)
+    const edgeLat = sw;                // deep snow extends a half-slope-width past = the reset line
+
+    // Two-tone snow ribbon: 4 verts per sample at [-edge, -piste, +piste, +edge].
+    // The middle band (±piste) is bright groomed snow; the outer bands fade to a
+    // colder, deeper powder — a clear visual "you've left the run" without a wall.
+    // The run is carved into a snowy MOUNTAIN: a groomed piste (alternating
+    // corduroy passes) + deep-snow shoulders, then snow RISING into mountainside
+    // walls on each side — all built from the centerline so the whole valley
+    // cross-section descends with the run. Near-white, no warm tint.
+    const NB = 6;                       // groomer passes across the piste
+    const PASS = 0xffffff, GROOVE = 0xf6f9fc, DEEP = 0xedf2f8, WALL = 0xf4f8fd;
+    const n = samples.length;
+    for (let p = 0; p < NB; p++) {      // groomed piste passes
+      const a = -pisteHalf + (2 * pisteHalf) * (p / NB);
+      const b = -pisteHalf + (2 * pisteHalf) * ((p + 1) / NB);
+      this._addSlopeStrip(samples, a, b, 0, 0, p % 2 === 0 ? PASS : GROOVE);
+    }
+    this._addSlopeStrip(samples, -edgeLat, -pisteHalf, 0, 0, DEEP); // deep-snow shoulders
+    this._addSlopeStrip(samples, pisteHalf, edgeLat, 0, 0, DEEP);
+    this._addSlopeStrip(samples, -(edgeLat + 26), -edgeLat, 14, 0, WALL); // mountainside walls
+    this._addSlopeStrip(samples, -(edgeLat + 72), -(edgeLat + 26), 48, 14, WALL);
+    this._addSlopeStrip(samples, edgeLat, edgeLat + 26, 0, 14, WALL);
+    this._addSlopeStrip(samples, edgeLat + 26, edgeLat + 72, 14, 48, WALL);
+
+    // Edge markers (alternating poles) along the GROOMED edge (±pisteHalf) — they
+    // mark where the deep snow starts and double as depth/speed cues.
+    const poleGeo = new THREE.CylinderGeometry(0.06, 0.06, 1.1, 6);
+    const blue = new THREE.MeshStandardMaterial({ color: 0x2d9cdb });
+    const red = new THREE.MeshStandardMaterial({ color: 0xe6492d });
+    for (let i = 2; i < n - 2; i += 5) {
+      const s = samples[i];
+      const side = (i % 10 === 2) ? 1 : -1;
+      const ex = s.pos.x + s.lateral.x * pisteHalf * side;
+      const ey = s.pos.y + s.lateral.y * pisteHalf * side;
+      const ez = s.pos.z + s.lateral.z * pisteHalf * side;
+      const pole = new THREE.Mesh(poleGeo, side > 0 ? red : blue);
+      pole.position.set(ex, ey + 0.5, ez);
+      pole.quaternion.setFromUnitVectors(_up, s.up);
+      this.slopeGroup.add(pole);
+    }
+
+    // Props.
+    const cl = track.centerline;
+    for (const r of (track.ramps || [])) this._addRamp(cl, r);
+    for (const o of (track.obstacles || [])) this._addObstacle(cl, o);
+    this._addBanner(cl, 0.2, 0x2bb673, 'start');
+    this._addBanner(cl, track.length - 0.2, 0xf2b134, 'finish');
+
+    this.ground.position.y = (track.groundY != null ? track.groundY : -2);
+
+    // Overview framing for the lobby turntable + size the shadow camera.
+    const box = new THREE.Box3();
+    for (const s of samples) box.expandByPoint(s.pos);
+    this._trackCenter = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const radius = Math.max(size.x, size.z) * 0.5 + 12;
+    const dist = radius / Math.tan((this.overview.fov * Math.PI / 180) / 2) * 0.95;
+    const ovDir = new THREE.Vector3(0.5, 0.7, 0.9).normalize();
+    this._ovPos = this._trackCenter.clone().add(ovDir.clone().multiplyScalar(dist));
+    this._ovTarget = this._trackCenter.clone();
+    const ovOff = this._ovPos.clone().sub(this._trackCenter);
+    this._ovRadius = Math.hypot(ovOff.x, ovOff.z);
+    this._ovHeight = ovOff.y;
+    this._orbitAngle = Math.atan2(ovOff.z, ovOff.x); // start the orbit where the static frame sits (no first-frame snap)
+
+    const half = Math.max(size.x, size.y, size.z) * 0.5 + 6;
+    const k = this._key;
+    k.target.position.copy(this._trackCenter); k.target.updateMatrixWorld();
+    k.position.copy(this._trackCenter).add(new THREE.Vector3(8, 16, 6).normalize().multiplyScalar(half * 2.2));
+    const sc = k.shadow.camera;
+    sc.left = -half; sc.right = half; sc.top = half; sc.bottom = -half;
+    sc.near = half * 0.5; sc.far = half * 4 + 16;
+    sc.updateProjectionMatrix();
+    k.shadow.needsUpdate = true;
+
+    // distant snow peaks + an alpine pine forest on the banks → a snowy mountain
+    this._addPeaks(this._trackCenter, size);
+    this._addScenery(samples, edgeLat);
+  }
+
+  // One snow strip from lateral offset offA→offB, optionally rising in world-Y
+  // (riseA→riseB) to form mountainside terrain. computeVertexNormals so the flat
+  // piste AND the tilted walls both light correctly.
+  _addSlopeStrip(samples, offA, offB, riseA, riseB, color) {
+    const n = samples.length;
+    const pos = new Float32Array(n * 2 * 3);
+    for (let i = 0; i < n; i++) {
+      const s = samples[i], a = i * 6;
+      pos[a] = s.pos.x + s.lateral.x * offA; pos[a + 1] = s.pos.y + s.lateral.y * offA + riseA; pos[a + 2] = s.pos.z + s.lateral.z * offA;
+      pos[a + 3] = s.pos.x + s.lateral.x * offB; pos[a + 4] = s.pos.y + s.lateral.y * offB + riseB; pos[a + 5] = s.pos.z + s.lateral.z * offB;
+    }
+    const sidx = [];
+    for (let i = 0; i < n - 1; i++) { const p = i * 2; sidx.push(p, p + 1, p + 2, p + 1, p + 3, p + 2); }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setIndex(sidx);
+    g.computeVertexNormals();
+    const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color, side: THREE.DoubleSide, roughness: 0.9, metalness: 0 }));
+    m.receiveShadow = true;
+    this.slopeGroup.add(m);
+    return m;
+  }
+
+  // World-Y height of the mountainside at a lateral distance |off| from centre
+  // (matches the wall strips built in setTrack), for sitting trees on the banks.
+  _riseAt(absO, edgeLat) {
+    if (absO <= edgeLat) return 0;
+    if (absO <= edgeLat + 26) return 14 * (absO - edgeLat) / 26;
+    return 14 + 34 * Math.min(1, (absO - edgeLat - 26) / 46);
+  }
+
+  // Big low-poly snow peaks ringing the run, set well back and partly in the fog
+  // so they read as a distant range. The single biggest "we're on a mountain" cue.
+  _addPeaks(center, size) {
+    const baseR = Math.max(size.x, size.z) * 0.5 + 95;
+    const peaks = [
+      { ang: 0.5, d: 1.0, h: 115, r: 72 }, { ang: 1.15, d: 1.4, h: 165, r: 100 },
+      { ang: 1.95, d: 1.05, h: 95, r: 62 }, { ang: 2.7, d: 1.3, h: 140, r: 90 },
+      { ang: -0.35, d: 1.25, h: 125, r: 82 }, { ang: -1.25, d: 1.05, h: 105, r: 68 },
+      { ang: 3.5, d: 1.15, h: 110, r: 72 }, { ang: 4.4, d: 1.35, h: 150, r: 95 },
+    ];
+    // emissive lifts the shaded faces toward a cool snowy white (distant peaks are
+    // hazy/bright), so they read as snow mountains rather than dark grey pyramids.
+    const snow = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xc6d2e0, emissiveIntensity: 0.18, roughness: 1, flatShading: true });
+    for (const p of peaks) {
+      const dist = baseR * p.d;
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(p.r, p.h, 5, 1), snow);
+      cone.position.set(center.x + Math.cos(p.ang) * dist, center.y - 60 + p.h / 2, center.z + Math.sin(p.ang) * dist);
+      cone.rotation.y = p.ang * 1.7;
+      this.slopeGroup.add(cone);
+    }
+  }
+
+  // Scatter an alpine pine forest over the mountainside banks (decorative, not
+  // collidable — the engine's obstacles are separate).
+  _addScenery(samples, edgeLat) {
+    const n = samples.length;
+    const foliage = new THREE.MeshStandardMaterial({ color: 0x2f7d52, roughness: 1, flatShading: true });
+    const bark = new THREE.MeshStandardMaterial({ color: 0x6b4a2f });
+    const worldUp = new THREE.Vector3(0, 1, 0);
+    for (let i = 4; i < n - 4; i += 3) {
+      const s = samples[i];
+      for (const side of [-1, 1]) {
+        if (Math.random() < 0.5) continue;
+        const off = side * (edgeLat + 3 + Math.random() * 58);
+        const tree = new THREE.Group();
+        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.24, 1.2, 6), bark);
+        trunk.position.y = 0.6; tree.add(trunk);
+        for (let c = 0; c < 3; c++) {
+          const cone = new THREE.Mesh(new THREE.ConeGeometry(1.3 - c * 0.32, 1.5, 7), foliage);
+          cone.position.y = 1.4 + c * 0.85; tree.add(cone);
+        }
+        tree.scale.setScalar(0.8 + Math.random() * 1.9);
+        tree.position.copy(s.pos).addScaledVector(s.lateral, off).addScaledVector(worldUp, this._riseAt(Math.abs(off), edgeLat));
+        this.slopeGroup.add(tree);
+      }
+    }
+  }
+
+  _addRamp(cl, r) {
+    const f = cl.sampleAt(r.s);
+    // A kicker: a wedge rising toward the lip. Built as a box, tilted so its top
+    // face ramps up along the slope tangent.
+    const w = (r.width || 2.4), len = 3.2, h = 1.1;
+    const geo = new THREE.BoxGeometry(w, h, len);
+    // shear the top forward by translating top verts — simpler: just a tilted box
+    const ramp = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x7fc4ec, roughness: 0.8 }));
+    ramp.castShadow = true; ramp.receiveShadow = true;
+    const lateral = f.lateral.clone().normalize();
+    const tangent = f.tangent.clone().normalize();
+    const up = f.up.clone().normalize();
+    ramp.position.copy(f.pos).addScaledVector(lateral, r.lat).addScaledVector(up, h * 0.25);
+    // Build a RIGHT-handed basis (x = up × tangent, NOT `lateral` = tangent × up,
+    // which would be left-handed → setFromRotationMatrix mis-orients the wedge).
+    const rx = new THREE.Vector3().crossVectors(up, tangent).normalize();
+    ramp.quaternion.setFromRotationMatrix(this._sBasis.makeBasis(rx, up, tangent));
+    ramp.rotateX(-0.32); // tip the lip up
+    this.propGroup.add(ramp);
+  }
+
+  _addObstacle(cl, o) {
+    const f = cl.sampleAt(o.s);
+    const up = f.up.clone().normalize();
+    const g = new THREE.Group();
+    if (o.kind === 'rock') {
+      const rock = new THREE.Mesh(
+        new THREE.IcosahedronGeometry(o.radius || 0.85, 0),
+        new THREE.MeshStandardMaterial({ color: 0x8a93a1, roughness: 1, flatShading: true })
+      );
+      rock.castShadow = true; rock.scale.set(1, 0.7, 1);
+      g.add(rock);
+    } else {
+      const trunk = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.12, 0.16, 0.9, 6),
+        new THREE.MeshStandardMaterial({ color: 0x7a5230 })
+      );
+      trunk.position.y = 0.45; trunk.castShadow = true;
+      g.add(trunk);
+      const foliage = new THREE.MeshStandardMaterial({ color: 0x2f8f5b, roughness: 1, flatShading: true });
+      for (let i = 0; i < 3; i++) {
+        const cone = new THREE.Mesh(new THREE.ConeGeometry(0.95 - i * 0.22, 1.0, 7), foliage);
+        cone.position.y = 1.0 + i * 0.55; cone.castShadow = true;
+        g.add(cone);
+      }
+    }
+    g.position.copy(f.pos).addScaledVector(f.lateral, o.lat);
+    g.quaternion.setFromUnitVectors(_up, up);
+    this.propGroup.add(g);
+  }
+
+  _addBanner(cl, s, color, kind) {
+    const f = cl.sampleAt(Math.max(0, Math.min(cl.length, s)));
+    const lateral = f.lateral.clone().normalize();
+    const up = f.up.clone().normalize();
+    const halfW = 5.2;
+    const poleGeo = new THREE.CylinderGeometry(0.12, 0.12, 3.2, 8);
+    const mat = new THREE.MeshStandardMaterial({ color });
+    for (const side of [-1, 1]) {
+      const pole = new THREE.Mesh(poleGeo, mat);
+      pole.position.copy(f.pos).addScaledVector(lateral, side * halfW).addScaledVector(up, 1.6);
+      pole.quaternion.setFromUnitVectors(_up, up);
+      pole.castShadow = true;
+      this.propGroup.add(pole);
+    }
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(halfW * 2, 0.7, 0.18), mat);
+    bar.position.copy(f.pos).addScaledVector(up, 3.0);
+    const tangent = f.tangent.clone().normalize();
+    const bx = new THREE.Vector3().crossVectors(up, tangent).normalize(); // right-handed
+    bar.quaternion.setFromRotationMatrix(this._sBasis.makeBasis(bx, up, tangent));
+    this.propGroup.add(bar);
+  }
+
+  // ---- skiers ----------------------------------------------------------
+  addSkier(id, colorIndex, name, opts = {}) {
+    const color = new THREE.Color(this.colors[colorIndex % this.colors.length] || '#2d9cdb');
+    const group = new THREE.Group();
+
+    // skis
+    const skiMat = new THREE.MeshStandardMaterial({ color: 0x26313f, roughness: 0.6 });
+    for (const sx of [-0.16, 0.16]) {
+      const ski = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 1.5), skiMat);
+      ski.position.set(sx, 0.03, 0.15);
+      ski.castShadow = true;
+      group.add(ski);
+    }
+    // body pivot (banks + tucks)
+    const body = new THREE.Group();
+    body.position.y = 0.0;
+    group.add(body);
+
+    const suit = new THREE.MeshStandardMaterial({ color, roughness: 0.7 });
+    const skin = new THREE.MeshStandardMaterial({ color: 0xf0c9a0, roughness: 0.8 });
+    const legs = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.5, 0.28), suit);
+    legs.position.y = 0.35; legs.castShadow = true; body.add(legs);
+    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.34, 4, 8), suit);
+    torso.position.y = 0.78; torso.castShadow = true; body.add(torso);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 12, 12), skin);
+    head.position.y = 1.12; head.castShadow = true; body.add(head);
+    const hat = new THREE.Mesh(new THREE.SphereGeometry(0.185, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), suit);
+    hat.position.y = 1.18; body.add(hat);
+
+    const cam = new THREE.PerspectiveCamera(BASE_FOV, 1, 0.1, 1200);
+
+    // soft contact shadow blob
+    const blob = new THREE.Mesh(
+      new THREE.CircleGeometry(0.7, 16),
+      new THREE.MeshBasicMaterial({ color: 0x3a5a78, transparent: true, opacity: 0.28, depthWrite: false })
+    );
+    blob.rotation.x = -Math.PI / 2;
+
+    this.scene.add(group);
+    this.scene.add(blob);
+
+    let label = null;
+    const celled = opts.cell !== false;
+    if (celled) {
+      label = document.createElement('div');
+      label.className = 'cell-label';
+      label.style.setProperty('--c', this.colors[colorIndex % this.colors.length] || '#2d9cdb');
+      label.innerHTML = `<span class="cell-label__name"></span><span class="cell-label__stat"></span>`;
+      label.querySelector('.cell-label__name').textContent = name || '';
+      this.overlay.appendChild(label);
+      if (!this._order.includes(id)) this._order.push(id);
+    }
+
+    this.skiers.set(id, {
+      id, group, body, cam, blob, label, name,
+      colorIndex, celled,
+      camPos: new THREE.Vector3(), camTarget: new THREE.Vector3(),
+      fov: BASE_FOV, init: false, lean: 0, tuckAmt: 0, pose: null, finished: false,
+    });
+  }
+
+  removeSkier(id) {
+    const c = this.skiers.get(id);
+    if (!c) return;
+    this.scene.remove(c.group); this.scene.remove(c.blob);
+    this._disposeGroup(c.group);
+    c.blob.geometry.dispose(); c.blob.material.dispose();
+    if (c.label && c.label.parentNode) c.label.parentNode.removeChild(c.label);
+    this.skiers.delete(id);
+    const i = this._order.indexOf(id);
+    if (i >= 0) this._order.splice(i, 1);
+  }
+
+  setSkierPose(id, pos, forward, up, carve = 0, spd = 0, airborne = false, tuck = 0, air = 0, spin = 0, crashed = false) {
+    const c = this.skiers.get(id);
+    if (!c) return;
+    c.spd = spd; c.airborne = airborne;
+    if (!c.pose) c.pose = { pos: new THREE.Vector3(), forward: new THREE.Vector3(), up: new THREE.Vector3() };
+    c.pose.pos.copy(pos);
+    c.pose.forward.copy(forward).normalize();
+    c.pose.up.copy(up).normalize();
+
+    c.group.position.copy(pos);
+    // orientation basis: z = forward (down-slope), x = up × z, y = z × x
+    const z = this._sz.copy(c.pose.forward);
+    const x = this._sx.copy(c.pose.up).cross(z).normalize();
+    const y = this._sy.copy(z).cross(x).normalize();
+    c.group.quaternion.setFromRotationMatrix(this._sBasis.makeBasis(x, y, z));
+    // wipeout spin about the slope normal (cosmetic)
+    if (spin) c.group.rotateY(spin);
+
+    // body: bank INTO the carve (negated — +carve is turn-aligned, and a positive
+    // local-Z roll tilts the torso the opposite way), crouch + pitch when tucking
+    const dt = this._frameDt || 0.016;
+    c.lean += (-carve * BANK_MAX - c.lean) * Math.min(1, dt * 12);
+    c.tuckAmt += ((tuck ? 1 : 0) - c.tuckAmt) * Math.min(1, dt * 10);
+    c.body.rotation.z = c.lean;
+    c.body.rotation.x = c.tuckAmt * TUCK_PITCH + (airborne ? -0.2 : 0);
+    c.body.position.y = -c.tuckAmt * TUCK_DROP;
+
+    // contact shadow on the surface beneath (pose includes air → subtract it)
+    const surf = this._sSurf.copy(pos).addScaledVector(c.pose.up, -air);
+    c.blob.position.set(surf.x, surf.y + 0.02, surf.z);
+    const sh = Math.max(0.25, 1 - air * 0.12);
+    c.blob.scale.set(sh, sh, sh);
+    c.blob.material.opacity = 0.28 * sh;
+  }
+
+  setSkierHud(id, info) {
+    const c = this.skiers.get(id);
+    if (!c || !c.label) return;
+    const stat = c.label.querySelector('.cell-label__stat');
+    if (info.finished) {
+      stat.textContent = `P${info.position} · ${info.finishTime ? info.finishTime.toFixed(1) + 's' : 'done'}`;
+      c.label.classList.add('is-finished');
+    } else {
+      stat.textContent = `P${info.position}/${info.of}` + (info.airborne ? ' · AIR' : (info.tuck ? ' · TUCK' : ''));
+    }
+  }
+
+  _updateChase(c, dt) {
+    const { pos, forward, up } = c.pose;
+    const want = this._sWant.copy(pos).addScaledVector(forward, -CHASE_DIST).addScaledVector(up, CHASE_HEIGHT);
+    const target = this._sTarget.copy(pos).addScaledVector(forward, CHASE_LOOK).addScaledVector(up, CHASE_TGT_UP);
+    const aPos = 1 - Math.exp(-CAM_POS_RATE * dt);
+    const aTgt = 1 - Math.exp(-CAM_TGT_RATE * dt);
+    if (!c.init) { c.camPos.copy(want); c.camTarget.copy(target); c.init = true; }
+    else { c.camPos.lerp(want, aPos); c.camTarget.lerp(target, aTgt); }
+    c.cam.position.copy(c.camPos);
+    const wantFov = BASE_FOV + (c.spd || 0) * FOV_GAIN + (c.airborne ? AIR_FOV : 0);
+    c.fov += (wantFov - c.fov) * (1 - Math.exp(-6 * dt));
+    c.cam.fov = c.fov;
+    c.cam.up.copy(up);
+    c.cam.lookAt(c.camTarget);
+  }
+
+  start() {
+    if (this._running) return;
+    this._running = true;
+    this._last = performance.now();
+    requestAnimationFrame((t) => this._loop(t));
+  }
+  stop() { this._running = false; }
+
+  _loop(t) {
+    if (!this._running) return;
+    const rawMs = t - this._last;
+    const dt = Math.min(rawMs / 1000, 0.05);
+    this._last = t;
+    this._frameDt = dt;
+    if (this.onFrame) this.onFrame(dt);
+
+    const W = window.innerWidth, H = window.innerHeight;
+    const r = this.renderer;
+    r.setScissorTest(false);
+    r.setViewport(0, 0, W, H);
+    r.clear();
+    if (this._key) this._key.shadow.needsUpdate = true;
+
+    const ids = this._order.filter((id) => this.skiers.has(id));
+    if (ids.length === 0) {
+      // lobby / attract: single overview camera, slow orbit
+      this.overview.aspect = W / H; this.overview.updateProjectionMatrix();
+      if (this.orbit && this._trackCenter) {
+        this._orbitAngle += LOBBY_ORBIT_SPEED * dt;
+        this.overview.position.set(
+          this._trackCenter.x + Math.cos(this._orbitAngle) * this._ovRadius,
+          this._trackCenter.y + this._ovHeight,
+          this._trackCenter.z + Math.sin(this._orbitAngle) * this._ovRadius);
+      } else if (this._ovPos) {
+        this.overview.position.lerp(this._ovPos, 0.05);
+      }
+      this.overview.lookAt(this._ovTarget);
+      r.render(this.scene, this.overview);
+      requestAnimationFrame((tt) => this._loop(tt));
+      return;
+    }
+
+    const { cols, rows } = bestGrid(ids.length, W, H);
+    const cw = Math.floor(W / cols), ch = Math.floor(H / rows);
+    ids.forEach((id, i) => {
+      const c = this.skiers.get(id);
+      if (!c.pose) return;
+      const col = i % cols, row = Math.floor(i / cols);
+      const x = col * cw;
+      const yBottom = H - (row + 1) * ch; // GL viewport origin = lower-left
+      this._updateChase(c, dt);
+      c.cam.aspect = cw / ch; c.cam.updateProjectionMatrix();
+      r.setViewport(x, yBottom, cw, ch);
+      r.setScissor(x, yBottom, cw, ch);
+      r.setScissorTest(true);
+      r.render(this.scene, c.cam);
+      // position the DOM label in the cell (CSS px, top-left origin)
+      if (c.label) { c.label.style.left = (x + 14) + 'px'; c.label.style.top = (row * ch + 12) + 'px'; }
+    });
+
+    requestAnimationFrame((tt) => this._loop(tt));
+  }
+
+  _disposeGroup(g) {
+    for (let i = g.children.length - 1; i >= 0; i--) {
+      const o = g.children[i];
+      o.traverse((m) => {
+        if (m.geometry) m.geometry.dispose();
+        if (m.material) { Array.isArray(m.material) ? m.material.forEach((x) => x.dispose()) : m.material.dispose(); }
+      });
+      g.remove(o);
+    }
+  }
+}

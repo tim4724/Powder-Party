@@ -1,0 +1,289 @@
+/* Controller — phone. Alpine / fresh-powder look built from the shared "Sunny
+   Circuit" tokens (the sky reads as a high-altitude bluebird sky, the surfaces
+   as snow). Tokens + reusable bits live in /shared/theme.css. --car is the
+   player's livery colour, set at runtime by controller/main.js (applyLivery). */
+
+html, body {
+  margin: 0; min-height: 100%;
+  /* bluebird sky fading to a clean snowfield at the foot */
+  background: linear-gradient(180deg, var(--sky-1) 0%, var(--sky-2) 50%, #ffffff 100%);
+  color: var(--ink);
+  touch-action: manipulation;
+}
+/* dvh tracks the *visible* viewport, so bottom content never hides under the
+   mobile browser navbar (100vh = the larger toolbar-retracted height). */
+body { display: flex; min-height: 100vh; min-height: 100dvh; position: relative; }
+/* high alpine sun — a soft warm disc kept clear of the content */
+body::before {
+  content: ''; position: fixed; top: -64px; right: -44px;
+  width: 200px; height: 200px; border-radius: 50%;
+  background: radial-gradient(circle, #fffbe6, var(--sun));
+  opacity: 0.85; filter: blur(2px); pointer-events: none; z-index: 0;
+}
+/* a faint snow ridge along the bottom edge, behind the content */
+body::after {
+  content: ''; position: fixed; left: -5%; right: -5%; bottom: -40px; height: 140px;
+  background: radial-gradient(120% 100% at 50% 100%, #fff 60%, transparent 72%);
+  opacity: 0.9; pointer-events: none; z-index: 0;
+}
+* { -webkit-tap-highlight-color: transparent; }
+/* Pad past the notch/home-indicator (viewport-fit=cover lets content reach the
+   physical edges) on top of the design breathing room. */
+section {
+  position: relative; z-index: 1;
+  flex: 1; display: flex; flex-direction: column;
+  padding:
+    calc(7vh + env(safe-area-inset-top)) calc(8vw + env(safe-area-inset-right))
+    calc(7vh + env(safe-area-inset-bottom)) calc(8vw + env(safe-area-inset-left));
+}
+/* the join screen is sparse — center it so it isn't top-heavy */
+#name { justify-content: center; padding-bottom: calc(12vh + env(safe-area-inset-bottom)); }
+
+h1 {
+  font-family: var(--font-display); font-weight: 700;
+  font-size: 2.1rem; line-height: 1.02; margin: 0 0 0.15em; color: var(--ink);
+}
+h1 span { color: var(--brand); }
+.sub { color: var(--ink-2); font-weight: 700; margin: 0 0 2rem; }
+
+/* ---- name form ---- */
+input[type=text] {
+  width: 100%; font-family: var(--font-body); font-weight: 700; font-size: 1.3rem;
+  padding: 1rem 1.1rem; color: var(--ink);
+  background: var(--surface); border: 2px solid var(--hairline); border-radius: var(--r-sm);
+}
+input[type=text]:focus { outline: none; border-color: var(--brand); }
+input[type=text]:disabled { opacity: 0.6; }
+.btn { width: 100%; margin-top: 1rem; }           /* phone buttons fill the row */
+#name-status { color: var(--ink-2); font-weight: 700; margin-top: 1rem; min-height: 1.4em; }
+
+/* ---- lobby: your name, your skier ---- */
+/* Top-aligned with the name at the very top; the WHOLE PAGE scrolls if the skier
+   picker doesn't fit (no inner scroll boxes). Top padding is just the safe-area
+   inset plus a little breathing room. */
+#lobby {
+  justify-content: flex-start;
+  padding-top: calc(0.9rem + env(safe-area-inset-top));
+}
+
+/* Player identity, up top — livery dot + name. */
+.lobby-me { display: flex; align-items: center; gap: 0.6rem; margin: 0 0 1.2rem; }
+.lobby-me__name {
+  font-family: var(--font-display); font-weight: 700; font-size: 1.7rem; line-height: 1;
+  color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#me-dot { width: 1rem; height: 1rem; flex: none; background: var(--car); }
+
+/* Eyes-free play reminder — every skier handles the same, so the lobby is just
+   your identity + this tip while you wait for the host to start. */
+.lobby-tip {
+  color: var(--ink-2); font-weight: 700; line-height: 1.5;
+  background: var(--surface-2); border: 2px solid var(--hairline);
+  border-radius: var(--r-sm); padding: 0.9rem 1.1rem; margin: 0.6rem 0 1.4rem;
+}
+
+#wait-host { color: var(--ink-2); font-weight: 700; text-align: center; margin-top: 1rem; }
+/* Host name in the wait text — tinted in their livery colour (set inline from
+   SKIER_COLORS), heavier weight so the colour reads as intentional. */
+.host-name { font-weight: 800; }
+
+/* ---- game / run HUD ---- */
+/* No countdown here — the full HUD shows immediately so players can pre-carve
+   while the display counts down 3..2..1..GO. */
+#game { align-items: stretch; justify-content: flex-start; user-select: none; }
+#drive-hud { display: flex; flex-direction: column; gap: 1rem; flex: 1; min-height: 0; }
+.hud-top { display: flex; justify-content: space-between; align-items: center; }
+#pos {
+  font-family: var(--font-display); font-weight: 700; font-size: 1.5rem; color: #fff;
+  padding: 0.3rem 1rem; border-radius: var(--r-sm); background: var(--car);
+  box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.18);
+}
+#pos.leader { background: var(--accent); color: var(--ink); }
+
+/* AIR badge — lights up when the display reports the skier is airborne. */
+.air-badge {
+  font-family: var(--font-display); font-weight: 700; font-size: 1.2rem; letter-spacing: 0.12em;
+  padding: 0.3rem 0.95rem; border-radius: var(--r-pill); color: #04443d;
+  background: var(--accent); box-shadow: var(--inset-hi);
+  animation: airPulse 0.7s ease-in-out infinite;
+}
+@keyframes airPulse { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+
+/* ---- the eyes-free play surface ----
+   The WHOLE area is the gesture target (swipe down + hold = tuck, release =
+   jump). The player watches the big screen, not the phone, so it's a big soft
+   panel with a single clear call-to-action, not a row of buttons. touch-action
+   :none (also set on #game by TiltInput) keeps the swipe from scrolling. */
+.play {
+  position: relative; flex: 1; min-height: 14rem; overflow: hidden;
+  display: flex; flex-direction: column; justify-content: center; align-items: center;
+  border-radius: var(--r);
+  background:
+    radial-gradient(140% 120% at 50% -10%, color-mix(in srgb, var(--car), #fff 80%) 0%, transparent 55%),
+    linear-gradient(180deg, #fbfdff 0%, #eef6ff 100%);
+  border: 3px solid var(--hairline);
+  box-shadow: var(--shadow-pop), inset 0 2px 6px rgba(40, 80, 120, 0.06);
+  touch-action: none;
+}
+.play__center { display: flex; flex-direction: column; align-items: center; gap: 0.9rem; z-index: 1; }
+
+/* a big down-chevron that reads "swipe down here". It flips to a thick up-pop
+   while tucking (charged + ready to jump) and flares on release. */
+.play__glyph {
+  width: 4.4rem; height: 4.4rem; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--car), #fff 70%);
+  box-shadow: var(--inset-hi), 0 4px 0 color-mix(in srgb, var(--car), #000 14%);
+  transition: transform 0.12s ease, background 0.12s ease;
+}
+.play__arrow {
+  width: 1.5rem; height: 1.5rem; border-right: 0.42rem solid var(--car); border-bottom: 0.42rem solid var(--car);
+  transform: rotate(45deg) translate(-0.12rem, -0.12rem);  /* down-chevron */
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+.play__glyph.tucking { transform: translateY(0.5rem) scale(0.92); background: color-mix(in srgb, var(--car), #fff 45%); }
+.play__glyph.tucking .play__arrow { transform: rotate(-135deg) translate(-0.12rem, -0.12rem); }  /* up-chevron: ready to pop */
+.play__glyph.jumped { animation: jumpPop 0.32s ease-out; }
+@keyframes jumpPop { 0% { transform: translateY(-0.8rem) scale(1.18); } 100% { transform: none; } }
+
+.play__hint { color: var(--ink-2); font-weight: 800; font-size: 0.95rem; text-align: center; max-width: 16rem; }
+
+/* charge meter — a vertical fill on the right edge of the play surface that grows
+   from the bottom while tucking. Mirrors the display's charge read; the live fill
+   is driven by the local swipe estimate, falling back to the server charge. */
+.charge {
+  position: absolute; top: 0.7rem; right: 0.7rem; bottom: 0.7rem; width: 0.95rem;
+  border-radius: var(--r-pill); overflow: hidden;
+  background: color-mix(in srgb, var(--hairline), #fff 30%);
+  box-shadow: inset 0 1px 3px rgba(40, 80, 120, 0.18);
+  z-index: 2;
+}
+.charge__fill {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 100%;
+  transform: scaleY(0); transform-origin: bottom;
+  background: linear-gradient(180deg, var(--accent), var(--car));
+  border-radius: var(--r-pill);
+  transition: transform 0.06s linear;
+}
+.charge.charging { box-shadow: inset 0 1px 3px rgba(40, 80, 120, 0.18), 0 0 0 2px color-mix(in srgb, var(--car), #fff 50%); }
+
+/* carve indicator — a centre-anchored bar that slides with the lean. Sits at the
+   bottom of the play surface so a glance reads "which way am I carving". */
+.carve { position: absolute; left: 1rem; right: 1rem; bottom: 0.9rem; z-index: 2; }
+.carve__track {
+  position: relative; height: 1.2rem; overflow: hidden;
+  background: var(--surface); border: 2px solid var(--hairline); border-radius: var(--r-pill);
+  box-shadow: inset 0 2px 4px rgba(40, 80, 120, 0.1);
+}
+.carve__track::before { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; background: var(--hairline); }
+#carve-fill { position: absolute; left: 50%; top: 0; bottom: 0; width: 50%; margin-left: -25%; background: var(--car); border-radius: var(--r-pill); transition: transform 0.05s linear; }
+.carve__label { text-align: center; color: var(--ink-2); font-weight: 700; font-size: 0.82rem; margin-top: 0.35rem; }
+
+#motion-tip { color: var(--ink-2); font-weight: 700; text-align: center; font-size: 0.95rem; }
+
+/* ---- latency chip ---- */
+/* One-way latency (RTT/2), pinned to the bottom-right corner. A dark pill keeps
+   the mint/honey/red ping colours legible over the bright sky background (and the
+   play surface it can overlap; pointer-events:none, so it never eats taps). The
+   colour comes from the .latency--good|ok|bad modifier; the bolt only shows under
+   .latency--fastlane (P2P DataChannel carrying the input/ping path). */
+.latency {
+  position: fixed;
+  right: calc(0.55rem + env(safe-area-inset-right));
+  bottom: calc(0.5rem + env(safe-area-inset-bottom));
+  z-index: 20;
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 0.26rem 0.55rem;
+  font-family: var(--font-body); font-weight: 800; font-size: 0.72rem; line-height: 1;
+  font-variant-numeric: tabular-nums;            /* stable width as the ms count ticks */
+  color: #fff;
+  background: color-mix(in srgb, var(--ink) 88%, transparent);
+  border-radius: var(--r-pill);
+  box-shadow: var(--shadow-pop);
+  pointer-events: none; user-select: none;
+}
+.latency__bolt { display: none; font-size: 0.9em; }
+.latency__bolt::before { content: "\26A1\FE0E"; }  /* ⚡ forced to monochrome text presentation */
+.latency--fastlane .latency__bolt { display: inline; }
+.latency--good { color: var(--ping-good); }
+.latency--ok   { color: var(--ping-ok); }
+.latency--bad  { color: var(--ping-bad); }
+
+/* ---- pause ---- */
+/* Pause button — top-right of the game screen, reachable from the first beat,
+   below the pause overlay + latency chip. .icon-btn (theme.css) supplies the
+   toy-button look. */
+#pause-btn {
+  position: fixed; z-index: 8;
+  top: calc(0.6rem + env(safe-area-inset-top));
+  right: calc(0.6rem + env(safe-area-inset-right));
+  width: 3.2rem; height: 3.2rem;
+}
+
+/* Pause overlay — frosted glass, the same Continue / New run choices the big
+   screen shows. Buttons fill the column like the rest of the phone UI. */
+#pause-overlay {
+  position: fixed; inset: 0; z-index: 15;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 1rem;
+  padding:
+    calc(7vh + env(safe-area-inset-top)) calc(10vw + env(safe-area-inset-right))
+    calc(7vh + env(safe-area-inset-bottom)) calc(10vw + env(safe-area-inset-left));
+  background: rgba(233, 248, 255, 0.82); backdrop-filter: blur(8px);
+}
+#pause-overlay h2 {
+  font-family: var(--font-display); font-weight: 700;
+  font-size: 2.6rem; margin: 0 0 0.6rem; color: var(--ink);
+}
+#pause-overlay .btn { width: min(82%, 18rem); margin-top: 0; }
+
+/* ---- results overlay ---- */
+/* Shown on your phone once you finish; the board fills in as the rest of the
+   field crosses the line. Centred in the section column like the other screens. */
+#results { justify-content: center; gap: 1.2rem; }
+.results-title {
+  font-family: var(--font-display); font-weight: 700; font-size: 2rem;
+  text-align: center; margin: 0; color: var(--ink);
+}
+.result-list {
+  list-style: none; counter-reset: li; margin: 0 -5px; padding: 0 5px;
+  display: flex; flex-direction: column; gap: 0.5rem;
+  /* overflow-y:auto forces overflow-x to compute to auto too, which clips the
+     is-me livery ring / pop shadow at the sides — the padding/-margin pair gives
+     them room inside the clip rect without changing the row width. */
+  min-height: 0; overflow-y: auto;        /* scroll a tall board rather than push the footer off-screen */
+}
+.result-list li {
+  counter-increment: li;
+  display: flex; align-items: center; gap: 0.6rem;
+  background: var(--surface); border: 2px solid var(--hairline); border-radius: var(--r-sm);
+  padding: 0.7rem 0.9rem; font-weight: 800; color: var(--ink);
+  box-shadow: var(--shadow-pop);
+}
+.result-list li::before {
+  content: counter(li); font-family: var(--font-display); font-weight: 700;
+  color: var(--ink-3); min-width: 1.2em; text-align: center;
+}
+.result-list li:first-child::before { color: var(--accent); } /* gold leader number */
+/* your own row, ringed in your livery like the skier picker */
+.result-list li.is-me { border-color: var(--car); box-shadow: 0 0 0 3px color-mix(in srgb, var(--car), #fff 62%), var(--shadow-pop); }
+.result-list .res-dot { width: 0.9rem; height: 0.9rem; border-radius: 50%; flex: none; box-shadow: inset 0 -2px 3px rgba(0, 0, 0, 0.18); }
+.result-list .res-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.result-list .res-time { margin-left: auto; color: var(--ink-3); font-weight: 700; font-variant-numeric: tabular-nums; }
+.result-list li.is-racing .res-time { font-style: italic; } /* still on the slope — "Skiing…" */
+#result-foot { display: flex; flex-direction: column; align-items: center; gap: 0.6rem; }
+#result-foot .btn { width: min(82%, 18rem); margin-top: 0; }
+.result-wait { color: var(--ink-2); font-weight: 700; text-align: center; }
+
+/* Landscape: less vertical room, so compact the paddings and let the play surface
+   stay big. The HUD stays a single column. */
+@media (orientation: landscape) {
+  section {
+    padding:
+      calc(4vh + env(safe-area-inset-top)) calc(6vw + env(safe-area-inset-right))
+      calc(4vh + env(safe-area-inset-bottom)) calc(6vw + env(safe-area-inset-left));
+  }
+  #drive-hud { gap: 0.6rem; }
+  .play { min-height: 9rem; }
+  .play__glyph { width: 3.4rem; height: 3.4rem; }
+}

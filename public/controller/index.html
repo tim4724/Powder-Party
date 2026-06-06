@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="app-version" content="__APP_VERSION__" />
+  <title>Powder Party Controller</title>
+  <link rel="icon" href="data:," />
+  <link rel="preload" as="font" type="font/woff2" href="/assets/fonts/fredoka-variable.woff2" crossorigin />
+  <link rel="preload" as="font" type="font/woff2" href="/assets/fonts/nunito-variable.woff2" crossorigin />
+  <link rel="stylesheet" href="/shared/theme.css?v=__APP_V__" />
+  <link rel="stylesheet" href="/controller/controller.css?v=__APP_V__" />
+  <!-- Classic scripts FIRST: they set the window globals (MSG, SKIER_*, RELAY_URL,
+       STUN_URL, FASTLANE_TYPES, PartyConnection, PartyFastlane) the ES module
+       below reads. The controller does NOT load RoomFlow (that's display-only). -->
+  <script src="/shared/protocol.js?v=__APP_V__"></script>
+  <script src="/partyplug/PartyConnection.js?v=__APP_V__"></script>
+  <script src="/partyplug/PartyFastlane.js?v=__APP_V__"></script>
+</head>
+<body>
+  <!-- Name -->
+  <section id="name">
+    <h1>Powder <span>Party</span></h1>
+    <p class="sub">Pick a name and drop in.</p>
+    <form id="name-form">
+      <input id="name-input" type="text" placeholder="Your name" maxlength="16" autocomplete="off" />
+      <button id="join-btn" type="submit" class="btn btn--brand">Join run</button>
+    </form>
+    <div id="name-status"></div>
+  </section>
+
+  <!-- Lobby — who you are (the shared display owns the roster + auto-assigns your
+       livery colour). The slope is fixed and every skier handles the same, so
+       there's nothing to pick — the host just starts. -->
+  <section id="lobby" class="hidden">
+    <div class="lobby-me">
+      <span id="me-dot" class="dot"></span>
+      <span id="me-name" class="lobby-me__name"></span>
+    </div>
+    <p class="lobby-tip">Tilt to carve · swipe down &amp; hold to tuck · release at a ramp to jump</p>
+    <button id="start-btn" class="btn btn--brand hidden">Start run</button>
+    <div id="wait-host" class="hidden">Waiting for the host to start…</div>
+  </section>
+
+  <!-- Game: tilt to CARVE · swipe down + hold to TUCK · release to JUMP.
+       The whole #play surface is the eyes-free gesture target — the player
+       watches the big screen, not the phone. -->
+  <section id="game" class="hidden">
+    <button id="pause-btn" class="icon-btn hidden" aria-label="Pause"><span class="pause-glyph"></span></button>
+    <div id="drive-hud" class="hidden">
+      <div class="hud-top">
+        <div id="pos">P1</div>
+        <div id="air" class="air-badge hidden">AIR</div>
+      </div>
+
+      <!-- full-bleed eyes-free play surface. The charge meter rides the right
+           edge (fills while tucking); the carve bar + hint sit at the bottom. -->
+      <div id="play" class="play">
+        <div id="charge" class="charge">
+          <div id="charge-fill" class="charge__fill"></div>
+        </div>
+        <div class="play__center">
+          <div id="play-glyph" class="play__glyph" aria-hidden="true">
+            <span class="play__arrow"></span>
+          </div>
+          <div class="play__hint">tuck to charge · release to jump</div>
+        </div>
+        <div class="carve">
+          <div class="carve__track"><div id="carve-fill"></div></div>
+          <div class="carve__label">tilt to carve</div>
+        </div>
+      </div>
+
+      <div id="motion-tip" class="hidden">No tilt? Use ◄ ► keys to carve.</div>
+    </div>
+    <!-- Pause overlay — frosted glass with the same choices as the big screen -->
+    <div id="pause-overlay" class="hidden">
+      <h2>Paused</h2>
+      <button id="pause-continue" class="btn btn--brand">Continue</button>
+      <button id="pause-newgame" class="btn btn--ghost">New run</button>
+    </div>
+  </section>
+
+  <!-- Results — shown once your skier finishes; the board fills in as the rest of
+       the field crosses the line. The host starts the next run from here. -->
+  <section id="results" class="hidden">
+    <h2 class="results-title">Results</h2>
+    <ol id="result-list" class="result-list"></ol>
+    <div id="result-foot">
+      <button id="newgame-btn" class="btn btn--brand hidden">New run</button>
+      <div id="result-wait" class="result-wait hidden"></div>
+    </div>
+  </section>
+
+  <!-- Latency chip — one-way (RTT/2), pinned bottom-right across all screens.
+       Hidden until the first reading lands (post-join). The bolt shows only
+       while the input/ping path is on the P2P fastlane DataChannel. -->
+  <div id="latency" class="latency hidden" role="status" aria-live="off">
+    <span class="latency__bolt" aria-hidden="true"></span><span class="latency__text">-- ms</span>
+  </div>
+
+  <script type="module" src="/controller/main.js?v=__APP_V__"></script>
+</body>
+</html>

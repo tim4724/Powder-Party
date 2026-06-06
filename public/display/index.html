@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="app-version" content="__APP_VERSION__" />
+  <title>Powder Party</title>
+  <link rel="icon" href="data:," />
+  <link rel="preload" as="font" type="font/woff2" href="/assets/fonts/fredoka-variable.woff2" crossorigin />
+  <link rel="preload" as="font" type="font/woff2" href="/assets/fonts/nunito-variable.woff2" crossorigin />
+  <!-- Three.js (vendored). The inline importmap is the one script needing a CSP
+       nonce; the module entry is external so it's covered by 'self'. -->
+  <script type="importmap" nonce="__CSP_NONCE__">
+  {
+    "imports": {
+      "three": "/vendor/three/three.module.js",
+      "three/addons/": "/vendor/three/addons/"
+    }
+  }
+  </script>
+  <link rel="modulepreload" href="/vendor/three/three.core.js" />
+  <link rel="modulepreload" href="/vendor/three/three.module.js" />
+  <link rel="stylesheet" href="/shared/theme.css?v=__APP_V__" />
+  <link rel="stylesheet" href="/display/display.css?v=__APP_V__" />
+
+  <!-- Transport + shared contract: classic scripts set window globals BEFORE
+       the deferred module entry runs. -->
+  <script src="/shared/protocol.js?v=__APP_V__"></script>
+  <script src="/partyplug/PartyConnection.js?v=__APP_V__"></script>
+  <script src="/partyplug/RoomFlow.js?v=__APP_V__"></script>
+  <script src="/partyplug/PartyFastlane.js?v=__APP_V__"></script>
+</head>
+<body>
+  <!-- Persistent 3D backdrop. In the lobby it slowly orbits the slope (live
+       preview); in a run it draws the split-screen world. -->
+  <div id="scene"></div>
+
+  <!-- Lobby -->
+  <section id="lobby">
+    <div class="lobby__left card">
+      <h1>Powder <span>Party</span></h1>
+      <div class="join">
+        <div class="join__label">Join at</div>
+        <div class="join__url" id="joinurl">…</div>
+      </div>
+      <div id="count">Scan the QR code to join</div>
+      <div id="players">
+        <div class="seat seat--open"><span class="seat__open">Open</span></div>
+        <div class="seat seat--open"><span class="seat__open">Open</span></div>
+        <div class="seat seat--open"><span class="seat__open">Open</span></div>
+        <div class="seat seat--open"><span class="seat__open">Open</span></div>
+      </div>
+      <div class="lobby__hint">Tilt to carve · swipe down &amp; hold to tuck · release at a ramp to jump</div>
+    </div>
+    <div class="lobby__right">
+      <div class="qr-card"><canvas id="qr"></canvas></div>
+    </div>
+  </section>
+
+  <!-- Run overlays over the persistent #scene backdrop -->
+  <section id="race" class="hidden">
+    <button id="pause-btn" class="icon-btn" aria-label="Pause"><span class="pause-glyph"></span></button>
+    <div id="countdown"></div>
+    <div id="pause-overlay" class="hidden">
+      <div class="pause-card card">
+        <h2>Paused</h2>
+        <div class="pause-card__btns">
+          <button id="pause-continue" class="btn btn--brand">Continue</button>
+          <button id="pause-newgame" class="btn btn--ghost">New run</button>
+        </div>
+      </div>
+    </div>
+    <div id="results" class="hidden">
+      <div class="results-card card">
+        <h2>Results</h2>
+        <ol id="results-list"></ol>
+        <button id="results-newgame" class="btn btn--brand">New run</button>
+      </div>
+    </div>
+  </section>
+
+  <script type="module" src="/display/main.js?v=__APP_V__"></script>
+</body>
+</html>
