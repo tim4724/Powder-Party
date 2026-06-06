@@ -28,7 +28,7 @@ jobs:
             const commentBody = [
               '### Preview',
               `- Display: ${base}`,
-              `- Controller (phone): ${base}/controller`,
+              `- Controller (phone): ${base}/controller/index.html`,
               marker,
             ].join('\n');
 
