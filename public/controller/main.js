@@ -1,6 +1,7 @@
-// Controller entry — name → lobby → run. Tilt to CARVE, swipe-down-and-hold to
-// TUCK, release (or swipe up) to JUMP, all streamed as CONTROL {s,t,j} to the
-// display; a light position/air HUD comes back over PLAYER_STATE.
+// Controller entry — name → lobby → run. The whole #game surface is an eyes-free
+// touch-pad: tilt to CARVE, push down + hold to BRAKE, and in the air flick any
+// direction to FLIP — streamed as CONTROL {s,t,j,f} to the display; a light
+// position HUD comes back over PLAYER_STATE. (Ramps auto-launch; no jump input.)
 import { ControllerNet } from './Net.js';
 import { TiltInput } from './TiltInput.js';
 import { SwipeInput } from './SwipeInput.js';
@@ -65,16 +66,17 @@ const net = new ControllerNet({
 const latencyEl = el('latency');
 function updateLatency(halfMs, viaFastlane) { applyLatencyChip(latencyEl, halfMs, viaFastlane); }
 
-// --- input: carve (gyro) + tuck/jump (swipe), merged into one CONTROL payload ---
+// --- input: carve (gyro) + brake/jump/flip (swipe), merged into one CONTROL payload ---
 // The whole #game surface is the eyes-free swipe target (TiltInput sets
 // touch-action:none on it). Carve owns the 25 Hz tick; each tick it folds in the
-// latest swipe state and sends {s,t,j} — all three fields every tick, all
-// latest-wins safe (s/t continuous + idempotent, j a wrapping one-shot counter).
+// latest swipe state and sends {s,t,j,f} — every field every tick, all latest-wins
+// safe (s/t continuous + idempotent, j/f wrapping one-shot edges).
 const swipe = new SwipeInput({
   surface: el('game'),
-  onBrakeStart: () => { buzz(15); el('play-glyph').classList.add('braking'); },
-  onBrakeEnd: () => { el('play-glyph').classList.remove('braking'); },
-  onFlick: (dir) => { buzz(15); flashFlick(dir); }
+  onContact: (x, y) => spawnRipple(x, y),
+  onBrakeStart: () => { buzz(15); el('play').classList.add('braking'); },
+  onBrakeEnd: () => { el('play').classList.remove('braking'); },
+  onFlick: () => { buzz(15); flashFlick(); }
 });
 const tilt = new TiltInput({
   surface: el('game'),
@@ -140,7 +142,6 @@ function handleMessage(data) {
       // Light HUD feed (~10Hz): {position, of, progress, airborne, finished}
       el('pos').textContent = data.finished ? `Done P${data.position}` : `P${data.position}`;
       el('pos').classList.toggle('leader', data.position === 1);
-      el('air').classList.toggle('hidden', !data.airborne);
       break;
     case MSG.STANDINGS: {
       // Live finish board. Refresh who's host (may have shifted if someone left)
@@ -253,6 +254,8 @@ function startDriving() {
   if (carveRaf) return; // already running (may have begun during the countdown)
   tilt.start();
   swipe.start();
+  // fresh run → clear any stale brake/flick state from a previous run
+  const play = el('play'); if (play) play.classList.remove('braking', 'flick');
   const fill = el('carve-fill');
   const tip = el('motion-tip');
   tip.classList.toggle('hidden', tilt.motionState === 'granted');
@@ -265,17 +268,30 @@ function startDriving() {
 function stopDriving() {
   tilt.stop();
   swipe.stop();
-  el('air').classList.add('hidden');
-  el('play-glyph').classList.remove('braking', 'jumped');
+  const p = el('play'); if (p) p.classList.remove('braking', 'flick');
   if (carveRaf) cancelAnimationFrame(carveRaf);
   carveRaf = null;
 }
 
-// brief pop on the play glyph each time a flick (jump / flip) fires. Eyes-free
+// brief pulse on the pad ring each time a flick (jump / flip) fires. Eyes-free
 // the buzz is the real confirmation; this is the eyes-on echo for a glance down.
-function flashFlick(dir) {
-  const g = el('play-glyph');
-  g.classList.remove('jumped'); void g.offsetWidth; g.classList.add('jumped');
+function flashFlick() {
+  const p = el('play');
+  if (!p) return;
+  p.classList.remove('flick'); void p.offsetWidth; p.classList.add('flick');
+}
+// A quick expanding disc at the contact point, so a glance reads "the whole pad
+// is live, not a button". The element removes itself when its animation ends.
+function spawnRipple(x, y) {
+  const play = el('play');
+  if (!play) return;
+  const r = play.getBoundingClientRect();
+  const dot = document.createElement('span');
+  dot.className = 'play__ripple';
+  dot.style.left = (x - r.left) + 'px';
+  dot.style.top = (y - r.top) + 'px';
+  play.appendChild(dot);
+  dot.addEventListener('animationend', () => dot.remove());
 }
 
 // --- name screen ---

@@ -229,7 +229,7 @@ scene.onFrame = (dt) => {
   const snap = session.getSnapshot();
   let packSpd = 0;
   for (const s of snap.skiers) {
-    if (s.pose) scene.setSkierPose(s.id, s.pose.pos, s.pose.forward, s.pose.up, s.carve, s.v, s.airborne, s.tuck, s.air, s.spin, s.crashed, s.trickAxis, s.trickPhase, s.trickSign);
+    if (s.pose) scene.setSkierPose(s.id, s.pose.pos, s.pose.forward, s.pose.up, s.carve, s.v, s.airborne, s.tuck, s.air, s.spin, s.crashed, s.trickActive, s.trickAngle, s.trickPhase, s.carveInput);
     packSpd = Math.max(packSpd, s.v);
     if (s.offPiste || (s.crashed && s.spin)) audio.scrape(0.8); // deep-snow hiss / wipeout
   }

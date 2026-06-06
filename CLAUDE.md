@@ -28,9 +28,10 @@ No browser/E2E suite. Preview the display without phones via `/?test=1&scenario=
   The renderer reads `pose = {pos, forward, up}` from the engine and never does physics.
 - **One input contract** `processInput(id, {s, t, j, f})` for humans AND CPU bots — latest-wins,
   stored not queued. `s` carve; `t` tuck 0|1 (DEFAULT 1 = tucked/fast, 0 = braking); `j` wrapping
-  up-flick edge (jump on snow / back flip in air); `f` `{n,d}` wrapping air-flick edge for the
-  non-up flips (`d` = front|left|right, air-only). The display resolves jump-vs-flip from its
-  authoritative air state.
+  up-flick edge — does nothing on the snow ("flick up to jump" removed; ramps auto-launch), in the
+  AIR a back-flip fallback for non-analog inputs; `f` `{n,a,m}` wrapping ANALOG air-trick flick
+  (`a` = angle rad, up=+π/2: up→back, down→front, sides→spin, diagonals→cork; `m` = strength 0..1 →
+  spin rate; air-only). Air tricks resolve from the display's authoritative air state.
 - Browser code is ES modules; the engine imports only `../AiDriver.js`. Three.js is vendored
   under `vendor/three/` and served via `/vendor/`, imported through an inline importmap (the
   one script needing a CSP nonce).

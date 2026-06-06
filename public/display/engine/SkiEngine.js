@@ -68,22 +68,21 @@ const SPIN_TURNS = 2;       // cosmetic whole turns over CRASH_TIME (multiple of
 
 // ---- Jump / air ---------------------------------------------------------
 const GRAV_AIR = 22.0;      // u/s² pulling you back to the snow while airborne (lower = more hang time for tricks)
-const POP_BASE = 4.0;       // u/s upward from a swipe-up / tuck-release hop on open snow (clears a tree)
-const RAMP_POP = 7.5;       // u/s up from hitting a ramp at full speed (auto-launch, ∝ speed → ~0.9u apex)
-const RAMP_JUMP_BONUS = 4.5; // extra pop for firing a jump AT the ramp lip — the timing reward
-const RAMP_LIP_REACH = 1.2; // small anticipation reach BEFORE a ramp's leading edge still counts as a lip pop (units)
+const RAMP_POP = 7.5;       // u/s up from hitting a ramp (auto-launch, ∝ speed → ~0.9u apex). NB: "flick up to jump" on the snow was removed — ramps launch you automatically.
 const LAND_CLEAN_ACROSS = 0.42; // |across| under this on touchdown = clean landing (keep speed + boost)
 const LAND_BOOST = 1.18;    // clean big-air landing multiplies speed briefly
 const LAND_BOOST_MIN_AIR = 1.2; // …only if the jump cleared at least this height
 const LAND_SLOPPY_SCRUB = 0.62; // sloppy landing (turned sideways) scrubs speed to 62%
 const LAND_WIPE_ACROSS = 0.85;  // landing this sideways = wipeout
 
-// ---- Air tricks (flips) -------------------------------------------------
-// While airborne a directional flick spins a flip (front / back / side). The
-// rotation MUST complete before touchdown — land mid-flip and you wash out (it
-// reuses the wipeout spin-out). A clean landing after ≥1 flip banks a small
-// speed boost; only ONE flip runs at a time. STARTING VALUES — tune by feel in
-// the `tricks` test scenario (see TestHarness / README).
+// ---- Air tricks (analog flips) ------------------------------------------
+// While airborne a flick spins a flip about an ANALOG axis built from the flick
+// angle: pitch (up/down) = front/back flip, yaw (left/right) = spin, a diagonal
+// blend = a cork. The flick STRENGTH scales the spin rate. The rotation MUST
+// complete before touchdown — land mid-flip and you wash out (it reuses the
+// wipeout spin-out). A clean landing after ≥1 flip banks a small speed boost;
+// only ONE flip runs at a time. STARTING VALUES — tune by feel in the `tricks`
+// test scenario (see TestHarness / README).
 const TRICK_DURATION = 0.30;   // s for one full rotation — short enough to chain (airtime/0.30 = max flips, so speed + slope + a timed pop = more flips). Test: a rollover lands a double, a timed lip pop a triple.
 const TRICK_MIN_AIR = 0.55;    // height (u) a flip arms at — keeps tiny hops (apex <0.55) from auto-crashing. Test: a plain roll-over hop must NOT arm a trick.
 const TRICK_BOOST = 1.08;      // per-flip landing speed-ceiling boost (compounds, combo-capped). Test: gains from flips must stay well under a missed flip's CRASH_TIME cost.
@@ -164,14 +163,14 @@ export class SkiEngine {
         vAir: 0,         // vertical velocity while airborne
         airPeak: 0,      // max height reached this jump (for clean-landing boost)
         landScrubT: 0,   // brief speed-scrub timer after a sloppy landing
-        // air tricks (flips): one rotation at a time, must finish before landing
-        trickAxis: 0,    // 0 none | 'front' | 'back' | 'side' (the rotation in progress)
-        trickSign: 1,    // side-flip roll direction (left -1 / right +1)
+        // air tricks (analog flips): one rotation at a time, must finish before landing
+        trickActive: false, // is a rotation in progress
+        trickAngle: 0,   // flick angle (rad, up=+π/2): pitch = flip, yaw = spin, blend = cork
         trickPhase: 0,   // 0..1 progress of the current rotation
-        trickRate: 0,    // 1/duration — trickPhase advances by trickRate*dt
+        trickRate: 0,    // 1/duration (scaled by flick strength) — trickPhase advances by trickRate*dt
         trickCount: 0,   // flips completed THIS air (combo → compounding boost, capped)
         trickSeq: 0,     // last-seen f.n — also starts at the idle value (0), same reason as jumpSeq
-        wantTrick: null, // a fresh air-trick command this frame ('front'|'left'|'right')
+        wantTrick: null, // a fresh analog air-trick command this frame ({ a, m })
         spin: 0,         // cosmetic wipeout angle (rad)
         spinT: 0,        // seconds of lost control left (0 = in control)
         spinDur: CRASH_TIME, // total duration of the current spin (so it lands on a whole turn)
@@ -208,11 +207,15 @@ export class SkiEngine {
     // just re-delivers the same value). Fire once per fresh value. Grounded it
     // pops a jump; airborne it spins a BACK flip (resolved in update()).
     if (Number.isFinite(msg.j) && msg.j !== c.jumpSeq) { c.jumpSeq = msg.j; c.wantJump = true; }
-    // Trick flick: a wrapping {n,d} edge (same latest-wins dedup), AIR-ONLY, for
-    // the non-up directions — d = 'front' | 'left' | 'right'. Up-flicks ride j.
+    // Trick flick: a wrapping {n,a,m} edge (same latest-wins dedup), AIR-ONLY and
+    // ANALOG — a = flick angle (rad, up=+π/2): up→back, down→front, sides→spin,
+    // diagonals→cork; m = flick strength 0..1 → spin rate. (An up-flick also bumps
+    // j, so a JUMP on the snow stays angle-independent; the air reads f's angle.)
     if (msg.f && Number.isFinite(msg.f.n) && msg.f.n !== c.trickSeq) {
       c.trickSeq = msg.f.n;
-      if (msg.f.d === 'front' || msg.f.d === 'left' || msg.f.d === 'right') c.wantTrick = msg.f.d;
+      if (Number.isFinite(msg.f.a)) {
+        c.wantTrick = { a: msg.f.a, m: Number.isFinite(msg.f.m) ? clamp(msg.f.m, 0, 1) : 0.5 };
+      }
     }
   }
 
@@ -259,36 +262,25 @@ export class SkiEngine {
         }
       }
 
-      // --- JUMP / AIR / TRICKS ---------------------------------------------
-      // TUCK is purely a speed mode. Air comes from ramps, plus a small hop to
-      // clear an obstacle; popping a jump AT a ramp lip is the timing reward.
-      // The SAME up-flick that jumps on the snow spins a BACK flip in the air, so
-      // resolve a jump edge that arrives mid-air into a trick command instead.
-      let trickCmd = null;
+      // --- AIR / TRICKS ----------------------------------------------------
+      // TUCK is purely a speed mode. Air comes from RAMPS (auto-launch, ∝ speed):
+      // "flick up to jump" on the snow was removed. An up-flick in the AIR still
+      // back-flips, so resolve an up-flick edge that arrives mid-air into a trick.
+      let trickCmd = null; // { a, m } | null
       if (!spinning && !c.finished && c.airborne) {
-        if (c.wantJump) trickCmd = 'back';
-        else if (c.wantTrick) trickCmd = c.wantTrick;
+        if (c.wantTrick) trickCmd = c.wantTrick;
+        // A bare up-flick (j only, no analog f — keyboard/bot/legacy) = a back flip.
+        else if (c.wantJump) trickCmd = { a: Math.PI / 2, m: 0.6 };
       }
       c.wantTrick = null; // air-only intent; never lingers onto the snow
 
       let launch = 0;
-      let popped = false; // player fired a jump this frame → suppress the ramp auto-launch
-      if (c.wantJump) {
-        c.wantJump = false;
-        if (!c.airborne && !spinning && !c.finished) {
-          popped = true;
-          if (this._nearRamp(c)) {
-            launch += RAMP_POP * (0.45 + 0.55 * (c.v / c.vmax)) + RAMP_JUMP_BONUS;
-          } else {
-            launch += POP_BASE; // a small hop on open snow (enough to clear a tree)
-          }
-        }
-      }
-      // A ramp lip auto-launches anyone who DIDN'T pop it themselves — you always
-      // catch some air off a kicker (∝ speed), you just miss the timing bonus. The
-      // `popped` guard keeps the two sources mutually exclusive (no double launch:
-      // a self-pop already went airborne below, so it can't also auto-launch).
-      if (!popped && !c.finished && !c.airborne && !spinning && this._enterRamp(c)) {
+      // Up-flicks no longer pop a jump on the snow (feature removed); just clear the
+      // edge so it can't linger (the in-air back-flip is resolved above).
+      c.wantJump = false;
+      // Ramps auto-launch anyone crossing them on the snow — you always catch air
+      // off a kicker (∝ speed), no input needed.
+      if (!c.finished && !c.airborne && !spinning && this._enterRamp(c)) {
         launch += RAMP_POP * (0.45 + 0.55 * (c.v / c.vmax));
       }
       if (launch > 0) {
@@ -296,7 +288,7 @@ export class SkiEngine {
         c.vAir = launch;
         c.air = 0.0001;
         c.airPeak = 0;
-        c.trickAxis = 0; c.trickPhase = 0; c.trickCount = 0; // fresh air → fresh combo
+        c.trickActive = false; c.trickAngle = 0; c.trickPhase = 0; c.trickCount = 0; // fresh air → fresh combo
         this.onEvent({ type: 'jump', id: c.id, power: launch });
       }
       // Integrate the ballistic arc + run any flip in progress.
@@ -306,19 +298,21 @@ export class SkiEngine {
         if (c.air > c.airPeak) c.airPeak = c.air;
 
         // Start a flip: commanded, high enough to arm, and none already spinning.
-        if (trickCmd && !c.trickAxis && c.air >= TRICK_MIN_AIR) {
-          c.trickAxis = trickCmd === 'front' ? 'front' : trickCmd === 'back' ? 'back' : 'side';
-          c.trickSign = trickCmd === 'left' ? -1 : 1; // side roll direction
+        // The flick STRENGTH scales the spin rate (a harder throw spins faster, so
+        // more rotation fits the same airtime — but is tighter to land clean).
+        if (trickCmd && !c.trickActive && c.air >= TRICK_MIN_AIR) {
+          c.trickActive = true;
+          c.trickAngle = trickCmd.a;
           c.trickPhase = 0;
-          c.trickRate = 1 / TRICK_DURATION;
-          this.onEvent({ type: 'trick_start', id: c.id, axis: c.trickAxis });
+          c.trickRate = (1 / TRICK_DURATION) * (0.8 + 0.4 * clamp(trickCmd.m, 0, 1));
+          this.onEvent({ type: 'trick_start', id: c.id, angle: c.trickAngle });
         }
         // Advance the rotation; a completed flip banks toward the combo and frees
         // the next flick (chainable in big air).
-        if (c.trickAxis) {
+        if (c.trickActive) {
           c.trickPhase += c.trickRate * dt;
           if (c.trickPhase >= 1) {
-            c.trickPhase = 0; c.trickAxis = 0;
+            c.trickPhase = 0; c.trickActive = false;
             c.trickCount = Math.min(TRICK_MAX_COMBO, c.trickCount + 1);
             this.onEvent({ type: 'trick_done', id: c.id, count: c.trickCount });
           }
@@ -329,8 +323,8 @@ export class SkiEngine {
           // sideways the skis point, and reward a clean landing after a flip.
           c.air = 0; c.airborne = false; c.vAir = 0;
           const across = Math.abs(Math.sin(c.heading));
-          if (c.trickAxis) {
-            c.trickAxis = 0; c.trickPhase = 0; c.trickCount = 0;
+          if (c.trickActive) {
+            c.trickActive = false; c.trickPhase = 0; c.trickCount = 0;
             c.spinT = c.spinDur = CRASH_TIME / c.control; c.spin = 0; spinning = true; c.tuck = 0;
             this.onEvent({ type: 'crash', id: c.id, trick: true });
           } else if (across > LAND_WIPE_ACROSS) {
@@ -429,7 +423,7 @@ export class SkiEngine {
         // settle out of any jump/flip so the post-finish coast can't crash-land or
         // emit spurious land/crash events for a skier whose run is decided.
         c.airborne = false; c.air = 0; c.vAir = 0;
-        c.trickAxis = 0; c.trickPhase = 0; c.trickCount = 0;
+        c.trickActive = false; c.trickAngle = 0; c.trickPhase = 0; c.trickCount = 0;
         this.finishedOrder.push(c.id);
         this.onEvent({ type: 'finish', id: c.id, rank: this.finishedOrder.length, time: c.finishTime });
         if (this.finishedOrder.length >= this.skiers.size) this.onEvent({ type: 'race_over' });
@@ -452,20 +446,6 @@ export class SkiEngine {
       else c.rampIn.delete(i);
     }
     return entered;
-  }
-
-  // Is the skier ON or just SHORT OF a ramp lip — close enough that a jump input
-  // counts as a "pop at the lip"? A LEVEL check (not _enterRamp's rising edge)
-  // with a little forward reach, so an anticipatory release still earns the bonus.
-  _nearRamp(c) {
-    for (let i = 0; i < this.ramps.length; i++) {
-      const r = this.ramps[i];
-      const ds = r.s - c.totalS;                 // >0 = ramp still ahead
-      const dl = c.lat - r.lat;
-      // on/just-short-of the lip (small forward reach), within the kicker's footprint
-      if (ds >= -r.radius && ds <= r.radius + RAMP_LIP_REACH && Math.abs(dl) <= r.radius) return true;
-    }
-    return false;
   }
 
   // Rising-edge overlap of a tree/rock (footprint = skier radius + obstacle radius).
@@ -516,7 +496,7 @@ export class SkiEngine {
         tuck: c.tuck,
         airborne: c.airborne, air: c.air,
         // current flip (for the renderer's somersault + the HUD tag)
-        trickAxis: c.trickAxis || 0, trickPhase: c.trickPhase, trickSign: c.trickSign,
+        trickActive: c.trickActive, trickAngle: c.trickAngle, trickPhase: c.trickPhase,
         spin: c.spin, crashed: c.spinT > 0, offPiste: !!c.offPiste,
         boostActive: c.boostT > 0
       });

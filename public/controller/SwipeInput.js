@@ -7,16 +7,20 @@
 //   press DOWN and HOLD            →  BRAKE (sit up, scrub speed, sharp carve).
 //     t drops to 0 while held; releasing returns to the default tuck (t=1).
 //   quick FLICK UP                 →  JUMP (a wrapping counter j; bigger at a
-//     ramp lip). The display turns the SAME up-flick into a BACK flip when the
-//     skier is already airborne — it owns the jump-vs-trick decision (it has the
+//     ramp lip). The display turns the SAME up-flick into a flip when the skier
+//     is already airborne — it owns the jump-vs-trick decision (it has the
 //     authoritative air state), so this module just reports the gesture.
-//   quick FLICK in the air         →  a FLIP. up = back, down = front, left/right
-//     = side. The non-up directions ride a separate wrapping {n,d} edge `f`
-//     (air-only; the display ignores them on the snow). j carries the up-flick.
+//   quick FLICK in the air         →  a FLIP, fully ANALOG: the swipe ANGLE picks
+//     the trick — up = back, down = front, left/right = spin, diagonals = corks —
+//     and how hard you throw sets the spin rate. Every flick rides the {n,a,m}
+//     edge `f` (a = angle, m = strength). An upward flick ALSO bumps j, so a
+//     JUMP on the snow stays angle-independent (a sloppy up-flick still launches),
+//     while the air reads f's exact angle.
 //
-// A flick is a FAST directional swipe (released within FLICK_MAX_MS); a brake is
-// a SUSTAINED downward hold. A quick down-flick therefore reads as a flip, while
-// a slow downward press reads as a brake — same direction, told apart by speed.
+// A flick is a FAST swipe (released within FLICK_MAX_MS); a brake is a SUSTAINED
+// downward hold. A quick down-flick therefore reads as a front flip (in the air),
+// while a slow downward press reads as a brake — same direction, told apart by
+// speed.
 //
 // Both j and f are latest-wins-safe wrapping edges: the display fires one action
 // per CHANGE, so a dropped fastlane frame just re-delivers the same value.
@@ -28,25 +32,35 @@
 // surface has touch-action:none (set by TiltInput on the shared #game element),
 // so a swipe never scrolls/zooms the page under the thumb.
 //
-// Contract: get state() → { t: 0|1, j: 0..255, f: {n:0..255, d} } for the CONTROL
-// tick, plus onBrakeStart / onBrakeEnd / onFlick(dir) callbacks for the HUD +
-// haptics (every recognized input gets a short confirming buzz in main.js).
+// Contract: get state() → { t: 0|1, j: 0..255, f: {n:0..255, a, m} } for the
+// CONTROL tick, plus onContact(x,y) / onBrakeStart / onBrakeEnd / onFlick(a,m)
+// callbacks for the HUD + haptics (every recognized input gets a confirming buzz
+// in main.js).
 
 const BRAKE_THRESHOLD_PX = 40;  // downward travel before a hold counts as a brake
 const FLICK_THRESHOLD_PX = 46;  // travel a quick swipe needs to count as a flick
 const FLICK_MAX_MS = 300;       // a flick must complete within this (else it's a hold/tap)
+const FLICK_MAG_SPAN = 140;     // travel (px) PAST the threshold that maps to full strength (m=1)
+const UP_CONE = Math.PI / 3;    // a flick within ±60° of straight up also pops a JUMP on the snow
+
+const clamp = (x, lo, hi) => (x < lo ? lo : x > hi ? hi : x);
+// Is this flick angle "upward" enough to also count as a jump pop? (up = +π/2,
+// so within ±UP_CONE of up ⇔ sin(a) ≥ cos(UP_CONE).)
+function isUpFlick(a) { return Math.sin(a) >= Math.cos(UP_CONE); }
 
 export class SwipeInput {
-  constructor({ surface, onBrakeStart, onBrakeEnd, onFlick } = {}) {
+  constructor({ surface, onContact, onBrakeStart, onBrakeEnd, onFlick } = {}) {
     this.surface = surface || (typeof document !== 'undefined' ? document.body : null);
+    this.onContact = onContact || (() => {});        // (x, y) => … any pointer touches the pad
     this.onBrakeStart = onBrakeStart || (() => {});  // () => …  brake engaged (t→0)
     this.onBrakeEnd = onBrakeEnd || (() => {});      // () => …  brake released (t→1)
-    this.onFlick = onFlick || (() => {});            // (dir) => … 'up'|'down'|'left'|'right'
+    this.onFlick = onFlick || (() => {});            // (a, m) => … angle (rad) + strength (0..1)
 
     this._braking = false;
-    this._jumpSeq = 0;         // wrapping up-flick edge (jump / back flip)
-    this._flickSeq = 0;        // wrapping non-up flick edge (front / side flips)
-    this._flickDir = null;     // last non-up flick direction ('front'|'left'|'right')
+    this._jumpSeq = 0;         // wrapping JUMP edge (bumped by any upward flick)
+    this._flickSeq = 0;        // wrapping analog trick edge
+    this._flickAngle = 0;      // last flick angle (rad, up = +π/2)
+    this._flickMag = 0;        // last flick strength (0..1)
 
     this._pointerId = null;
     this._startX = 0;
@@ -56,7 +70,7 @@ export class SwipeInput {
     // keyboard fallback flags
     this._keyBrake = false;
     this._keyUp = false;
-    this._keyFront = false;
+    this._keyDown = false;
     this._keyLeft = false;
     this._keyRight = false;
 
@@ -92,6 +106,7 @@ export class SwipeInput {
     this._startX = e.clientX;
     this._startY = e.clientY;
     this._startT = performance.now();
+    this.onContact(e.clientX, e.clientY);        // ripple / "the whole pad is live"
     e.preventDefault();                          // stop iOS pull-to-refresh / scroll
   }
   _move(e) {
@@ -107,31 +122,31 @@ export class SwipeInput {
     const dx = e.clientX - this._startX;
     const dy = e.clientY - this._startY;
     const dt = performance.now() - this._startT;
-    // A fast directional swipe is a FLICK (jump / flip). It overrides any brake
-    // that briefly engaged on the way (a few ms of t=0 is harmless on the snow,
-    // and t is ignored in the air where flips happen).
-    if (dt < FLICK_MAX_MS && (dx * dx + dy * dy) > FLICK_THRESHOLD_PX * FLICK_THRESHOLD_PX) {
+    const dist = Math.hypot(dx, dy);
+    // A fast swipe is a FLICK (jump / flip). It overrides any brake that briefly
+    // engaged on the way (a few ms of t=0 is harmless on the snow, and t is
+    // ignored in the air where flips happen).
+    if (dt < FLICK_MAX_MS && dist > FLICK_THRESHOLD_PX) {
       this._endBrake();
-      let dir;
-      if (Math.abs(dy) >= Math.abs(dx)) dir = dy < 0 ? 'up' : 'down';
-      else dir = dx < 0 ? 'left' : 'right';
-      this._fireFlick(dir);
+      // angle: math convention, up = +π/2 (screen y is down-positive → negate dy).
+      const a = Math.atan2(-dy, dx);
+      // strength: how far past the flick threshold the swipe travelled, normalized.
+      const m = clamp((dist - FLICK_THRESHOLD_PX) / FLICK_MAG_SPAN, 0, 1);
+      this._fireFlick(a, m);
     } else {
       // a hold or a tap — release any brake, fire nothing
       this._endBrake();
     }
   }
 
-  // Route a flick: up rides the jump counter j (jump on snow / back flip in air);
-  // the rest ride the air-only trick edge f.
-  _fireFlick(dir) {
-    if (dir === 'up') {
-      this._jumpSeq = (this._jumpSeq + 1) & 255;
-    } else {
-      this._flickDir = dir === 'down' ? 'front' : dir; // 'front' | 'left' | 'right'
-      this._flickSeq = (this._flickSeq + 1) & 255;
-    }
-    this.onFlick(dir);
+  // Route a flick: every flick rides the analog trick edge f; an upward flick
+  // ALSO bumps the jump edge j (so a JUMP on the snow stays angle-independent).
+  _fireFlick(a, m = 0.6) {
+    this._flickAngle = a;
+    this._flickMag = m;
+    this._flickSeq = (this._flickSeq + 1) & 255;
+    if (isUpFlick(a)) this._jumpSeq = (this._jumpSeq + 1) & 255;
+    this.onFlick(a, m);
   }
 
   _endBrake() {
@@ -142,20 +157,21 @@ export class SwipeInput {
 
   // latest-state-wins fields the CONTROL tick reads each frame.
   //   t : tuck 0|1 (1 = default tuck/fast, 0 = braking)
-  //   j : wrapping up-flick edge (jump / back flip)
-  //   f : wrapping air-trick edge { n, d } for the non-up flicks (front / side)
+  //   j : wrapping JUMP edge (bumped by any upward flick)
+  //   f : wrapping ANALOG trick flick { n, a, m } — a = angle (rad), m = strength
   get state() {
     return {
       t: this._braking ? 0 : 1,
       j: this._jumpSeq,
-      f: { n: this._flickSeq, d: this._flickDir },
+      f: { n: this._flickSeq, a: this._flickAngle, m: this._flickMag },
     };
   }
 
   // --- keyboard fallback / testing (works over plain HTTP — no touchscreen) ---
   // Hold S = brake. Space / ArrowUp = jump (or back flip in the air). ArrowDown =
-  // front flip, Q = side-left, E = side-right. (ArrowLeft/Right + A/D are carve,
-  // owned by TiltInput, so they're left alone here.)
+  // front flip, Q = spin-left, E = spin-right. (ArrowLeft/Right + A/D are carve,
+  // owned by TiltInput, so they're left alone here.) Each trick key maps to the
+  // same gesture angle a real flick would produce.
   _bindKeys() {
     if (typeof window === 'undefined') return;
     window.addEventListener('keydown', (e) => {
@@ -164,16 +180,16 @@ export class SwipeInput {
         if (!this._keyBrake) { this._keyBrake = true; this._braking = true; this.onBrakeStart(); }
         e.preventDefault();
       } else if (k === 'arrowup' || k === ' ') {
-        if (!this._keyUp) { this._keyUp = true; this._fireFlick('up'); }
+        if (!this._keyUp) { this._keyUp = true; this._fireFlick(Math.PI / 2); }   // jump / back flip
         e.preventDefault();
       } else if (k === 'arrowdown') {
-        if (!this._keyFront) { this._keyFront = true; this._fireFlick('down'); }
+        if (!this._keyDown) { this._keyDown = true; this._fireFlick(-Math.PI / 2); } // front flip
         e.preventDefault();
       } else if (k === 'q') {
-        if (!this._keyLeft) { this._keyLeft = true; this._fireFlick('left'); }
+        if (!this._keyLeft) { this._keyLeft = true; this._fireFlick(Math.PI); }   // spin left
         e.preventDefault();
       } else if (k === 'e') {
-        if (!this._keyRight) { this._keyRight = true; this._fireFlick('right'); }
+        if (!this._keyRight) { this._keyRight = true; this._fireFlick(0); }       // spin right
         e.preventDefault();
       }
     });
@@ -181,7 +197,7 @@ export class SwipeInput {
       const k = e.key.toLowerCase();
       if (k === 's') { this._keyBrake = false; this._endBrake(); e.preventDefault(); }
       else if (k === 'arrowup' || k === ' ') { this._keyUp = false; e.preventDefault(); }
-      else if (k === 'arrowdown') { this._keyFront = false; e.preventDefault(); }
+      else if (k === 'arrowdown') { this._keyDown = false; e.preventDefault(); }
       else if (k === 'q') { this._keyLeft = false; e.preventDefault(); }
       else if (k === 'e') { this._keyRight = false; e.preventDefault(); }
     });

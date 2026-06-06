@@ -45,11 +45,12 @@ npm start            # http://localhost:4000  (PORT env overrides)
 1. Open the display URL on a big screen.
 2. Players scan the QR code with their phones to join.
 3. The first player to join is the host and starts the run from their phone.
-4. Tilt to carve, hold to brake, flick up to jump, flick in the air to flip. First to the bottom wins.
+4. Tilt to carve, push down to brake, and in the air flick **any direction** to pull a trick (the
+   angle picks it — up/down flip, sides spin, diagonals cork; ramps launch you). First to the bottom wins.
 
 > Phones need **HTTPS** for the tilt sensors — front the server with a tunnel or TLS cert when
 > testing on real devices. The display works over plain HTTP, and desktop keyboard fallback
-> (A/D carve · hold S brake · ↑/Space jump · ↓ front flip · Q/E side flip) lets you test
+> (A/D carve · hold S brake · ↑/Space back flip · ↓ front · Q/E spin · Z/C corks) lets you test
 > without a phone.
 
 ### No-phone preview
@@ -61,7 +62,7 @@ The display page drives itself from fake data with `?test=1&scenario=…` (no re
 - `/?test=1&scenario=lobby` — orbiting slope preview + fake roster
 - `/?test=1&scenario=slope` — clean orbiting slope preview, CPU field (no overlays)
 - `/?test=1&scenario=tricks` — **drive skier 0 from the keyboard** beside the ramps to feel the
-  brake/jump/flip loop (A/D carve · hold S brake · ↑/Space jump · ↓ front · Q/E side flip)
+  brake/flip loop (A/D carve · hold S brake · ↑/Space back flip · ↓ front · Q/E spin · Z/C corks)
 - `/?test=1&scenario=countdown` · `…&scenario=paused`
 
 The phone controller previews a single screen the same way, off the relay:

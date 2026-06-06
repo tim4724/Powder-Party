@@ -55,10 +55,9 @@ export function runControllerScenario(opts) {
   const setLatency = (halfMs, fastlane) => applyLatencyChip(el('latency'), halfMs, fastlane);
 
   const setCarve = (v) => { const f = el('carve-fill'); if (f) f.style.transform = `translateX(${v * 50}%)`; };
-  function setHud(pos, finished, airborne) {
+  function setHud(pos, finished) {
     el('pos').textContent = finished ? `Done P${pos}` : `P${pos}`;
     el('pos').classList.toggle('leader', pos === 1);
-    el('air').classList.toggle('hidden', !airborne);
   }
   function showDriveHud() {
     show('game');
@@ -106,33 +105,25 @@ export function runControllerScenario(opts) {
       // (the 3..2..1..GO lives on the display). Same as 'playing' but pre-fastlane.
       showDriveHud();
       setCarve(0);
-      setHud(1, false, false);
+      setHud(1, false);
       setLatency(24, false);   // pre-fastlane: WS reading, no bolt
       break;
 
     case 'playing':
       showDriveHud();
       setCarve(0.4);  // mid-right lean, so the carve bar reads off-centre
-      setHud(2, false, false);
+      setHud(2, false);
       setLatency(16, true);    // fastlane up: low RTT + bolt
       break;
 
-    case 'tuck':
-      // Mid-tuck: the play glyph is in its "ready to pop" (up-chevron) state.
-      // Eyeball the new eyes-free surface.
+    case 'brake':
+      // Braking: push down + hold. The pad warms toward the livery and the brake
+      // label lights up. Eyeball the eyes-free touch-pad surface.
       showDriveHud();
       setCarve(-0.2);
-      el('play-glyph').classList.add('tucking');
-      setHud(2, false, false);
+      el('play').classList.add('braking');
+      setHud(2, false);
       setLatency(15, true);
-      break;
-
-    case 'air':
-      // Airborne after a ramp pop — the AIR badge pulses.
-      showDriveHud();
-      setCarve(0.1);
-      setHud(1, false, true);
-      setLatency(17, true);
       break;
 
     case 'finished':
@@ -150,7 +141,7 @@ export function runControllerScenario(opts) {
     case 'paused':
       showDriveHud();
       setCarve(0.2);
-      setHud(2, false, false);
+      setHud(2, false);
       setLatency(18, true);
       el('pause-btn').classList.remove('hidden');
       el('pause-btn').disabled = true;     // overlay covers it while paused

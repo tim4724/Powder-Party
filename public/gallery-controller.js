@@ -14,8 +14,7 @@ var CONTROLLER_CARDS = [
   { key: 'lobby-waiting',   title: 'Lobby (waiting)', perColor: true },
   { key: 'countdown',       title: 'Ready (countdown)', perColor: true },
   { key: 'playing',         title: 'Driving',         perColor: true },
-  { key: 'tuck',            title: 'Tuck (speed)',    perColor: true },
-  { key: 'air',             title: 'Airborne',        perColor: true },
+  { key: 'brake',           title: 'Brake (slow)',    perColor: true },
   { key: 'paused',          title: 'Paused',          perColor: true },
   { key: 'finished',        title: 'Finished',        perColor: true },
   { key: 'results',         title: 'Results',         perColor: true }

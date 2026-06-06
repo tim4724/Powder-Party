@@ -131,70 +131,17 @@ test('hitting a tree wipes you out (spin + speed loss)', async () => {
   assert.ok(crashedSeen, 'skier should wipe out crossing the tree');
 });
 
-test('a jump input hops the skier off the open snow, then lands', async () => {
-  const e = await makeEngine([1], track({ length: 300 }), {}); // no ramps → a plain hop
+test('flick-up no longer jumps on open snow (feature removed)', async () => {
+  const e = await makeEngine([1], track({ length: 300 }), {}); // no ramps to launch off
   run(e, 1.0, () => e.processInput(1, { s: 0, t: 0, j: 0 }));   // get moving
-  assert.ok(!e.getSnapshot().skiers[0].airborne, 'on the snow before the hop');
-  // a jump input (release / swipe-up) on open snow pops a small hop
+  assert.ok(!e.getSnapshot().skiers[0].airborne, 'on the snow');
+  // an up-flick on open snow does NOTHING now — jump-on-snow was removed (ramps auto-launch)
   e.processInput(1, { s: 0, t: 0, j: 1 });
   e.update(1000 / 60);
-  assert.ok(e.getSnapshot().skiers[0].airborne, 'a jump input launches a hop');
-  // fly and land
-  let wasAir = false;
-  run(e, 2.5, () => { if (e.getSnapshot().skiers[0].airborne) wasAir = true; });
-  assert.ok(wasAir, 'skier was airborne');
-  assert.ok(!e.getSnapshot().skiers[0].airborne, 'skier lands again');
-});
-
-test('popping a jump at the ramp lip out-launches just rolling over it', async () => {
-  const ramp = [{ s: 50, lat: 0, radius: 1.6 }];
-  // Roller: never jumps — only the ramp's speed-scaled auto-launch.
-  const roll = await makeEngine([1], track({ length: 200, ramps: ramp }), {});
-  let rollAir = 0;
-  run(roll, 8, () => { rollAir = Math.max(rollAir, roll.getSnapshot().skiers[0].air); });
-  // Popper: fires a SINGLE jump as it nears the lip (within RAMP_LIP_REACH 1.2).
-  const pop = await makeEngine([1], track({ length: 200, ramps: ramp }), {});
-  let popAir = 0, fired = false;
-  run(pop, 8, () => {
-    const s = pop.getSnapshot().skiers[0];
-    const totalS = s.progress * 200;
-    if (!fired && !s.airborne && totalS > 48.4) { pop.processInput(1, { s: 0, t: 0, j: 1 }); fired = true; }
-    popAir = Math.max(popAir, pop.getSnapshot().skiers[0].air);
-  });
-  assert.ok(rollAir > 0, 'rolling over a ramp still catches some air');
-  assert.ok(popAir > rollAir + 0.2, `a timed lip pop (${popAir.toFixed(2)}) clears more air than a roll-over (${rollAir.toFixed(2)})`);
-});
-
-test('a jump at the exact ramp-entry frame launches once, not twice', async () => {
-  // Regression: the self-pop and the ramp auto-launch must be mutually exclusive.
-  const r = { s: 50, lat: 0, radius: 1.6 };
-  const events = [];
-  const e = await makeEngine([1], track({ length: 200, ramps: [r] }), { onEvent: (ev) => events.push(ev) });
-  run(e, 2.0, () => {}); // build speed on the snow (no input → no stray jump)
-  // Park the skier on the ramp's leading edge (inside the footprint, on the snow)
-  // so the auto-launch rising edge AND the jump input coincide on this frame.
-  const sk = [...e.skiers.values()][0];
-  sk.totalS = r.s - r.radius + 0.05; sk.lat = 0; sk.airborne = false; sk.rampIn.clear();
-  e.processInput(1, { s: 0, t: 0, j: 1 });
-  e.update(1000 / 60);
-  const jumps = events.filter((ev) => ev.type === 'jump');
-  assert.equal(jumps.length, 1, 'exactly one launch event');
-  // single lip pop ≤ RAMP_POP(7.5)+RAMP_JUMP_BONUS(4.5)=12; a double-count would be ~18.
-  assert.ok(jumps[0].power <= 12.01, `must not double-count the ramp launch (saw ${jumps[0].power.toFixed(2)})`);
-});
-
-test('a jump fired off to the SIDE of a ramp is a plain hop, not a ramp pop', async () => {
-  const r = { s: 50, lat: 0, radius: 1.6 };
-  const events = [];
-  const e = await makeEngine([1], track({ length: 200, width: 20, ramps: [r] }), { onEvent: (ev) => events.push(ev) });
-  run(e, 2.0, () => {}); // no input → no stray jump
-  const sk = [...e.skiers.values()][0];
-  sk.totalS = r.s; sk.lat = r.radius + 2; sk.airborne = false; sk.rampIn.clear(); // beside the kicker
-  e.processInput(1, { s: 0, t: 0, j: 1 });
-  e.update(1000 / 60);
-  const jumps = events.filter((ev) => ev.type === 'jump');
-  assert.equal(jumps.length, 1, 'one launch');
-  assert.ok(jumps[0].power < 5.0, `off to the side is a plain hop, not a ramp pop (saw ${jumps[0].power.toFixed(2)})`);
+  assert.ok(!e.getSnapshot().skiers[0].airborne, 'an up-flick does not launch a hop');
+  let everAir = false;
+  run(e, 2.0, () => { if (e.getSnapshot().skiers[0].airborne) everAir = true; });
+  assert.ok(!everAir, 'with no ramp, the skier never leaves the snow');
 });
 
 test('a ramp auto-launches a skier crossing it on the snow', async () => {
@@ -215,9 +162,9 @@ test('an air flip lands clean and banks a trick boost', async () => {
   run(e, 1.4, () => {
     const s = e.getSnapshot().skiers[0];
     if (s.airborne && s.air > 0.6 && !flipSent) { e.processInput(1, { s: 0, t: 1, j: 1 }); flipSent = true; } // up-flick in the air → back flip
-    if (s.trickAxis === 'back') sawAxis = true;
+    if (s.trickActive && Math.abs(s.trickAngle - Math.PI / 2) < 0.01) sawAxis = true;
   });
-  assert.ok(sawAxis, 'an up-flick mid-air spins a back flip');
+  assert.ok(sawAxis, 'an up-flick mid-air spins a back flip (angle = +π/2)');
   assert.ok(events.some((ev) => ev.type === 'trick_done'), 'the flip completed before touchdown');
   const land = events.filter((ev) => ev.type === 'land').pop();
   assert.ok(land && land.tricks > 0, `a clean landing credits the flip (saw tricks=${land && land.tricks})`);
@@ -250,26 +197,65 @@ test('a tiny hop is too low to arm a flip (no accidental crash)', async () => {
   run(e, 1.0, () => {
     const s = e.getSnapshot().skiers[0];
     if (s.airborne) e.processInput(1, { s: 0, t: 1, j: n++ }); // spam up-flicks the whole hop
-    if (s.trickAxis) sawAxis = true;
+    if (s.trickActive) sawAxis = true;
   });
   assert.ok(!sawAxis, 'a sub-threshold hop never arms a flip');
   assert.ok(!events.some((ev) => ev.type === 'trick_start'), 'no flip started');
   assert.ok(!events.some((ev) => ev.type === 'crash'), 'so it cannot crash you');
 });
 
-test('a side-flick spins a side flip, not a jump', async () => {
-  const e = await makeEngine([1], track({ length: 300 }), {});
+test('a side-flick spins (yaw), not a flip or a jump', async () => {
+  const events = [];
+  const e = await makeEngine([1], track({ length: 300 }), { onEvent: (ev) => events.push(ev) });
   run(e, 1.0, () => e.processInput(1, { s: 0, t: 1, j: 0 }));
   const sk = [...e.skiers.values()][0];
   sk.airborne = true; sk.vAir = 12; sk.air = 0.01; sk.airPeak = 0; sk.trickCount = 0;
-  let sent = false, axis = 0, sign = 0;
+  let sent = false, sawSpin = false;
   run(e, 1.4, () => {
     const s = e.getSnapshot().skiers[0];
-    if (s.airborne && s.air > 0.6 && !sent) { e.processInput(1, { s: 0, t: 1, f: { n: 1, d: 'left' } }); sent = true; }
-    if (s.trickAxis === 'side') { axis = s.trickAxis; sign = s.trickSign; }
+    // a LEFT flick (angle π) in the air — analog f only, never bumps the jump edge
+    if (s.airborne && s.air > 0.6 && !sent) { e.processInput(1, { s: 0, t: 1, f: { n: 1, a: Math.PI } }); sent = true; }
+    // a pure spin: the trick axis is yaw → |cos(angle)| ≈ 1, |sin(angle)| ≈ 0
+    if (s.trickActive && Math.abs(Math.cos(s.trickAngle)) > 0.99) sawSpin = true;
   });
-  assert.equal(axis, 'side', 'a left-flick in the air spins a side flip');
-  assert.equal(sign, -1, 'left rolls the opposite way to right');
+  assert.ok(sawSpin, 'a left-flick mid-air spins a (yaw) trick');
+  assert.equal(events.filter((ev) => ev.type === 'jump').length, 0, 'a side-flick never pops a jump');
+});
+
+test('a diagonal flick corks (off-axis), not a pure flip or spin', async () => {
+  const events = [];
+  const e = await makeEngine([1], track({ length: 300 }), { onEvent: (ev) => events.push(ev) });
+  run(e, 1.0, () => e.processInput(1, { s: 0, t: 1, j: 0 }));
+  const sk = [...e.skiers.values()][0];
+  sk.airborne = true; sk.vAir = 12; sk.air = 0.01; sk.airPeak = 0; sk.trickCount = 0;
+  let sent = false, corkAngle = null;
+  run(e, 1.4, () => {
+    const s = e.getSnapshot().skiers[0];
+    if (s.airborne && s.air > 0.6 && !sent) { e.processInput(1, { s: 0, t: 1, f: { n: 1, a: Math.PI / 4, m: 0.8 } }); sent = true; }
+    if (s.trickActive && corkAngle == null) corkAngle = s.trickAngle;
+  });
+  assert.ok(corkAngle != null, 'a diagonal flick arms a trick');
+  // a true cork blends pitch + yaw → BOTH axis components are well off zero
+  assert.ok(Math.abs(Math.sin(corkAngle)) > 0.3 && Math.abs(Math.cos(corkAngle)) > 0.3,
+    `the cork axis is off both pure-flip and pure-spin (angle=${corkAngle.toFixed(2)})`);
+  assert.ok(events.some((ev) => ev.type === 'trick_done'), 'the cork completed before touchdown');
+});
+
+test('a harder flick spins faster than a soft one', async () => {
+  // The flick strength m scales the spin rate. Arm a flip at the same airtime with
+  // m=0 vs m=1 and compare the resulting trickRate (read off the internal skier).
+  const armRate = async (m) => {
+    const e = await makeEngine([1], track({ length: 300 }), {});
+    run(e, 1.0, () => e.processInput(1, { s: 0, t: 1, j: 0 }));
+    const sk = [...e.skiers.values()][0];
+    sk.airborne = true; sk.vAir = 6; sk.air = 0.7; sk.airPeak = 0.7; sk.trickCount = 0; // already above the arm gate
+    e.processInput(1, { s: 0, t: 1, f: { n: 1, a: Math.PI / 2, m } });
+    e.update(1000 / 60);
+    return [...e.skiers.values()][0].trickRate;
+  };
+  const soft = await armRate(0);
+  const hard = await armRate(1);
+  assert.ok(hard > soft * 1.2, `a full-strength flick spins faster (${hard.toFixed(2)}) than a soft one (${soft.toFixed(2)})`);
 });
 
 test('results rank finished skiers by time, then by distance', async () => {

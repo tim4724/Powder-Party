@@ -7,8 +7,8 @@
 // kit at construction. The kit reads none of these globals.
 //
 // The game: a downhill ski race. Phones are controllers — tucked-and-fast is the
-// default; tilt to CARVE, hold to BRAKE (sit up for control), flick up to JUMP,
-// and flick in the air to FLIP. The shared screen renders the authoritative
+// default; tilt to CARVE, hold to BRAKE (sit up for control), and flick in the air
+// to FLIP (ramps auto-launch you). The shared screen renders the authoritative
 // slope simulation; first skier to the bottom wins.
 // ============================================================================
 
@@ -27,13 +27,15 @@ var MSG = {
   // CONTROL — the hot path (~25Hz, fastlane). All fields are latest-wins safe:
   //   s : carve  [-1,1]  gyro roll (or air-lean while airborne). 0 = straight.
   //   t : tuck   0|1     DEFAULT 1 (tucked/fast); 0 only while BRAKING (held).
-  //   j : jumpSeq 0..255  wrapping up-flick edge. On the snow it pops a JUMP;
-  //                       in the air it spins a BACK flip (the display decides,
-  //                       from its authoritative air state).
-  //   f : { n:0..255, d } wrapping AIR-trick edge for the non-up flicks —
-  //                       d = 'front' | 'left' | 'right'. Air-only; ignored on
-  //                       the snow. Like j, the display fires one action per
-  //                       CHANGE, so a dropped fastlane frame just re-delivers.
+  //   j : jumpSeq 0..255  wrapping up-flick edge. Does nothing on the snow now
+  //                       ("flick up to jump" was removed — ramps auto-launch). In
+  //                       the AIR it's a back-flip fallback for inputs without an
+  //                       analog f (keyboard/bots); real controllers send f's angle.
+  //   f : { n:0..255, a, m } wrapping ANALOG AIR-trick flick. a = flick angle
+  //                       (rad, up = +π/2): up→back flip, down→front, sides→spin,
+  //                       diagonals→cork. m = strength 0..1 → spin rate. Air-only
+  //                       (ignored on the snow). Like j, the display fires one
+  //                       action per CHANGE, so a dropped fastlane frame re-delivers.
   CONTROL: 'control',
   START_GAME: 'start_game',           // host only
   RETURN_TO_LOBBY: 'return_to_lobby', // "New run" — abort back to the lobby (host)

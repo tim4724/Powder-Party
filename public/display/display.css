@@ -17,12 +17,16 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #cfeaf8; }
   display: flex; align-items: center; justify-content: space-between;
   gap: 4vw; padding: 5vh 6vw; box-sizing: border-box;
 }
-.lobby__left { padding: clamp(1.5rem, 3vw, 3rem); max-width: 46vw; }
-.lobby__left h1 {
+/* The card is the main element — grow to fill the space left of the QR (flex:1
+   with a 0 basis) so its width is stable regardless of the join URL's length,
+   capped at 2× the QR's width (qr-card = the clamp canvas + 1.2rem padding a side)
+   so it never more than doubles the QR on a wide display. */
+.lobby__card { padding: clamp(1.5rem, 3vw, 3rem); flex: 1; max-width: calc(2 * clamp(220px, 26vw, 420px) + 4.8rem); }
+.lobby__card h1 {
   font-family: var(--font-display); font-weight: 700;
   font-size: clamp(2.4rem, 5vw, 4.2rem); margin: 0 0 1rem; color: var(--ink);
 }
-.lobby__left h1 span { color: var(--brand); }
+.lobby__card h1 span { color: var(--brand); }
 .join { margin-bottom: 1rem; }
 .join__label { font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.8rem; color: var(--ink-3); }
 .join__url { font-family: var(--font-display); font-size: clamp(1.2rem, 2.4vw, 2rem); font-weight: 600; color: var(--ink); word-break: break-all; }
@@ -40,9 +44,8 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #cfeaf8; }
 .seat__name { flex: 1; }
 .seat__host { font-size: 0.7rem; font-weight: 800; letter-spacing: 0.08em; color: #fff; background: var(--brand); border-radius: var(--r-pill); padding: 0.15rem 0.6rem; }
 .seat__skier { font-size: 0.85rem; color: var(--ink-3); font-weight: 700; }
-.lobby__hint { margin-top: 1.4rem; color: var(--ink-2); font-weight: 700; font-size: 0.95rem; }
 
-.lobby__right { flex: none; }
+.lobby__qr { flex: none; }
 .qr-card { background: #fff; padding: 1.2rem; border-radius: var(--r-lg); box-shadow: var(--shadow-float); }
 .qr-card canvas { display: block; width: clamp(220px, 26vw, 420px); height: auto; image-rendering: pixelated; }
 
@@ -87,7 +90,26 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #cfeaf8; }
 .cell-label.is-finished { background: var(--brand); }
 .cell-label.is-finished .cell-label__name, .cell-label.is-finished .cell-label__stat { color: #fff; }
 
+/* per-cell steer indicator (mirrors the phone's carve bar), centred along the
+   cell bottom — a livery-coloured fill that slides with the player's lean. The
+   left/top are set per cell each frame; transform:translateX(-50%) centres it. */
+.cell-steer {
+  position: absolute; display: none; transform: translateX(-50%);
+  width: clamp(150px, 15vw, 280px); height: 2rem;
+  background: rgba(255, 255, 255, 0.9); border: 2px solid var(--hairline);
+  border-radius: var(--r-pill); overflow: hidden; box-shadow: var(--shadow-pop);
+}
+.cell-steer::before {
+  content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 2px;
+  background: rgba(40, 80, 120, 0.18);
+}
+.cell-steer__fill {
+  position: absolute; left: 50%; top: 0; bottom: 0; width: 50%; margin-left: -25%;
+  background: var(--c, var(--brand)); border-radius: var(--r-pill);
+  transition: transform 0.05s linear;
+}
+
 @media (max-width: 860px) {
   #lobby { flex-direction: column; justify-content: center; gap: 2vh; }
-  .lobby__left { max-width: 90vw; }
+  .lobby__card { flex: none; max-width: 90vw; }
 }

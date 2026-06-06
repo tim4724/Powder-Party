@@ -13,27 +13,33 @@
 //        STRAIGHT, tree-free practice run (the `trick-lab` slope) lined with kickers,
 //        driven from the KEYBOARD to feel the brake/jump/flip loop, no phone or relay:
 //          A / D (or ← / →) carve · hold S brake · Space / ↑ jump (back flip in air)
-//          ↓ front flip · Q side-left · E side-right
+//          ↓ front flip · Q spin-left · E spin-right · Z / C corks (off-axis)
 //        (add &players=4 for a CPU field, or &slope=powder-bowl for the real run)
 
 const el = (id) => document.getElementById(id);
 
 // Minimal keyboard → CONTROL {s,t,j,f} reader for the `tricks` scenario, mirroring
 // the controller's TiltInput (carve) + SwipeInput (brake/jump/flip) key maps so the
-// no-relay preview exercises the real engine input path.
+// no-relay preview exercises the real engine input path. Flicks are ANALOG: each
+// trick key emits an angle (rad, up = +π/2) on f, matching SwipeInput's gesture
+// angles. The up key ALSO bumps j (jump on the snow / back flip in the air).
 function keyboardDriver() {
   const st = { left: false, right: false, brake: false };
-  let jSeq = 0, fSeq = 0, fDir = null;
-  const edge = { up: false, down: false, q: false, e: false };
+  let jSeq = 0, fSeq = 0, fAngle = 0;
+  const fMag = 0.6; // keyboard has no flick speed → a fixed mid-strength spin rate
+  const edge = { up: false, down: false, q: false, e: false, z: false, c: false };
+  const flick = (a) => { fSeq = (fSeq + 1) & 255; fAngle = a; };
   const down = (e) => {
     const k = e.key.toLowerCase();
     if (k === 'arrowleft' || k === 'a') st.left = true;
     else if (k === 'arrowright' || k === 'd') st.right = true;
     else if (k === 's') st.brake = true;
-    else if (k === 'arrowup' || k === ' ') { if (!edge.up) { edge.up = true; jSeq = (jSeq + 1) & 255; } e.preventDefault(); }
-    else if (k === 'arrowdown') { if (!edge.down) { edge.down = true; fSeq = (fSeq + 1) & 255; fDir = 'front'; } e.preventDefault(); }
-    else if (k === 'q') { if (!edge.q) { edge.q = true; fSeq = (fSeq + 1) & 255; fDir = 'left'; } }
-    else if (k === 'e') { if (!edge.e) { edge.e = true; fSeq = (fSeq + 1) & 255; fDir = 'right'; } }
+    else if (k === 'arrowup' || k === ' ') { if (!edge.up) { edge.up = true; jSeq = (jSeq + 1) & 255; flick(Math.PI / 2); } e.preventDefault(); } // jump / back flip
+    else if (k === 'arrowdown') { if (!edge.down) { edge.down = true; flick(-Math.PI / 2); } e.preventDefault(); } // front flip
+    else if (k === 'q') { if (!edge.q) { edge.q = true; flick(Math.PI); } }            // spin left (yaw)
+    else if (k === 'e') { if (!edge.e) { edge.e = true; flick(0); } }                  // spin right (yaw)
+    else if (k === 'z') { if (!edge.z) { edge.z = true; flick(3 * Math.PI / 4); } }    // back-left cork
+    else if (k === 'c') { if (!edge.c) { edge.c = true; flick(Math.PI / 4); } }        // back-right cork
     else return;
   };
   const up = (e) => {
@@ -45,10 +51,12 @@ function keyboardDriver() {
     else if (k === 'arrowdown') edge.down = false;
     else if (k === 'q') edge.q = false;
     else if (k === 'e') edge.e = false;
+    else if (k === 'z') edge.z = false;
+    else if (k === 'c') edge.c = false;
   };
   window.addEventListener('keydown', down);
   window.addEventListener('keyup', up);
-  return { read: () => ({ s: (st.right ? 1 : 0) - (st.left ? 1 : 0), t: st.brake ? 0 : 1, j: jSeq, f: { n: fSeq, d: fDir } }) };
+  return { read: () => ({ s: (st.right ? 1 : 0) - (st.left ? 1 : 0), t: st.brake ? 0 : 1, j: jSeq, f: { n: fSeq, a: fAngle, m: fMag } }) };
 }
 
 export async function runDisplayScenario(cfg, ctx) {
@@ -140,7 +148,7 @@ export async function runDisplayScenario(cfg, ctx) {
     session.update(dt * 1000);
     const snap = session.getSnapshot();
     for (const s of snap.skiers) {
-      if (s.pose) scene.setSkierPose(s.id, s.pose.pos, s.pose.forward, s.pose.up, s.carve, s.v, s.airborne, s.tuck, s.air, s.spin, s.crashed, s.trickAxis, s.trickPhase, s.trickSign);
+      if (s.pose) scene.setSkierPose(s.id, s.pose.pos, s.pose.forward, s.pose.up, s.carve, s.v, s.airborne, s.tuck, s.air, s.spin, s.crashed, s.trickActive, s.trickAngle, s.trickPhase, s.carveInput);
       scene.setSkierHud(s.id, s);
     }
     if ((scn === 'running' || scn === 'slope' || scn === 'tricks') && session.engine.raceOver) {

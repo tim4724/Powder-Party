@@ -35,9 +35,9 @@
        preview); in a run it draws the split-screen world. -->
   <div id="scene"></div>
 
-  <!-- Lobby -->
+  <!-- Lobby — the join/roster card on the left, QR on the right. -->
   <section id="lobby">
-    <div class="lobby__left card">
+    <div class="lobby__card card">
       <h1>Powder <span>Party</span></h1>
       <div class="join">
         <div class="join__label">Join at</div>
@@ -50,9 +50,8 @@
         <div class="seat seat--open"><span class="seat__open">Open</span></div>
         <div class="seat seat--open"><span class="seat__open">Open</span></div>
       </div>
-      <div class="lobby__hint">Tilt to carve · hold to brake · flick up to jump · flick in the air to flip</div>
     </div>
-    <div class="lobby__right">
+    <div class="lobby__qr">
       <div class="qr-card"><canvas id="qr"></canvas></div>
     </div>
   </section>

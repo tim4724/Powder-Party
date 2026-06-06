@@ -73,6 +73,7 @@ export class SceneRenderer {
     this._sWant = new THREE.Vector3();
     this._sTarget = new THREE.Vector3();
     this._sSurf = new THREE.Vector3();
+    this._sTrickAxis = new THREE.Vector3();
 
     this._initThree();
     this._initOverlay();
@@ -622,20 +623,29 @@ export class SceneRenderer {
     this.scene.add(group);
     this.scene.add(blob);
 
-    let label = null;
+    let label = null, steerBar = null, steerFill = null;
     const celled = opts.cell !== false;
     if (celled) {
+      const hex = this.colors[colorIndex % this.colors.length] || '#2d9cdb';
       label = document.createElement('div');
       label.className = 'cell-label';
-      label.style.setProperty('--c', this.colors[colorIndex % this.colors.length] || '#2d9cdb');
+      label.style.setProperty('--c', hex);
       label.innerHTML = `<span class="cell-label__name"></span><span class="cell-label__stat"></span>`;
       label.querySelector('.cell-label__name').textContent = name || '';
       this.overlay.appendChild(label);
+      // on-screen steer indicator for this cell (mirrors the phone's carve bar):
+      // a centre-anchored fill that slides with the lean, in the player's livery.
+      steerBar = document.createElement('div');
+      steerBar.className = 'cell-steer';
+      steerBar.style.setProperty('--c', hex);
+      steerBar.innerHTML = `<div class="cell-steer__fill"></div>`;
+      this.overlay.appendChild(steerBar);
+      steerFill = steerBar.querySelector('.cell-steer__fill');
       if (!this._order.includes(id)) this._order.push(id);
     }
 
     this.skiers.set(id, {
-      id, group, body, cam, blob, label, name,
+      id, group, body, cam, blob, label, steerBar, steerFill, name,
       colorIndex, celled,
       camPos: new THREE.Vector3(), camTarget: new THREE.Vector3(),
       fov: BASE_FOV, init: false, lean: 0, tuckAmt: 0, pose: null, finished: false,
@@ -649,12 +659,13 @@ export class SceneRenderer {
     this._disposeGroup(c.group);
     c.blob.geometry.dispose(); c.blob.material.dispose();
     if (c.label && c.label.parentNode) c.label.parentNode.removeChild(c.label);
+    if (c.steerBar && c.steerBar.parentNode) c.steerBar.parentNode.removeChild(c.steerBar);
     this.skiers.delete(id);
     const i = this._order.indexOf(id);
     if (i >= 0) this._order.splice(i, 1);
   }
 
-  setSkierPose(id, pos, forward, up, carve = 0, spd = 0, airborne = false, tuck = 0, air = 0, spin = 0, crashed = false, trickAxis = 0, trickPhase = 0, trickSign = 1) {
+  setSkierPose(id, pos, forward, up, carve = 0, spd = 0, airborne = false, tuck = 0, air = 0, spin = 0, crashed = false, trickActive = false, trickAngle = 0, trickPhase = 0, carveInput = 0) {
     const c = this.skiers.get(id);
     if (!c) return;
     c.spd = spd; c.airborne = airborne;
@@ -671,12 +682,14 @@ export class SceneRenderer {
     c.group.quaternion.setFromRotationMatrix(this._sBasis.makeBasis(x, y, z));
     // wipeout spin about the slope normal (cosmetic)
     if (spin) c.group.rotateY(spin);
-    // air trick: somersault the WHOLE skier — pitch (local x) for front/back,
-    // roll (local z) for side. The chase cam tracks pose.forward, not the group,
-    // so the view holds steady while the skier flips.
-    if (trickAxis === 'front') c.group.rotateX(trickPhase * _TAU);
-    else if (trickAxis === 'back') c.group.rotateX(-trickPhase * _TAU);
-    else if (trickAxis === 'side') c.group.rotateZ(trickSign * trickPhase * _TAU);
+    // air trick: somersault the WHOLE skier about an ANALOG axis built from the
+    // flick angle — pitch (local x) = front/back flip, yaw (local y) = spin, a
+    // blend = a cork. The chase cam tracks pose.forward (not the group), so the
+    // view holds steady while the skier flips.
+    if (trickActive) {
+      const tax = this._sTrickAxis.set(-Math.sin(trickAngle), Math.cos(trickAngle), 0).normalize();
+      c.group.rotateOnAxis(tax, trickPhase * _TAU);
+    }
 
     // body: bank INTO the carve (negated — +carve is turn-aligned, and a positive
     // local-Z roll tilts the torso the opposite way), crouch + pitch when tucking
@@ -697,11 +710,16 @@ export class SceneRenderer {
     const sh = Math.max(0.35, 1 - air * 0.09); // shrink + fade with height
     c.blob.scale.set(sh, sh, 1);
     c.blob.material.opacity = 0.42 * sh;
+
+    // on-screen steer bar: mirror the player's RAW carve input (the way they tilt),
+    // not the turn-aligned value — same convention as the phone's carve bar.
+    if (c.steerFill) c.steerFill.style.transform = `translateX(${(carveInput * 50).toFixed(1)}%)`;
   }
 
   setSkierHud(id, info) {
     const c = this.skiers.get(id);
     if (!c || !c.label) return;
+    c.finished = !!info.finished;   // gates the steer bar (hidden once finished, in _loop)
     const stat = c.label.querySelector('.cell-label__stat');
     if (info.finished) {
       stat.textContent = `P${info.position} · ${info.finishTime ? info.finishTime.toFixed(1) + 's' : 'done'}`;
@@ -710,7 +728,7 @@ export class SceneRenderer {
       // Tucked is the default now, so don't tag it — flag only the active states:
       // a flip / airborne, or a deliberate brake (tuck released).
       let tag = '';
-      if (info.airborne) tag = info.trickAxis ? ' · FLIP' : ' · AIR';
+      if (info.airborne) tag = info.trickActive ? ' · FLIP' : ' · AIR';
       else if (!info.tuck) tag = ' · BRAKE';
       stat.textContent = `P${info.position}/${info.of}` + tag;
     }
@@ -795,6 +813,13 @@ export class SceneRenderer {
       r.render(this.scene, c.cam);
       // position the DOM label in the cell (CSS px, top-left origin)
       if (c.label) { c.label.style.left = (x + 14) + 'px'; c.label.style.top = (row * ch + 12) + 'px'; }
+      // steer bar: centred along the cell bottom, hidden once the skier finishes
+      // (it's on autopilot then — the finish stat in the label says it all).
+      if (c.steerBar) {
+        c.steerBar.style.display = c.finished ? 'none' : 'block';
+        c.steerBar.style.left = (x + cw / 2) + 'px';
+        c.steerBar.style.top = (row * ch + ch - 56) + 'px';
+      }
     });
 
     requestAnimationFrame((tt) => this._loop(tt));

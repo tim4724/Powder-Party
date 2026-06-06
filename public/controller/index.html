@@ -37,29 +37,34 @@
       <span id="me-dot" class="dot"></span>
       <span id="me-name" class="lobby-me__name"></span>
     </div>
-    <p class="lobby-tip">You're tucked and fast. Tilt to carve · hold to brake · flick up to jump · flick in the air to flip.</p>
     <button id="start-btn" class="btn btn--brand hidden">Start run</button>
     <div id="wait-host" class="hidden">Waiting for the host to start…</div>
   </section>
 
-  <!-- Game: tucked-and-fast is the default. Tilt to CARVE · hold to BRAKE ·
-       flick up to JUMP · flick in the air to FLIP. The whole #play surface is the
-       eyes-free gesture target — the player watches the big screen, not the phone. -->
+  <!-- Game: tucked-and-fast is the default. The whole #play surface is one
+       eyes-free TOUCH-PAD — push down to BRAKE · in the air flick ANY direction to
+       FLIP (the angle picks the trick). Ramps launch you automatically. The player
+       watches the big screen, not the phone. -->
   <section id="game" class="hidden">
     <button id="pause-btn" class="icon-btn hidden" aria-label="Pause"><span class="pause-glyph"></span></button>
     <div id="drive-hud" class="hidden">
       <div class="hud-top">
         <div id="pos">P1</div>
-        <div id="air" class="air-badge hidden">AIR</div>
       </div>
 
-      <!-- full-bleed eyes-free play surface. The carve bar + hint sit at the bottom. -->
+      <!-- Eyes-free touch surface. A clean structured legend up top names the
+           moves; below it a smaller bounded touch zone is the focal swipe target
+           (swipes anywhere still register — see SwipeInput). Carve bar at the foot. -->
       <div id="play" class="play">
-        <div class="play__center">
-          <div id="play-glyph" class="play__glyph" aria-hidden="true">
-            <span class="play__arrow"></span>
+        <div class="play__legend" aria-hidden="true">
+          <div class="legend-row"><span class="legend-ico">↓</span><span class="legend-txt"><b>Brake</b>push &amp; hold</span></div>
+          <div class="legend-row">
+            <span class="legend-ico"><svg class="legend-arrows" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.5V19.5M4.5 12H19.5M9.7 6.8L12 4.5L14.3 6.8M9.7 17.2L12 19.5L14.3 17.2M6.8 9.7L4.5 12L6.8 14.3M17.2 9.7L19.5 12L17.2 14.3"/></svg></span>
+            <span class="legend-txt"><b>Flip</b>in the air, flick any way</span>
           </div>
-          <div class="play__hint">hold to brake · flick up to jump</div>
+        </div>
+        <div id="touch-zone" class="play__zone" aria-hidden="true">
+          <span class="play__zone-label">swipe here</span>
         </div>
         <div class="carve">
           <div class="carve__track"><div id="carve-fill"></div></div>
