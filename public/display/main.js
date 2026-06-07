@@ -17,6 +17,7 @@ const {
 const FIELD_SIZE = MAX_PLAYERS;     // skiers in a run (humans topped up with CPU)
 const AI_PREFIX = 'ai-';
 const HUD_HZ_MS = 150;              // PLAYER_STATE / HUD throttle (~6.5 Hz)
+const COAST_OUT_MAX_MS = 20_000;   // failsafe cap on the post-results coast (then hold)
 
 const el = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -62,8 +63,8 @@ let currentField = [];               // full roster incl. AI (for results naming
 let aiBots = new Map();              // id -> AiController
 let humanIds = new Set();
 let paused = false;
-let raceEnded = false;
-let fastForwarding = false;
+let raceEnded = false;       // results panel up (every human across) — world may still be coasting
+let raceEndedAt = 0;         // performance.now() when the panel went up — bounds the coast-out
 let lastHud = 0;
 
 // ---- net -----------------------------------------------------------------
@@ -165,7 +166,7 @@ function buildField(humans) {
 function startRun() {
   if (session || !sceneReady) return;
   net.flow.transitionTo(ROOM_STATE.COUNTDOWN);
-  raceEnded = false; paused = false; fastForwarding = false;
+  raceEnded = false; paused = false;
   aiBots = new Map();
   const humans = net.roster().filter((p) => p.connected !== false);
   currentField = buildField(humans);
@@ -220,16 +221,34 @@ function humansAllDone() {
   return true;
 }
 
-scene.onFrame = (dt) => {
-  if (!session || paused || raceEnded) return;
-  driveBots();
-  session.update(dt * 1000);
+// Are any skiers still sliding? Drives the post-results coast-out: once the panel
+// is up we keep stepping the world until the whole field has glided to a stop
+// (bounded by COAST_OUT_MAX_MS so a freak non-finisher can't loop forever).
+function worldMoving() {
+  if (!session) return false;
+  if (performance.now() - raceEndedAt > COAST_OUT_MAX_MS) return false;
+  for (const s of session.engine.skiers.values()) if (s.v > 0.3) return true;
+  return false;
+}
 
-  if (session.racing && humansAllDone()) {
-    fastForwarding = true;
-    session.fastForwardToEnd(driveBots);
-    fastForwarding = false;
-    return;
+scene.onFrame = (dt) => {
+  if (!session || paused) return;
+
+  if (!raceEnded) {
+    // Live race. session.update can end the run itself (raceOver/timeout → _finish
+    // → endRun), so re-check raceEnded before the humans-done trigger fires too.
+    driveBots();
+    session.update(dt * 1000);
+    if (!raceEnded && session.racing && humansAllDone()) endRun(session.getResults());
+  } else if (worldMoving()) {
+    // Results panel is up but the field is still in motion: keep stepping so the
+    // just-finished skier glides to a natural stop and any CPU still out race in,
+    // all behind the translucent panel — instead of the world snapping to a halt.
+    // Step the engine directly: `racing` may already be false (raceOver ended it).
+    driveBots();
+    session.engine.update(dt * 1000);
+  } else {
+    return; // settled — hold the final frame under the results panel
   }
 
   const snap = session.getSnapshot();
@@ -237,8 +256,12 @@ scene.onFrame = (dt) => {
   for (const s of snap.skiers) {
     if (s.pose) scene.setSkierPose(s.id, s.pose.pos, s.pose.forward, s.pose.up, s.carve, s.v, s.airborne, s.tuck, s.air, s.spin, s.crashed, s.trickActive, s.trickAngle, s.trickPhase, s.carveInput);
     packSpd = Math.max(packSpd, s.v);
-    if (s.offPiste || (s.crashed && s.spin)) audio.scrape(0.8); // deep-snow hiss / wipeout
+    if (!raceEnded && (s.offPiste || (s.crashed && s.spin))) audio.scrape(0.8); // deep-snow hiss / wipeout
   }
+
+  // Run decided (results panel up): keep posing the coasting skiers, but go quiet —
+  // no wind, no HUD — so it reads as a results screen, not a live race.
+  if (raceEnded) return;
   audio.setWind(Math.min(1, packSpd / 26));
 
   if (!session.racing) return; // countdown: posed + steerable, no HUD yet
@@ -259,11 +282,18 @@ scene.onFrame = (dt) => {
 };
 
 function onRaceEvent(e) {
-  // During the synchronous fast-forward burst we don't push per-event standings
-  // or play SFX — endRun broadcasts the final board once it's done.
-  if (fastForwarding) return;
-  if (e.type === 'finish') broadcastStandings(false);
-  else if (e.type === 'jump') audio.jump();
+  // Standings tick on every crossing. Once the panel is up (all humans across),
+  // keep refreshing it so the CPU still coasting in fill their DNFs with real
+  // times on the live board.
+  if (e.type === 'finish') {
+    broadcastStandings(raceEnded);
+    if (raceEnded && session) showResults(session.getResults());
+    return;
+  }
+  // Run decided: the world keeps moving behind the results panel, but stay silent
+  // so a stray CPU jump/crash doesn't rattle over the board.
+  if (raceEnded) return;
+  if (e.type === 'jump') audio.jump();
   else if (e.type === 'trick_start') audio.trick();             // whoosh as the flip kicks off
   else if (e.type === 'trick_done') audio.trickLand();          // chime per completed rotation
   else if (e.type === 'land') audio.land(!!e.clean);
@@ -293,7 +323,9 @@ function standingsPayload(over) {
 function broadcastStandings(over) { if (session) net.broadcast(standingsPayload(over)); }
 
 function endRun(results) {
+  if (raceEnded) return; // panel already up (humans done) — onRaceEvent keeps it refreshed
   raceEnded = true;
+  raceEndedAt = performance.now();
   net.flow.transitionTo(ROOM_STATE.RESULTS);
   broadcastStandings(true);
   audio.stopWind();
@@ -309,15 +341,20 @@ function showResults(results, field = currentField) {
   if (list) {
     list.innerHTML = '';
     const byId = new Map(field.map((p) => [p.peerIndex, p]));
+    // While the panel is up but skiers are still coasting in, an unfinished row is
+    // "still going" (…), not a DNF. DNF is reserved for when the run is fully over
+    // (everyone settled / timeout) and someone truly never crossed.
+    const fullyOver = !session || session.engine.raceOver;
     for (const r of results.results) {
       const p = byId.get(r.playerId) || {};
       const li = document.createElement('li');
       const color = SKIER_COLORS[(p.colorIndex || 0) % SKIER_COLORS.length];
+      const time = r.finished && r.time != null ? r.time.toFixed(1) + 's' : (fullyOver ? 'DNF' : '…');
       li.innerHTML =
         `<span class="res__rank">${r.rank}</span>` +
         `<span class="dot" style="background:${color}"></span>` +
         `<span class="res__name">${escapeHtml(p.name || 'Skier')}${p.ai ? ' <span class="res__cpu">CPU</span>' : ''}</span>` +
-        `<span class="res__time">${r.finished && r.time != null ? r.time.toFixed(1) + 's' : 'DNF'}</span>`;
+        `<span class="res__time">${time}</span>`;
       list.appendChild(li);
     }
   }
