@@ -193,8 +193,7 @@ function onCountdownTick(n) {
     else if (n === 0) { c.textContent = 'GO!'; c.classList.add('is-go'); }
     else { c.textContent = ''; c.classList.remove('is-go'); }
   }
-  if (n >= 0) net.broadcast({ type: MSG.COUNTDOWN, n });
-  audio.countdown(n);
+  if (n >= 0) { net.broadcast({ type: MSG.COUNTDOWN, n }); audio.countdown(n); }
 }
 
 function onRaceStart() {
