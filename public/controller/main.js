@@ -208,22 +208,24 @@ function renderResults(data) {
 }
 
 // Footer: while skiers are still out, a waiting note for everyone. Once the run is
-// over, the host gets the "New run" button; everyone else is told who to wait on.
+// over, the host gets "Play again" (rematch, fresh slope) + "New game" (back to the
+// lobby); everyone else is told who to wait on.
 function renderResultFoot(data) {
+  const again = el('again-btn');
   const btn = el('newgame-btn');
   const wait = el('result-wait');
+  const hostControls = data.over && amHost;
+  again.classList.toggle('hidden', !hostControls);
+  btn.classList.toggle('hidden', !hostControls);
   if (!data.over) {
-    btn.classList.add('hidden');
     wait.classList.remove('hidden');
     wait.textContent = 'Waiting for the other skiers to finish…';
   } else if (amHost) {
-    btn.classList.remove('hidden');
     wait.classList.add('hidden');
   } else {
-    btn.classList.add('hidden');
     wait.classList.remove('hidden');
     const host = (data.order || []).find((o) => o.playerId === hostPeerIndex);
-    renderWaitNote(wait, { name: host && host.name, color: host && SKIER_COLORS[host.colorIndex] }, ' to start a new run…');
+    renderWaitNote(wait, { name: host && host.name, color: host && SKIER_COLORS[host.colorIndex] }, ' to start the next run…');
   }
 }
 
@@ -347,7 +349,9 @@ el('pause-btn').addEventListener('click', () => { buzz(15); net.send(MSG.PAUSE_G
 el('pause-continue').addEventListener('click', () => { buzz(15); net.send(MSG.RESUME_GAME); });
 el('pause-newgame').addEventListener('click', () => { buzz(15); net.send(MSG.RETURN_TO_LOBBY); });
 
-// Results overlay: only the host gets the button; it sends everyone to the lobby.
+// Results overlay: host-only. "Play again" rematches on a fresh slope (display turns
+// START_GAME from a finished run into a replay); "New game" sends everyone to the lobby.
+el('again-btn').addEventListener('click', () => { if (amHost) { buzz(15); net.send(MSG.START_GAME); } });
 el('newgame-btn').addEventListener('click', () => { if (amHost) { buzz(15); net.send(MSG.RETURN_TO_LOBBY); } });
 
 show('name');

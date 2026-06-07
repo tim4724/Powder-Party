@@ -82,7 +82,9 @@ function onRoomReady({ joinUrl }) {
 function onControllerMessage(from, data) {
   if (!data) return;
   if (data.type === MSG.CONTROL) { if (session) session.processInput(from, data); }
-  else if (data.type === MSG.START_GAME) { if (from === net.flow.host && net.flow.connectedCount > 0) startRun(); }
+  // Host's start/rematch. From the lobby this starts the first run; from the results
+  // board (run already over) it plays again on a fresh slope.
+  else if (data.type === MSG.START_GAME) { if (from === net.flow.host && net.flow.connectedCount > 0) (raceEnded ? playAgain() : startRun()); }
   else if (data.type === MSG.PAUSE_GAME) pauseRun();   // any player may pause (friendly)
   else if (data.type === MSG.RESUME_GAME) resumeRun();
   // host-gated: aborting the run back to the lobby affects everyone.
@@ -321,21 +323,36 @@ function showResults(results) {
   if (res) res.classList.remove('hidden');
 }
 
-function returnToLobby() {
+// Tear down the current run and roll a FRESH random slope for the next one (live
+// play only — test mode pins a stable seed). Shared by "New game" (→ lobby) and
+// "Play again" (→ straight into the next run); both get a new mountain.
+function teardownRun() {
   if (session) { session.dispose(); session = null; }
   for (const p of currentField) scene.removeSkier(p.peerIndex);
   currentField = []; aiBots = new Map(); humanIds = new Set();
   raceEnded = false; paused = false;
   audio.stopWind();
-  // Roll a fresh slope for the next run so the lobby orbit previews the very hill
-  // you're about to ski (live play only — test mode pins a stable seed).
   slope = makeSlope();
   window.__slope = slope;
   if (sceneReady) scene.setTrack(slope, { debug: params.get('centerline') === '1' });
+}
+
+function returnToLobby() {
+  teardownRun();
   net.flow.transitionTo(ROOM_STATE.LOBBY);
   net.broadcast({ type: MSG.GAME_END, results: null });
   scene.orbit = true;
   showLobby();
+}
+
+// Rematch from the results screen: fresh random slope, same lobby, straight into a
+// new run (RESULTS → COUNTDOWN is a valid flow transition). Only from a finished
+// run; startRun rebuilds the field from the current roster and broadcasts the
+// countdown, which pulls every phone off its results board into the new race.
+function playAgain() {
+  if (!sceneReady || !session) return;
+  teardownRun();
+  startRun();
 }
 
 function pauseRun() {
@@ -374,6 +391,7 @@ function escapeHtml(s) {
 el('pause-btn') && el('pause-btn').addEventListener('click', () => (paused ? resumeRun() : pauseRun()));
 el('pause-continue') && el('pause-continue').addEventListener('click', resumeRun);
 el('pause-newgame') && el('pause-newgame').addEventListener('click', returnToLobby);
+el('results-again') && el('results-again').addEventListener('click', playAgain);
 el('results-newgame') && el('results-newgame').addEventListener('click', returnToLobby);
 window.addEventListener('keydown', (e) => {
   if (e.key === 'g' && net.roomState === ROOM_STATE.LOBBY) startRun(); // dev: start without a phone

@@ -69,7 +69,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #cfeaf8; }
 }
 .pause-card, .results-card { padding: clamp(1.5rem, 3vw, 2.6rem); min-width: min(90vw, 420px); text-align: center; }
 .pause-card h2, .results-card h2 { font-family: var(--font-display); margin: 0 0 1.2rem; color: var(--ink); }
-.pause-card__btns { display: flex; gap: 0.8rem; justify-content: center; }
+.pause-card__btns, .results-card__btns { display: flex; gap: 0.8rem; justify-content: center; flex-wrap: wrap; }
 
 #results-list { list-style: none; margin: 0 0 1.4rem; padding: 0; display: grid; gap: 0.5rem; text-align: left; }
 #results-list li { display: flex; align-items: center; gap: 0.7rem; background: var(--surface-2); border-radius: var(--r-sm); padding: 0.6rem 0.9rem; font-weight: 800; color: var(--ink); }
