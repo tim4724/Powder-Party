@@ -3,6 +3,10 @@
 Multiplayer downhill ski racing where phones become **tilt + swipe** controllers and a
 shared screen is the slope. A couch party game for 1–4 players on one display.
 
+![4-player split-screen](artwork/splitscreen-4p.png)
+
+**▶ [Play it live](https://powder-main.couch-games.com/)** · **[UI gallery](https://powder-main.couch-games.com/gallery.html)**
+
 ## The idea
 
 The big screen renders the mountain; each player joins by scanning a QR code with their
@@ -109,6 +113,7 @@ public/
 partyplug/                 # reusable party-game transport kit (served under /partyplug/)
 vendor/three/              # vendored Three.js (served under /vendor/)
 tests/engine.test.js       # SkiEngine unit tests (node:test)
+scripts/capture-artwork.js # headless 4-player split-screen hero shot → artwork/ (Playwright)
 ```
 
 ## Testing
