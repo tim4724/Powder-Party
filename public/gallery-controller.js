@@ -17,7 +17,8 @@ var CONTROLLER_CARDS = [
   { key: 'brake',           title: 'Brake (slow)',    perColor: true },
   { key: 'paused',          title: 'Paused',          perColor: true },
   { key: 'finished',        title: 'Finished',        perColor: true },
-  { key: 'results',         title: 'Results',         perColor: true }
+  { key: 'results',         title: 'Results (host)',    perColor: true },
+  { key: 'results-waiting', title: 'Results (waiting)', perColor: true }
 ];
 
 var state = Gallery.loadState();

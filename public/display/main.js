@@ -301,11 +301,14 @@ function endRun(results) {
   showResults(results);
 }
 
-function showResults(results) {
+// `field` is the full roster (incl. AI) used to name + colour the rows; defaults
+// to the live `currentField` but is passed explicitly by the test harness so the
+// preview shares this exact render path instead of re-implementing it.
+function showResults(results, field = currentField) {
   const list = el('results-list');
   if (list) {
     list.innerHTML = '';
-    const byId = new Map(currentField.map((p) => [p.peerIndex, p]));
+    const byId = new Map(field.map((p) => [p.peerIndex, p]));
     for (const r of results.results) {
       const p = byId.get(r.playerId) || {};
       const li = document.createElement('li');
@@ -403,7 +406,9 @@ if (params.get('test') === '1' || scenario) {
   import('./TestHarness.js').then(({ runDisplayScenario }) => runDisplayScenario(
     // tricks defaults to a single full-screen skier (just you, drilling flips); add ?players=N for a CPU field
     { scenario: scenario || 'running', players: parseInt(params.get('players'), 10) || (scenario === 'tricks' ? 1 : 4), host: parseInt(params.get('host'), 10) || 0 },
-    { scene, slope, scenePromise, SKIER_COLORS, AiController, AI_PERSONALITIES, RunSession }
+    // Inject the REAL render fns so the harness previews the live DOM path rather
+    // than a hand-copy (which drifts — see renderRoster/showResults).
+    { scene, slope, scenePromise, SKIER_COLORS, AiController, AI_PERSONALITIES, RunSession, renderRoster, showResults }
   ));
 } else {
   showLobby();

@@ -64,7 +64,7 @@ function keyboardDriver() {
 }
 
 export async function runDisplayScenario(cfg, ctx) {
-  const { scene, slope, scenePromise, SKIER_COLORS, AiController, AI_PERSONALITIES, RunSession } = ctx;
+  const { scene, slope, scenePromise, SKIER_COLORS, AiController, AI_PERSONALITIES, RunSession, renderRoster, showResults } = ctx;
   await scenePromise;
 
   const N = Math.max(1, Math.min(4, cfg.players || 4));
@@ -116,18 +116,9 @@ export async function runDisplayScenario(cfg, ctx) {
     scene.orbit = true;
     el('lobby') && el('lobby').classList.remove('hidden');
     el('race') && el('race').classList.add('hidden');
-    const wrap = el('players');
-    if (wrap) {
-      wrap.innerHTML = '';
-      field.forEach((p, i) => {
-        const seat = document.createElement('div');
-        seat.className = 'seat';
-        seat.innerHTML = `<span class="dot" style="background:${SKIER_COLORS[i % SKIER_COLORS.length]}"></span>` +
-          `<span class="seat__name">${p.name}</span>` + (i === 0 ? `<span class="seat__host">HOST</span>` : '');
-        wrap.appendChild(seat);
-      });
-    }
-    el('count') && (el('count').textContent = 'Preview — scan to join');
+    // Share the REAL roster render — pads open seats, applies the live count copy,
+    // escapes names. First skier is host (matches the live "first to join" rule).
+    renderRoster(field, field[0] && field[0].peerIndex);
     return;
   }
 
@@ -171,9 +162,11 @@ export async function runDisplayScenario(cfg, ctx) {
         const idx = bumpIdx.get(id) || 0;
         const dir = idx % 2 ? 1 : -1;
         bot.laneBias = dir * 4.5 * Math.sin(1.3 * sess.engine.elapsed + idx * 0.7);
-        sess.processInput(id, bot.drive(sk, slope.centerline)); // stays tucked/fast → matches a tucking human
+        sess.processInput(id, bot.drive(sk, sess.engine)); // stays tucked/fast → matches a tucking human
       } else {
-        sess.processInput(id, bot.drive(sk, slope.centerline));
+        // Hand the bot the full engine (not just the centerline) so its tree/skier
+        // avoidance + air tricks run exactly as in real play — matches main.js.
+        sess.processInput(id, bot.drive(sk, sess.engine));
       }
     }
   }
@@ -207,26 +200,8 @@ export async function runDisplayScenario(cfg, ctx) {
     session.racing = true; // skip the countdown delay so fast-forward actually runs
     driveBots(session);
     session.fastForwardToEnd(() => driveBots(session));
-    showResults(session.getResults(), field, SKIER_COLORS);
+    showResults(session.getResults(), field);
   } else { // running / slope (default) — start the run, onFrame loops it
     session.startCountdown(1);
   }
-}
-
-function showResults(results, field, colors) {
-  const byId = new Map(field.map((p) => [p.peerIndex, p]));
-  const list = el('results-list');
-  if (list) {
-    list.innerHTML = '';
-    for (const r of results.results) {
-      const p = byId.get(r.playerId) || {};
-      const li = document.createElement('li');
-      li.innerHTML = `<span class="res__rank">${r.rank}</span>` +
-        `<span class="dot" style="background:${colors[(p.colorIndex || 0) % colors.length]}"></span>` +
-        `<span class="res__name">${p.name || 'Skier'} <span class="res__cpu">CPU</span></span>` +
-        `<span class="res__time">${r.finished && r.time != null ? r.time.toFixed(1) + 's' : 'DNF'}</span>`;
-      list.appendChild(li);
-    }
-  }
-  el('results') && el('results').classList.remove('hidden');
 }

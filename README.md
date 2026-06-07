@@ -72,7 +72,7 @@ The display page drives itself from fake data with `?test=1&scenario=…` (no re
 The phone controller previews a single screen the same way, off the relay:
 `/controller/index.html?scenario=playing&color=2` (scenarios: `name`, `name-connecting`,
 `lobby-host`, `lobby-waiting`, `countdown`, `playing`, `tuck`, `air`, `paused`, `finished`,
-`results`; `color` 0–7 picks the livery).
+`results` (host), `results-waiting` (non-host); `color` 0–7 picks the livery).
 
 ### Gallery
 
