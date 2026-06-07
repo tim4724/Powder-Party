@@ -79,10 +79,11 @@ export async function runDisplayScenario(cfg, ctx) {
     if (human && i === 0) { field.push({ peerIndex: 'me', name: 'You (keys)', colorIndex: 0, ai: false }); continue; }
     const persona = AI_PERSONALITIES[i % AI_PERSONALITIES.length];
     const id = 'cpu-' + i;
-    field.push({ peerIndex: id, name: persona.name, colorIndex: i, ai: true });
-    // `bump` zeroes laneBias so the bots all converge on the fall line and pile up
-    // (their normal fanned-out lanes exist precisely to AVOID contact).
-    bots.set(id, new AiController(scn === 'bump' ? { ...persona, laneBias: 0 } : persona));
+    field.push({ peerIndex: id, name: persona.name, colorIndex: i, ai: true, stats: { glide: persona.glide, edge: persona.edge } });
+    // `bump` zeroes laneBias AND disables avoidance so the bots ignore each other
+    // and pile up on the fall line (their normal fanned lanes + dodging exist
+    // precisely to AVOID contact — the opposite of the demolition derby).
+    bots.set(id, new AiController(scn === 'bump' ? { ...persona, laneBias: 0, avoid: false } : persona));
   }
 
   // Drop the keyboard skier in just above the first ramp so the launch is a

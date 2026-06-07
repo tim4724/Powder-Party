@@ -149,7 +149,10 @@ function buildField(humans) {
     used.add(colorIndex);
     const p = AI_PERSONALITIES[persona];
     const id = AI_PREFIX + persona;
-    field.push({ peerIndex: id, name: p.name, colorIndex, ai: true });
+    // CPU skiers carry a smooth `glide` handicap (the difficulty dial → a beatable
+    // tail, a boss at the player's pace); `edge` stays the benchmark 1.0 — no grip
+    // advantage. Humans always ski the benchmark (no stats).
+    field.push({ peerIndex: id, name: p.name, colorIndex, ai: true, stats: { glide: p.glide, edge: p.edge } });
     aiBots.set(id, new AiController(p));
     persona++;
   }
@@ -203,7 +206,7 @@ function driveBots() {
   for (const [id, bot] of aiBots) {
     const skier = session.engine.skiers.get(id);
     if (!skier || skier.finished) continue;
-    session.processInput(id, bot.drive(skier, slope.centerline));
+    session.processInput(id, bot.drive(skier, session.engine));
   }
 }
 
