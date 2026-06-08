@@ -311,6 +311,33 @@ test('removeCar drops a skier and recomputes raceOver', async () => {
   assert.ok(!e.removeCar(99), 'removeCar returns false for an unknown id');
 });
 
+// A dropped player who reconnects on a different device keeps their skier — it's
+// re-keyed onto the new slot, preserving its descent state and its place in the
+// results, so they don't vanish from the standings (the reconnect bug fix).
+test('rekeyCar moves a skier to a new id, keeping its state + results slot', async () => {
+  const e = await makeEngine([1, 2], track({ length: 120 }), {});
+  run(e, 3, () => { e.processInput(1, { s: 0, t: 1, j: 0 }); e.processInput(2, { s: 0, t: 1, j: 0 }); });
+  const before = e.skiers.get(2);
+  assert.ok(before, 'skier 2 exists before the re-key');
+  const beforeS = before.totalS;
+
+  assert.ok(e.rekeyCar(2, 7), 'rekeyCar returns true for an existing source');
+  const moved = e.skiers.get(7);
+  assert.ok(moved, 'skier now races under the new id');
+  assert.ok(!e.skiers.has(2), 'old id is gone');
+  assert.equal(moved.id, 7, "the skier's own id field is updated");
+  assert.equal(e.getSnapshot().skiers.length, 2, 'no skier was lost');
+  assert.ok(Math.abs(moved.totalS - beforeS) < 1e-6, 'descent state carried over');
+
+  // Still two ranked results, now crediting the new id (was the bug: dropped → missing).
+  const ids = e.getResults().results.map((r) => r.playerId);
+  assert.ok(ids.includes(7) && !ids.includes(2), 'results credit the new id');
+  assert.equal(e.getResults().results.length, 2);
+
+  assert.ok(!e.rekeyCar(99, 8), 'rekeyCar is a no-op for an unknown source');
+  assert.ok(!e.rekeyCar(1, 7), 'rekeyCar refuses to clobber a taken target id');
+});
+
 // --- skier-vs-skier contact ----------------------------------------------
 // These reach into `e.skiers` to place the pair precisely (the start grid keeps
 // them well apart), then step the engine and read the resolved state.

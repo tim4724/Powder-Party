@@ -64,7 +64,7 @@ function keyboardDriver() {
 }
 
 export async function runDisplayScenario(cfg, ctx) {
-  const { scene, slope, scenePromise, SKIER_COLORS, AiController, AI_PERSONALITIES, RunSession, renderRoster, showResults } = ctx;
+  const { scene, slope, scenePromise, SKIER_COLORS, AiController, AI_PERSONALITIES, RunSession, renderRoster, showResults, buildReconnectCard } = ctx;
   await scenePromise;
 
   const N = Math.max(1, Math.min(4, cfg.players || 4));
@@ -131,6 +131,17 @@ export async function runDisplayScenario(cfg, ctx) {
   el('race') && el('race').classList.toggle('hidden', orbitPreview);
   for (const p of field) scene.addSkier(p.peerIndex, p.colorIndex, p.name, { cell: !orbitPreview });
 
+  // `reconnect` lab: one celled skier has dropped — its still-descending ghost
+  // shows the rejoin QR centred in its cell (the live display path: a dropped seat
+  // → buildReconnectCard → scene.setSkierReconnect). The rest race on as normal.
+  if (scn === 'reconnect' && buildReconnectCard) {
+    const dropped = field.find((p) => p.peerIndex !== 'me') || field[0];
+    if (dropped) scene.setSkierReconnect(dropped.peerIndex, buildReconnectCard({
+      name: dropped.name, colorIndex: dropped.colorIndex,
+      url: (window.location.origin + '/POWDER?claim=' + dropped.colorIndex)
+    }));
+  }
+
   let session = newSession();
   seedField(session);
   window.__harness = () => session;       // current session (reassigned on restart) — for automated checks
@@ -180,7 +191,7 @@ export async function runDisplayScenario(cfg, ctx) {
       if (s.pose) scene.setSkierPose(s.id, s.pose.pos, s.pose.forward, s.pose.up, s.carve, s.v, s.airborne, s.tuck, s.air, s.spin, s.crashed, s.trickActive, s.trickAngle, s.trickPhase, s.carveInput);
       scene.setSkierHud(s.id, s);
     }
-    if ((scn === 'running' || scn === 'slope' || scn === 'tricks' || scn === 'bump') && session.engine.raceOver) {
+    if ((scn === 'running' || scn === 'slope' || scn === 'tricks' || scn === 'bump' || scn === 'reconnect') && session.engine.raceOver) {
       session.dispose();
       scene.clearTrails(); // fresh snow when the preview loops the run
       session = newSession();

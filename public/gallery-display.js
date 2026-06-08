@@ -12,6 +12,7 @@ var DISPLAY_CARDS = [
   { key: 'lobby',     title: 'Lobby' },
   { key: 'countdown', title: 'Countdown', animated: true },
   { key: 'running',   title: 'Run',       animated: true },
+  { key: 'reconnect', title: 'Reconnect', animated: true },
   { key: 'paused',    title: 'Paused' },
   { key: 'results',   title: 'Results' }
 ];

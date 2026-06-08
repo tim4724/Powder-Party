@@ -653,6 +653,7 @@ export class SceneRenderer {
     this.skiers.set(id, {
       id, group, body, cam, blob, label, steerBar, steerFill, name,
       colorIndex, celled,
+      reconnecting: false, reconnectEl: null, // dropped-player reconnect card, centred in this cell by _loop
       camPos: new THREE.Vector3(), camTarget: new THREE.Vector3(),
       fov: BASE_FOV, init: false, lean: 0, tuckAmt: 0, pose: null, finished: false,
     });
@@ -666,9 +667,45 @@ export class SceneRenderer {
     c.blob.geometry.dispose(); c.blob.material.dispose();
     if (c.label && c.label.parentNode) c.label.parentNode.removeChild(c.label);
     if (c.steerBar && c.steerBar.parentNode) c.steerBar.parentNode.removeChild(c.steerBar);
+    if (c.reconnectEl && c.reconnectEl.parentNode) c.reconnectEl.parentNode.removeChild(c.reconnectEl);
     this.skiers.delete(id);
     const i = this._order.indexOf(id);
     if (i >= 0) this._order.splice(i, 1);
+  }
+
+  // Re-key a skier's render entry from one id to another (a dropped player
+  // reconnects on a different device). Keeps the same meshes, label and
+  // split-screen cell — only the id it's filed under changes, so the chase camera
+  // keeps following it. The reconnect card is dropped: a re-key means the seat's back.
+  rekeySkier(oldId, newId) {
+    if (oldId === newId) return false;
+    const c = this.skiers.get(oldId);
+    if (!c || this.skiers.has(newId)) return false;
+    this.setSkierReconnect(oldId, null);
+    c.id = newId;
+    this.skiers.delete(oldId);
+    this.skiers.set(newId, c);
+    for (let i = 0; i < this._order.length; i++) {
+      if (this._order[i] === oldId) this._order[i] = newId;
+    }
+    return true;
+  }
+
+  // Show (el) or clear (null) a dropped player's reconnect card, centred in their
+  // split-screen cell by _loop. `el` is the card DOM built by the display layer
+  // (carries the rejoin QR). No-op if the skier has no cell (e.g. a CPU racer or
+  // an unknown id) — reconnect cards only show in a human's cell.
+  setSkierReconnect(id, el) {
+    const c = this.skiers.get(id);
+    if (!c || !c.label) return false; // cell-less / unknown skier → nowhere to centre it
+    if (c.reconnectEl && c.reconnectEl !== el && c.reconnectEl.parentNode) {
+      c.reconnectEl.parentNode.removeChild(c.reconnectEl);
+    }
+    if (!el) { c.reconnectEl = null; c.reconnecting = false; return true; }
+    c.reconnectEl = el;
+    c.reconnecting = true;
+    if (el.parentNode !== this.overlay) this.overlay.appendChild(el);
+    return true;
   }
 
   setSkierPose(id, pos, forward, up, carve = 0, spd = 0, airborne = false, tuck = 0, air = 0, spin = 0, crashed = false, trickActive = false, trickAngle = 0, trickPhase = 0, carveInput = 0) {
@@ -824,14 +861,29 @@ export class SceneRenderer {
       r.setScissor(x, yBottom, cw, ch);
       r.setScissorTest(true);
       r.render(this.scene, c.cam);
+      // While a dropped player's reconnect card owns the cell, the live HUD
+      // (label + steer bar) is hidden so the card is the whole story for that seat.
+      const rc = c.reconnecting && !!c.reconnectEl;
       // position the DOM label in the cell (CSS px, top-left origin)
-      if (c.label) { c.label.style.left = (x + 14) + 'px'; c.label.style.top = (row * ch + 12) + 'px'; }
+      if (c.label) {
+        c.label.style.display = rc ? 'none' : 'flex';
+        c.label.style.left = (x + 14) + 'px'; c.label.style.top = (row * ch + 12) + 'px';
+      }
       // steer bar: centred along the cell bottom, hidden once the skier finishes
       // (it's on autopilot then — the finish stat in the label says it all).
       if (c.steerBar) {
-        c.steerBar.style.display = c.finished ? 'none' : 'block';
+        c.steerBar.style.display = (c.finished || rc) ? 'none' : 'block';
         c.steerBar.style.left = (x + cw / 2) + 'px';
         c.steerBar.style.top = (row * ch + ch - 56) + 'px';
+      }
+      // Reconnect QR: centred in the dropped player's cell while their skier keeps
+      // its place on the slope, so they (or a fresh phone) can scan and drop back in.
+      if (c.reconnectEl) {
+        c.reconnectEl.style.display = rc ? 'flex' : 'none';
+        if (rc) {
+          c.reconnectEl.style.left = (x + cw / 2) + 'px';
+          c.reconnectEl.style.top = (row * ch + ch / 2) + 'px';
+        }
       }
     });
 

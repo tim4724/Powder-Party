@@ -23,7 +23,7 @@ var STUN_URL = 'stun:stun.couch-games.com:3478';
 // a plain object with a `.type` drawn from here.
 var MSG = {
   // Controller -> Display
-  HELLO: 'hello',                     // {name?} sent right after join
+  HELLO: 'hello',                     // {name?, rejoinToken?} sent right after join — rejoinToken claims a dropped seat (cross-device reconnect, from the big screen's QR ?claim=)
   // CONTROL — the hot path (~25Hz, fastlane). All fields are latest-wins safe:
   //   s : carve  [-1,1]  gyro roll (or air-lean while airborne). 0 = straight.
   //   t : tuck   0|1     DEFAULT 1 (tucked/fast); 0 only while BRAKING (held).
@@ -41,6 +41,7 @@ var MSG = {
   RETURN_TO_LOBBY: 'return_to_lobby', // "New run" — abort back to the lobby (host)
   PAUSE_GAME: 'pause_game',           // request a pause (any player, mid-countdown/run)
   RESUME_GAME: 'resume_game',         // request resume from the pause overlay
+  LEAVE: 'leave',                     // intentional exit (back-out) — display frees the seat at once (no reconnect QR)
   PING: 'ping',
 
   // Display -> specific controller

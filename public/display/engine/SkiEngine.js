@@ -252,6 +252,24 @@ export class SkiEngine {
     return true;
   }
 
+  // Re-key a live skier from one id to another — a dropped player reconnects on a
+  // DIFFERENT device (new peerIndex) but their skier keeps descending. Preserves
+  // all skier state; updates the map key, the skier's own id and its place in the
+  // finish order so nothing dangles on the old id. No-op (false) if the source
+  // skier is gone or the target id is already taken.
+  rekeyCar(oldId, newId) {
+    if (oldId === newId) return false;
+    const c = this.skiers.get(oldId);
+    if (!c || this.skiers.has(newId)) return false;
+    this.skiers.delete(oldId);
+    c.id = newId;
+    this.skiers.set(newId, c);
+    for (let i = 0; i < this.finishedOrder.length; i++) {
+      if (this.finishedOrder[i] === oldId) this.finishedOrder[i] = newId;
+    }
+    return true;
+  }
+
   update(dtMs) {
     const dt = Math.min(dtMs / 1000, 0.05);
     if (dt <= 0) return;

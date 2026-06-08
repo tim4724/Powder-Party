@@ -2,7 +2,7 @@
 // in the browser, renders it, and drives the lobby/run lifecycle. Phones are
 // thin controllers reached over the relay (DisplayNet). Adapted from the
 // reference kart display main.js — same orchestration shape, ski game logic.
-import { DisplayNet, fetchQR, renderQR, renderJoinUrl } from './Net.js';
+import { DisplayNet, fetchQR, renderQR, renderJoinUrl, buildReconnectCard } from './Net.js';
 import { SceneRenderer } from './SceneRenderer.js';
 import { buildSlopeById, buildGeneratedSlope } from './SlopeBuilder.js';
 import { SLOPES } from '../shared/slopes.js';
@@ -71,6 +71,8 @@ let lastHud = 0;
 const net = new DisplayNet({
   onRoomReady,
   onRosterChange: renderRoster,
+  onReconnectChange: renderReconnect,   // dropped seats awaiting a rejoin → QR cards
+  onPlayerRekey: rekeyPlayer,           // cross-device rejoin: move their skier to the new slot
   onControllerMessage,
 });
 
@@ -92,17 +94,51 @@ function onControllerMessage(from, data) {
   else if (data.type === MSG.RETURN_TO_LOBBY) { if (from === net.flow.host) returnToLobby(); }
 }
 
-// A human leaving mid-run forfeits: drop their skier from the engine so the run
-// can still reach raceOver (forceRemoveCar re-checks it and may end the run),
-// and remove their mesh. Without this a departed skier never finishes and the
-// run only ends via the MAX_RUN_MS failsafe.
-net.flow.on('playerleave', ({ peerIndex }) => {
-  if (session && humanIds.has(peerIndex)) {
-    humanIds.delete(peerIndex);
-    session.forceRemoveCar(peerIndex);
-    scene.removeSkier(peerIndex);
+// Pull a human's skier out of the live run: drop it from the engine so the run
+// can still reach raceOver (forceRemoveCar re-checks it and may end the run), and
+// remove its mesh. Without this a departed skier never finishes and the run only
+// ends via the MAX_RUN_MS failsafe. Fires on playerleave — a clean back-out
+// (LEAVE) or a dropped seat whose reconnect grace window elapsed — and when every
+// connected human is home but a dropped ghost is still "on track" (see onFrame).
+// A brief mid-run disconnect does NOT come through here: the skier is kept
+// descending (camera stays on it) so a quick reconnect resumes driving.
+function forfeitSkier(peerIndex) {
+  if (!session || !humanIds.has(peerIndex)) return;
+  humanIds.delete(peerIndex);
+  _rcShown.delete(peerIndex);   // keep the reconnect-card bookkeeping in sync with the removed skier
+  session.forceRemoveCar(peerIndex);
+  scene.removeSkier(peerIndex);
+}
+net.flow.on('playerleave', ({ peerIndex }) => forfeitSkier(peerIndex));
+
+// A dropped player reconnected on a different device (new peerIndex): move their
+// still-descending skier — engine, render entry and results identity — onto the
+// new slot so that phone drives it and the camera keeps following the same skier.
+function rekeyPlayer(oldId, newId) {
+  if (!session || !session.rekeyCar(oldId, newId)) return;
+  scene.rekeySkier(oldId, newId);
+  if (humanIds.delete(oldId)) humanIds.add(newId);
+  if (_rcShown.delete(oldId)) _rcShown.add(newId);
+  for (const p of currentField) { if (p.peerIndex === oldId) p.peerIndex = newId; }
+}
+
+// Dropped-seat reconnect cards: a QR centred in each disconnected player's
+// split-screen cell so they can scan — their own phone OR a new one — and drop
+// back into their exact seat. The card rides on their still-descending skier via
+// the renderer; SceneRenderer._loop keeps it centred. Driven by
+// DisplayNet.onReconnectChange; diffed against what's shown so a roster reshuffle
+// only adds/removes the cards that changed.
+const _rcShown = new Set(); // skier ids currently showing a reconnect card
+function renderReconnect(seats) {
+  const want = new Set(seats.map((s) => s.peerIndex));
+  for (const id of [..._rcShown]) {
+    if (!want.has(id)) { scene.setSkierReconnect(id, null); _rcShown.delete(id); }
   }
-});
+  for (const s of seats) {
+    if (_rcShown.has(s.peerIndex)) continue;             // already showing this seat's card
+    if (scene.setSkierReconnect(s.peerIndex, buildReconnectCard(s))) _rcShown.add(s.peerIndex);
+  }
+}
 
 // ---- lobby roster --------------------------------------------------------
 function renderRoster(roster, host) {
@@ -214,11 +250,14 @@ function driveBots() {
 
 function humansAllDone() {
   if (!humanIds.size) return false; // all-CPU preview: never fast-forward
+  let live = 0;
   for (const id of humanIds) {
+    if (net.flow.isDisconnected(id)) continue; // a dropped ghost can't finish — don't let it hold up the run
+    live++;
     const s = session.engine.skiers.get(id);
     if (s && !s.finished) return false;
   }
-  return true;
+  return live > 0; // false when every remaining human is dropped (MAX_RUN_MS failsafe covers that)
 }
 
 // Are any skiers still sliding? Drives the post-results coast-out: once the panel
@@ -239,7 +278,17 @@ scene.onFrame = (dt) => {
     // → endRun), so re-check raceEnded before the humans-done trigger fires too.
     driveBots();
     session.update(dt * 1000);
-    if (!raceEnded && session.racing && humansAllDone()) endRun(session.getResults());
+    if (!raceEnded && session.racing && humansAllDone()) {
+      // Every connected human is home. A dropped racer's UNFINISHED ghost can never
+      // cross the line (no input), so forfeit it now — otherwise the run would hang
+      // on it (raceOver never trips) until the MAX_RUN_MS failsafe. A ghost that
+      // already finished keeps its real result (it must NOT be dropped — that's the
+      // very "missing from results" bug this whole feature fixes).
+      for (const [id, s] of session.engine.skiers) {
+        if (!aiBots.has(id) && net.flow.isDisconnected(id) && !s.finished) forfeitSkier(id);
+      }
+      if (!raceEnded) endRun(session.getResults()); // forfeiting the last ghost may have ended it
+    }
   } else if (worldMoving()) {
     // Results panel is up but the field is still in motion: keep stepping so the
     // just-finished skier glides to a natural stop and any CPU still out race in,
@@ -368,6 +417,7 @@ function showResults(results, field = currentField) {
 function teardownRun() {
   if (session) { session.dispose(); session = null; }
   for (const p of currentField) scene.removeSkier(p.peerIndex);
+  _rcShown.clear(); // drop any stale reconnect-card bookkeeping before the next run
   currentField = []; aiBots = new Map(); humanIds = new Set();
   raceEnded = false; paused = false;
   audio.stopWind();
@@ -445,7 +495,7 @@ if (params.get('test') === '1' || scenario) {
     { scenario: scenario || 'running', players: parseInt(params.get('players'), 10) || (scenario === 'tricks' ? 1 : 4), host: parseInt(params.get('host'), 10) || 0 },
     // Inject the REAL render fns so the harness previews the live DOM path rather
     // than a hand-copy (which drifts — see renderRoster/showResults).
-    { scene, slope, scenePromise, SKIER_COLORS, AiController, AI_PERSONALITIES, RunSession, renderRoster, showResults }
+    { scene, slope, scenePromise, SKIER_COLORS, AiController, AI_PERSONALITIES, RunSession, renderRoster, showResults, buildReconnectCard }
   ));
 } else {
   showLobby();

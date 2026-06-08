@@ -109,6 +109,11 @@ export class RunSession {
     return removed;
   }
 
+  // Move a still-descending skier from one id to another (a dropped player
+  // reconnects on a different device → new peerIndex). Delegates to
+  // SkiEngine.rekeyCar. Returns truthy if the skier existed and was moved.
+  rekeyCar(oldId, newId) { return this.engine.rekeyCar(oldId, newId); }
+
   getSnapshot() { return this.engine.getSnapshot(); }
   getResults()  { return this.engine.getResults(); }
 
