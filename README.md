@@ -66,7 +66,12 @@ The display page drives itself from fake data with `?test=1&scenario=…` (no re
 - `/?test=1&scenario=lobby` — orbiting slope preview + fake roster
 - `/?test=1&scenario=slope` — clean orbiting slope preview, CPU field (no overlays)
 - `/?test=1&scenario=tricks` — **drive skier 0 from the keyboard** beside the ramps to feel the
-  brake/flip loop (A/D carve · hold S brake · ↑/Space back flip · ↓ front · Q/E spin · Z/C corks)
+  brake/flip loop (A/D carve · hold S brake · ↑/Space back flip · W/↓ front · Q/E spin · Z/C corks)
+- `/?scenario=solo` — **play single player on the big screen, no phone**: a real race down a
+  generated mountain against a CPU field, you in a full-screen chase cell. Keyboard: A/D carve ·
+  hold S brake · Q spin-left · W front flip · E spin-right · Space back flip (Z/C corks). The
+  finish holds the results board — Enter (or "Play again") skis it again. `&players=N` sizes the
+  field (default you + 3 CPU), `&seed=N` picks the mountain.
 - `/?test=1&scenario=countdown` · `…&scenario=paused`
 
 The phone controller previews a single screen the same way, off the relay:
