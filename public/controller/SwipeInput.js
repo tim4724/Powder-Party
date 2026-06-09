@@ -6,16 +6,13 @@
 //
 //   press DOWN and HOLD            →  BRAKE (sit up, scrub speed, sharp carve).
 //     t drops to 0 while held; releasing returns to the default tuck (t=1).
-//   quick FLICK UP                 →  JUMP (a wrapping counter j; bigger at a
-//     ramp lip). The display turns the SAME up-flick into a flip when the skier
-//     is already airborne — it owns the jump-vs-trick decision (it has the
-//     authoritative air state), so this module just reports the gesture.
 //   quick FLICK in the air         →  a FLIP, fully ANALOG: the swipe ANGLE picks
 //     the trick — up = back, down = front, left/right = spin, diagonals = corks —
 //     and how hard you throw sets the spin rate. Every flick rides the {n,a,m}
-//     edge `f` (a = angle, m = strength). An upward flick ALSO bumps j, so a
-//     JUMP on the snow stays angle-independent (a sloppy up-flick still launches),
-//     while the air reads f's exact angle.
+//     edge `f` (a = angle, m = strength). On the snow a flick does nothing — there
+//     is no jump gesture; RAMPS auto-launch you. An upward flick ALSO bumps a
+//     legacy jump edge `j`, which the display reads ONLY in the air, as a back-flip
+//     fallback for non-analog inputs (the air otherwise reads f's exact angle).
 //
 // A flick is a FAST swipe (released within FLICK_MAX_MS); a brake is a SUSTAINED
 // downward hold. A quick down-flick therefore reads as a front flip (in the air),
@@ -25,7 +22,7 @@
 // Both j and f are latest-wins-safe wrapping edges: the display fires one action
 // per CHANGE, so a dropped fastlane frame just re-delivers the same value.
 //
-// This module owns only brake + jump + flip; carve lives in TiltInput.js. They
+// This module owns only brake + flick; carve lives in TiltInput.js. They
 // merge at the CONTROL payload boundary in main.js, never inside either module.
 //
 // Pointer events (not touch events) unify mouse (desktop test) + touch. The
@@ -41,7 +38,7 @@ const BRAKE_THRESHOLD_PX = 40;  // downward travel before a hold counts as a bra
 const FLICK_THRESHOLD_PX = 46;  // travel a quick swipe needs to count as a flick
 const FLICK_MAX_MS = 300;       // a flick must complete within this (else it's a hold/tap)
 const FLICK_MAG_SPAN = 140;     // travel (px) PAST the threshold that maps to full strength (m=1)
-const UP_CONE = Math.PI / 3;    // a flick within ±60° of straight up also pops a JUMP on the snow
+const UP_CONE = Math.PI / 3;    // a flick within ±60° of straight up also bumps the legacy jump edge j (air back-flip fallback)
 
 const clamp = (x, lo, hi) => (x < lo ? lo : x > hi ? hi : x);
 // Is this flick angle "upward" enough to also count as a jump pop? (up = +π/2,
@@ -140,7 +137,8 @@ export class SwipeInput {
   }
 
   // Route a flick: every flick rides the analog trick edge f; an upward flick
-  // ALSO bumps the jump edge j (so a JUMP on the snow stays angle-independent).
+  // ALSO bumps the legacy jump edge j (the display reads j only in the air, as a
+  // back-flip fallback — the snow has no jump gesture; ramps auto-launch).
   _fireFlick(a, m = 0.6) {
     this._flickAngle = a;
     this._flickMag = m;
@@ -168,8 +166,8 @@ export class SwipeInput {
   }
 
   // --- keyboard fallback / testing (works over plain HTTP — no touchscreen) ---
-  // Hold S = brake. Space / ArrowUp = jump (or back flip in the air). ArrowDown =
-  // front flip, Q = spin-left, E = spin-right. (ArrowLeft/Right + A/D are carve,
+  // Hold S = brake. Space / ArrowUp = back flip (in the air; nothing on the snow).
+  // ArrowDown = front flip, Q = spin-left, E = spin-right. (ArrowLeft/Right + A/D are carve,
   // owned by TiltInput, so they're left alone here.) Each trick key maps to the
   // same gesture angle a real flick would produce.
   _bindKeys() {
@@ -180,7 +178,7 @@ export class SwipeInput {
         if (!this._keyBrake) { this._keyBrake = true; this._braking = true; this.onBrakeStart(); }
         e.preventDefault();
       } else if (k === 'arrowup' || k === ' ') {
-        if (!this._keyUp) { this._keyUp = true; this._fireFlick(Math.PI / 2); }   // jump / back flip
+        if (!this._keyUp) { this._keyUp = true; this._fireFlick(Math.PI / 2); }   // back flip (air); nothing on the snow
         e.preventDefault();
       } else if (k === 'arrowdown') {
         if (!this._keyDown) { this._keyDown = true; this._fireFlick(-Math.PI / 2); } // front flip

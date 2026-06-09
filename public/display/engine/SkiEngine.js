@@ -231,14 +231,15 @@ export class SkiEngine {
     if (Number.isFinite(msg.s)) c.carve = clamp(msg.s, -1, 1);
     if (typeof msg.t === 'number') c.tuck = msg.t > 0.5 ? 1 : 0;
     else if (typeof msg.t === 'boolean') c.tuck = msg.t ? 1 : 0;
-    // Jump: a wrapping counter (rides the latest-wins fastlane — a dropped frame
-    // just re-delivers the same value). Fire once per fresh value. Grounded it
-    // pops a jump; airborne it spins a BACK flip (resolved in update()).
+    // Jump edge: a wrapping counter (rides the latest-wins fastlane — a dropped
+    // frame just re-delivers the same value). Fire once per fresh value. On the
+    // snow it does nothing (ramps auto-launch); airborne it spins a BACK flip
+    // (resolved in update()).
     if (Number.isFinite(msg.j) && msg.j !== c.jumpSeq) { c.jumpSeq = msg.j; c.wantJump = true; }
     // Trick flick: a wrapping {n,a,m} edge (same latest-wins dedup), AIR-ONLY and
     // ANALOG — a = flick angle (rad, up=+π/2): up→back, down→front, sides→spin,
     // diagonals→cork; m = flick strength 0..1 → spin rate. (An up-flick also bumps
-    // j, so a JUMP on the snow stays angle-independent; the air reads f's angle.)
+    // j, but j is air-only here — a back-flip fallback; the snow ignores it.)
     if (msg.f && Number.isFinite(msg.f.n) && msg.f.n !== c.trickSeq) {
       c.trickSeq = msg.f.n;
       if (Number.isFinite(msg.f.a)) {

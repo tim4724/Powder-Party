@@ -32,7 +32,8 @@ const el = (id) => document.getElementById(id);
 // the controller's TiltInput (carve) + SwipeInput (brake/jump/flip) key maps so the
 // no-relay preview exercises the real engine input path. Flicks are ANALOG: each
 // trick key emits an angle (rad, up = +π/2) on f, matching SwipeInput's gesture
-// angles. The up key ALSO bumps j (jump on the snow / back flip in the air).
+// angles. The up key ALSO bumps j (ignored on the snow, where ramps auto-launch;
+// a back-flip fallback in the air).
 function keyboardDriver() {
   const st = { left: false, right: false, brake: false };
   let jSeq = 0, fSeq = 0, fAngle = 0;

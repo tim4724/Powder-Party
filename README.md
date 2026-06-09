@@ -5,7 +5,7 @@ shared screen is the slope. A couch party game for 1–4 players on one display.
 
 ![4-player split-screen](artwork/splitscreen-4p.png)
 
-**▶ [Play it live](https://powder-main.couch-games.com/)** · **[UI gallery](https://powder-main.couch-games.com/gallery.html)**
+**▶ [Play it live](https://powder.couch-games.com/)** · **[UI gallery](https://powder-main.couch-games.com/gallery.html)**
 
 ## The idea
 
@@ -20,11 +20,13 @@ You're **tucked and fast by default** — you only touch the pad to do something
 | **Tilt** the phone left/right | **Carve** left/right (gyro roll) |
 | *(rest — nothing)* | **Tuck** — the default: squat for speed (soft steering) |
 | **Hold down** | **Brake** — sit up to scrub speed and carve hard (corners, trees) |
-| **Flick up** | **Jump** — bigger off a ramp lip; a back **flip** if you're already in the air |
-| **Flick in the air** (up/down/left/right) | A **flip** — back / front / side. Land it for a small boost; land mid-flip and you wash out |
+| **Flick in the air** (any direction) | A **trick** — the angle picks it: up = back flip, down = front, sides = spin, diagonals = cork. Land it clean for a small boost; land mid-rotation and you wash out |
+
+There's **no jump button**: ramps **auto-launch** you when you ski over the lip — the faster you
+hit it, the bigger the air.
 
 The core loop: **rip the straights** tucked, **hold to brake** into the bends and around the
-trees, **flick up at the ramp lips** for the biggest air, and **flip** off the big jumps for a
+trees, **hit the ramps** for air, and **flip** off the big jumps for a
 boost — but only if you have the air to finish the rotation. First skier to the bottom wins.
 Short-handed lobbies are topped up with CPU skiers so a solo player still races.
 
@@ -34,7 +36,7 @@ Same display-authoritative model as the sibling games (Tiny-Track-Party, HexStac
 the **display browser runs the authoritative simulation** and renders it with Three.js; the
 Node server only serves static files + a QR/JSON API (no game logic, no WebSocket). Phones are
 thin controllers. Game events flow display → relay → controllers over a
-[Party-Sockets](https://github.com/tim4654/Party-Sockets) WebSocket relay; the hot-path
+[Party-Sockets](https://github.com/tim4724/Party-Sockets) WebSocket relay; the hot-path
 `CONTROL` input (`{s: carve, t: tuck/brake, j: up-flick edge, f: air-flick edge}`) rides a low-latency WebRTC fastlane with
 relay fallback. The transport kit (`partyplug/`) and Three.js (`vendor/`) are reused verbatim
 from the sibling games.
@@ -111,7 +113,7 @@ public/
     TestHarness.js         #   no-relay preview scenarios
   controller/              # the phone (tilt + swipe)
     TiltInput.js           #   gyro → carve
-    SwipeInput.js          #   hold → brake, flick up → jump, flick in air → flip
+    SwipeInput.js          #   hold → brake, flick (in the air) → trick
     Net.js, main.js, ui.js
   gallery*.{html,js}       # no-relay preview gallery (Display / Phone / Slopes tabs)
   gallery.css              #   shared gallery chrome
