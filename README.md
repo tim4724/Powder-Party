@@ -78,7 +78,7 @@ The display page drives itself from fake data with `?test=1&scenario=…` (no re
 
 The phone controller previews a single screen the same way, off the relay:
 `/controller/index.html?scenario=playing&color=2` (scenarios: `name`, `name-connecting`,
-`lobby-host`, `lobby-waiting`, `countdown`, `playing`, `tuck`, `air`, `paused`, `finished`,
+`lobby-host`, `lobby-waiting`, `countdown`, `playing`, `brake`, `paused`, `finished`,
 `results` (host), `results-waiting` (non-host); `color` 0–7 picks the livery).
 
 ### Gallery
@@ -119,7 +119,7 @@ public/
   gallery.css              #   shared gallery chrome
 partyplug/                 # reusable party-game transport kit (served under /partyplug/)
 vendor/three/              # vendored Three.js (served under /vendor/)
-tests/engine.test.js       # SkiEngine unit tests (node:test)
+tests/                     # SkiEngine + slope-generator unit tests (node:test)
 scripts/capture-artwork.js # headless 4-player split-screen hero shot → artwork/ (Playwright)
 ```
 
