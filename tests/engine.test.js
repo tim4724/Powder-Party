@@ -155,7 +155,7 @@ test('an air flip lands clean and banks a trick boost', async () => {
   const events = [];
   const e = await makeEngine([1], track({ length: 300 }), { onEvent: (ev) => events.push(ev) });
   run(e, 1.0, () => e.processInput(1, { s: 0, t: 1, j: 0 })); // get moving, straight line
-  // a generous pop — plenty of air to finish a 0.45s flip
+  // a generous pop — plenty of air to finish a flip
   const sk = [...e.skiers.values()][0];
   sk.airborne = true; sk.vAir = 12; sk.air = 0.01; sk.airPeak = 0; sk.trickCount = 0;
   let flipSent = false, sawAxis = false;
@@ -175,7 +175,7 @@ test('landing mid-flip washes you out', async () => {
   const events = [];
   const e = await makeEngine([1], track({ length: 300 }), { onEvent: (ev) => events.push(ev) });
   run(e, 1.0, () => e.processInput(1, { s: 0, t: 1, j: 0 }));
-  // at the apex with little airtime left — a 0.45s flip can't finish before the snow
+  // at the apex with little airtime left — the flip can't finish before the snow
   const sk = [...e.skiers.values()][0];
   sk.airborne = true; sk.vAir = 0; sk.air = 0.6; sk.airPeak = 0.6; sk.trickCount = 0;
   e.processInput(1, { s: 0, t: 1, j: 1 }); // flick now (already above the arm gate)

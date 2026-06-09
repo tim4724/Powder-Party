@@ -10,7 +10,6 @@ const FAKE_NAMES = ['Mia', 'Theo', 'Ava', 'Leo', 'Zoe', 'Max', 'Ivy', 'Sam'];
 
 const el = (id) => document.getElementById(id);
 
-// runControllerScenario({ scenario, color })
 export function runControllerScenario(opts) {
   const COLORS = window.SKIER_COLORS || ['#2bb673'];
   const scenario = opts.scenario;
@@ -23,8 +22,6 @@ export function runControllerScenario(opts) {
   // surface glow, the carve fill, and the skier-picker tiles).
   const myColor = COLORS[color % COLORS.length];
   document.documentElement.style.setProperty('--car', myColor);
-
-  window.__TEST__ = window.__TEST__ || {};
 
   // Results board — mirrors main.js renderResults + renderResultFoot. `over=false`
   // is the "you just finished, others still out" state (some rows "Skiing…", a

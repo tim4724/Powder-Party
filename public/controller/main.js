@@ -8,7 +8,7 @@ import { SwipeInput } from './SwipeInput.js';
 import { applyLatencyChip, renderWaitNote } from './ui.js';
 import { keepScreenOn, letScreenSleep } from '../shared/WakeLock.js';
 
-const { MSG, SKIER_COLORS } = window;
+const { MSG, ROOM_STATE, SKIER_COLORS } = window;
 const el = (id) => document.getElementById(id);
 
 const screens = { name: el('name'), lobby: el('lobby'), game: el('game'), results: el('results') };
@@ -142,7 +142,7 @@ function handleMessage(data) {
       // lobby, but a player who rejoins mid-run (reconnected, or scanned the
       // reconnect QR) must drop straight back into the run instead of stalling on
       // the lobby — their skier is still on the slope waiting for input.
-      if (data.roomState === 'countdown' || data.roomState === 'playing') {
+      if (data.roomState === ROOM_STATE.COUNTDOWN || data.roomState === ROOM_STATE.PLAYING) {
         inResults = false;
         show('game');
         el('drive-hud').classList.remove('hidden');
@@ -195,7 +195,7 @@ function handleMessage(data) {
       break;
     case MSG.PLAYER_STATE:
       if (inResults) break;            // finished → results overlay owns the screen now
-      // Light HUD feed (~10Hz): {position, of, progress, airborne, finished}
+      // Light HUD feed (~6.5 Hz): {position, of, progress, airborne, finished}
       el('pos').textContent = data.finished ? `Done P${data.position}` : `P${data.position}`;
       el('pos').classList.toggle('leader', data.position === 1);
       break;

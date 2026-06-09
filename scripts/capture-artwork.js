@@ -48,7 +48,6 @@ const WAIT_MS = parseInt(args.wait, 10) || 11000;      // let skiers get mid-slo
 const PORT = parseInt(args.port, 10) || 4319;          // off the default 4000 dev port
 const OUT = path.resolve(ROOT, args.out || 'artwork/splitscreen-4p.png');
 
-// Poll the server root until it answers (or time out).
 function waitForServer(port, timeoutMs = 15000) {
   const deadline = Date.now() + timeoutMs;
   return new Promise((resolve, reject) => {

@@ -446,7 +446,7 @@ export class SkiEngine {
       const steerIn = Math.sign(c.carve) * Math.pow(Math.abs(c.carve), STEER_EXPO);
       c.heading += STEER_SIGN * steerIn * c.turn * turnMul * authority * dt;
 
-      const before = this.centerline.sampleAt(Math.max(0, c.totalS));
+      const before = frame; // same s as the slope sample above — totalS hasn't moved yet
       const along = Math.cos(c.heading), acrossSign = Math.sin(c.heading);
       const prevTotal = c.totalS;
       c.totalS += c.v * Math.max(0.1, along) * dt; // always some forward progress

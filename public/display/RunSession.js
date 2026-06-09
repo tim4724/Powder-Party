@@ -96,8 +96,8 @@ export class RunSession {
   }
 
   // Skip the rest of the run in one synchronous burst (real deterministic
-  // physics, no rendering) when every human has finished and only CPU skiers
-  // are still descending — humans shouldn't watch them crawl to the bottom.
+  // physics, no rendering). Used by the test harness's 'results' scenario to
+  // synthesize a finished run.
   fastForwardToEnd(stepBots, dtMs = 1000 / 30) {
     if (!this.racing || this.paused || this._ended) return;
     let guard = 0;

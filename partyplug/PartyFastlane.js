@@ -31,13 +31,13 @@
  * onPeerClosed so callers can fall back or update UI.
  *
  * Perfect negotiation: higher-indexed peer is polite (rolls back on
- * collision); lower-indexed peer is impolite. setSelfIndex must be called
- * before open() so the role is known.
+ * collision); lower-indexed peer is impolite. selfIndex (constructor option
+ * or setSelfIndex) must be set before open() so the role is known.
  */
 (function () {
   var RTC_KEY = '__rtc';
 
-  // Netcode parameters. See plan doc for derivation.
+  // Netcode parameters.
   // TICK_MS:     resend cadence while ring has unacked events.
   // TTL_MS:      how long a re-sendable event stays in the ring (3× TICK_MS).
   // IDLE_MS:     heartbeat cadence when ring is empty.

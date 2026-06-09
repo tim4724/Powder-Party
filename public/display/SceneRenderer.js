@@ -245,6 +245,7 @@ export class SceneRenderer {
     const NB = 6;                       // groomer passes across the piste
     const PASS = 0xffffff, GROOVE = 0xf6f9fc, DEEP = 0xedf2f8, WALL = 0xf4f8fd;
     const n = samples.length;
+    const groundY = track.groundY != null ? track.groundY : -2;
     for (let p = 0; p < NB; p++) {      // groomed piste passes
       const a = -pisteHalf + (2 * pisteHalf) * (p / NB);
       const b = -pisteHalf + (2 * pisteHalf) * ((p + 1) / NB);
@@ -261,7 +262,7 @@ export class SceneRenderer {
     // instead of a thin ribbon floating over the flat ground — which the rotating
     // lobby camera exposed from the side. The outer edge meets the ground plane
     // (groundY) exactly, so the whole mountain reads as one piece.
-    this._addFlanks(meshSamples, edgeLat, (track.groundY != null ? track.groundY : -2));
+    this._addFlanks(meshSamples, edgeLat, groundY);
 
     // Edge markers (alternating poles) along the GROOMED edge (±pisteHalf) — they
     // mark where the deep snow starts and double as depth/speed cues.
@@ -307,7 +308,7 @@ export class SceneRenderer {
     // the lower end of a long slope, leaving a void the flanks now drape into.) It
     // sits at the finish elevation so the flanks meet it seamlessly.
     const groundSpan = Math.max(size.x, size.z) + this._ovRadius * 3;
-    this.ground.position.set(this._trackCenter.x, (track.groundY != null ? track.groundY : -2), this._trackCenter.z);
+    this.ground.position.set(this._trackCenter.x, groundY, this._trackCenter.z);
     this.ground.scale.set(groundSpan / 1200, groundSpan / 1200, 1);
 
     const half = Math.max(size.x, size.y, size.z) * 0.5 + 6;
@@ -343,7 +344,7 @@ export class SceneRenderer {
     // the SAME forest (two independent streams so tweaking one doesn't shift the other).
     const sceneSeed = _hashStr(track.def && track.def.id ? track.def.id : 'slope');
     this._addScenery(samples, edgeLat, mulberry32(sceneSeed));
-    this._addOuterTrees(samples, edgeLat, (track.groundY != null ? track.groundY : -2), mulberry32(sceneSeed ^ 0x9e3779b9));
+    this._addOuterTrees(samples, edgeLat, groundY, mulberry32(sceneSeed ^ 0x9e3779b9));
   }
 
   // One snow strip from lateral offset offA→offB, optionally rising in world-Y
@@ -517,7 +518,6 @@ export class SceneRenderer {
     // so its top face ramps up along the slope tangent.
     const w = (r.width || 2.4), len = 3.0, h = 0.5;
     const geo = new THREE.BoxGeometry(w, h, len);
-    // shear the top forward by translating top verts — simpler: just a tilted box
     const ramp = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x7fc4ec, roughness: 0.8 }));
     ramp.castShadow = true; ramp.receiveShadow = true;
     const lateral = f.lateral.clone().normalize();

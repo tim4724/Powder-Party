@@ -30,7 +30,6 @@
 class PartyConnection {
   constructor(relayUrl, options) {
     this.relayUrl = relayUrl;
-    // The relay requires a clientId; generate a session-stable one if omitted.
     this.clientId = (options && options.clientId) || PartyConnection._genClientId();
     this.ws = null;
     this._reconnectTimer = null;
@@ -173,7 +172,6 @@ class PartyConnection {
   }
 }
 
-// Export for both Node.js and browser
 if (typeof window !== 'undefined') {
   window.PartyConnection = PartyConnection;
 }

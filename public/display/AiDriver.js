@@ -50,7 +50,7 @@ function cornerAhead(skier, centerline) {
 
 // Carve one skier toward the lookahead point (optionally offset to a held lane).
 // Returns a carve input in [-1, 1] for engine.processInput {s}.
-export function pursue(skier, centerline, { lookahead = LOOKAHEAD, gain = STEER_GAIN, laneBias = 0 } = {}) {
+function pursue(skier, centerline, { lookahead = LOOKAHEAD, gain = STEER_GAIN, laneBias = 0 } = {}) {
   if (!skier || !skier.pose) return 0;
   const f = centerline.sampleAt(skier.totalS + lookahead);
   const tgt = f.pos.clone().addScaledVector(f.lateral, laneBias);

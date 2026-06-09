@@ -125,7 +125,6 @@ class AirConsoleAdapter {
    */
   connect() {
     this._connectCalled = true;
-    // If AirConsole already fired onReady, synthesize protocol events now
     if (this._acReady) {
       this._fireReady();
     }

@@ -66,7 +66,8 @@ var MSG = {
 // here. All other traffic and WS fallback flow through the relay.
 var FASTLANE_TYPES = { control: true };
 
-// Room states (must match partyplug RoomFlow.STATES; asserted at display boot).
+// Room states (must match partyplug RoomFlow.STATES — keep in sync by hand;
+// the controller page never loads RoomFlow, so the values live here too).
 var ROOM_STATE = {
   LOBBY: 'lobby',
   COUNTDOWN: 'countdown',
@@ -95,7 +96,6 @@ var SKIER_COLORS = [
   '#56ccf2'  // cyan
 ];
 
-// Export for both Node.js and browser.
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     MSG, FASTLANE_TYPES, ROOM_STATE,

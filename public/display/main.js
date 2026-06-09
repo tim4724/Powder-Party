@@ -437,7 +437,7 @@ function teardownRun() {
 function returnToLobby() {
   teardownRun();
   net.flow.transitionTo(ROOM_STATE.LOBBY);
-  net.broadcast({ type: MSG.GAME_END, results: null });
+  net.broadcast({ type: MSG.GAME_END });
   scene.orbit = true;
   showLobby();
 }

@@ -285,9 +285,7 @@ describe('PartyFastlane / netcode', () => {
       const { fastlane, peerIdx } = makeFastlane();
       fastlane.enqueue(peerIdx, { a: 1 });
       const before = fastlane.getStats(peerIdx).out;
-      // Simulate teardown
       fastlane._teardownPeer(peerIdx);
-      // Stats survive
       assert.strictEqual(fastlane.getStats(peerIdx).out, before);
     });
 
