@@ -98,7 +98,7 @@ export async function runDisplayScenario(cfg, ctx) {
     if (me) { me.lat = 0; me.heading = 0; }
   }
   // `bump` lab: pack the whole field into ONE tight cluster just below the gate so
-  // they're already overlapping (lanes ~0.8u apart < the ~1.1u contact footprint)
+  // they're already overlapping (lanes ~0.55u apart < the ~0.8u contact footprint)
   // and start jostling the instant the run begins — no waiting for a chance scrum.
   function seedCluster(sess) {
     const ids = field.map((p) => p.peerIndex);
@@ -106,7 +106,7 @@ export async function runDisplayScenario(cfg, ctx) {
       const sk = sess.engine.skiers.get(id);
       if (!sk) return;
       sk.totalS = 6;
-      sk.lat = (i - (ids.length - 1) / 2) * 0.8; // symmetric about the fall line
+      sk.lat = (i - (ids.length - 1) / 2) * 0.55; // symmetric about the fall line
       sk.heading = 0; sk.v = 0;
     });
   }

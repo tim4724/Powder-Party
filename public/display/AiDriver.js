@@ -95,6 +95,9 @@ const URGENT_TIME = 0.35;    // a tree within v·this AND needing a big swerve �
 const URGENT_MOVE = 1.0;     // …only when the lane is still this far off (else dodge it TUCKED) —
                             // keeps the stand-up rare: small dodges are carved without braking
 const SKIER_LOOK = 8.0;      // give a skier this far ahead room (pick a passing line)
+const SKIER_ABREAST = 2.0;   // a skier within this |Δs| is riding ALONGSIDE — dodge it too, so the pair doesn't lock together
+const PEEL_STACK = 1.2;      // …and if it's also within this of our lane we're stacked: peel deterministically apart
+const PEEL_BIAS = 1.6;       // how far (u) that peel shoves our preferred lane to its assigned (by-id) side
 const RAMP_LOOK = 16.0;      // a reachable kicker within this pulls the bolder bots in
 const RAMP_REACH = 2.2;      // …but only if it's already within this of the current line
 // Racing line: the preferred lateral leans toward the INSIDE of the bend ahead (the
@@ -199,12 +202,27 @@ export class AiController {
       bands.push({ lo: o.lat - need, hi: o.lat + need });
       if (ds < nearestDs) nearestDs = ds;
     }
+    // Other skiers carve a forbidden band too — but a pure "look AHEAD" scan misses a
+    // rival riding right ALONGSIDE (|ds|≈0): the pair locks together and neither peels
+    // off (the "two skiers stuck" bug). So treat near-abreast skiers as a hazard as
+    // well, and when we're stacked almost dead on someone's line, peel our preferred
+    // lane AWAY from them — toward the side we're already on, so the move cooperates
+    // with the physics push-apart rather than fighting it. Dead-even (same lat) breaks
+    // the tie by id so the pair always splits to OPPOSITE sides, never chase the same.
+    let peel = 0;
     for (const b of skiers.values()) {
       if (b === skier || b.finished || b.airborne) continue;
       const ds = b.totalS - s0;
-      if (ds <= 0 || ds > SKIER_LOOK) continue;
+      const ahead = ds > 0 && ds <= SKIER_LOOK;
+      const abreast = Math.abs(ds) < SKIER_ABREAST;
+      if (!ahead && !abreast) continue;
       const need = skier.radius + b.radius + 0.4;
       bands.push({ lo: b.lat - need, hi: b.lat + need });
+      if (abreast && Math.abs(b.lat - cur) < PEEL_STACK) {
+        const side = cur - b.lat; // which side of them we're already on
+        peel += Math.abs(side) > 1e-3 ? Math.sign(side)
+              : (String(skier.id) < String(b.id) ? -1 : 1); // string-compare → works for numeric or 'me'-style ids
+      }
     }
 
     // Preferred line: a RACING LINE — lean toward the inside of the bend ahead so the
@@ -221,6 +239,7 @@ export class AiController {
         if (ds > 0 && ds < RAMP_LOOK && Math.abs(r.lat - cur) < RAMP_REACH) { pref = r.lat; break; }
       }
     }
+    if (peel) pref += peel * PEEL_BIAS;   // shove off a skier we're riding right on top of
     pref = clamp(pref, -maxLane, maxLane);
     if (!bands.length) return { lat: pref, urgent: false };
 

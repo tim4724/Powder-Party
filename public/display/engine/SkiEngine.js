@@ -70,17 +70,21 @@ const SPIN_DRAG = 9.0;      // u/s² speed bleed while wiping out (coasts to a n
 const SPIN_TURNS = 2;       // cosmetic whole turns over CRASH_TIME (multiple of 2π → lands on 0)
 
 // ---- Skier-vs-skier contact ---------------------------------------------
-// Skiers are SOFT bumpers, not hazards. Overlapping in the (s,lat) plane shoves
-// them apart LATERALLY (never along s — that would teleport race progress and is
-// exploitable) and a trailing skier can't tunnel through the one ahead: it tucks
-// in behind (the draft/pack feel). Contact bleeds a little speed from both. Only
-// a FAST, side-on hit (a T-bone) actually wipes out — and then BOTH skiers on the
-// snow spin out (it's a tangle); a plain rear-end just blocks. Air is a separate
-// dimension, so a skier clearing the field overhead passes clean through.
-// STARTING VALUES — tune by feel.
+// Skiers are SOFT bumpers, not hazards. Their contact footprint is TIGHTER than
+// their obstacle radius (SKIER_HITBOX_MUL) — brushing shoulders shouldn't read as a
+// hit. Overlapping in the (s,lat) plane shoves them apart LATERALLY (never along s —
+// that would teleport race progress and is exploitable) and a trailing skier can't
+// tunnel through the one directly ahead: it tucks in behind (the draft/pack feel).
+// Contact bleeds only a LITTLE speed — light enough that a bump costs momentum but
+// never stops your run. Only a FAST, side-on hit (a T-bone) actually wipes out — and
+// then BOTH skiers on the snow spin out (it's a tangle); a plain rear-end just blocks.
+// Air is a separate dimension, so a skier clearing the field overhead passes clean
+// through. STARTING VALUES — tune by feel.
+const SKIER_HITBOX_MUL = 0.72; // skier-skier footprint as a fraction of the summed obstacle radii (tighter than a tree hit)
 const BUMP_PUSH = 0.5;      // share of the lateral overlap each skier is pushed out per frame
 const BUMP_EPS = 0.12;      // min lateral split (u) to unstack a dead nose-to-tail jam (ndl≈0)
-const BUMP_DAMP = 0.25;     // fraction of the closing speed bled from BOTH skiers on contact
+const BUMP_DAMP = 0.05;     // fraction of the closing speed bled from BOTH skiers on contact (very low → a bump barely costs momentum)
+const BUMP_BLOCK_NORMAL = 0.5; // contact must be at least this head-on (|nds|) to draft-block — abreast skiers are NOT speed-locked
 const TBONE_LATERAL = 0.5;  // contact normal must be at least this sideways (|ndl|) to count as a T-bone vs a rear-end
 const TBONE_CLOSING = 6.0;  // lateral closing speed (u/s) above which a side-on hit wipes BOTH skiers out
                             // (well clear of the ~2u/s of incidental jostle, so light side-by-side contact stays a soft bump)
@@ -490,10 +494,10 @@ export class SkiEngine {
 
   // Skier-vs-skier soft contact: one relaxation pass over all pairs (N is tiny,
   // so O(N²) is free), run AFTER every skier has integrated this frame so it acts
-  // on settled positions. Pushes overlapping skiers apart laterally, blocks a
-  // trailing skier from tunnelling through the one ahead, bleeds a little speed,
-  // and spins BOTH skiers out on a fast side-on hit (T-bone). Never moves anyone
-  // along s. See the contact constants above.
+  // on settled positions. Pushes overlapping skiers apart laterally, drafts a
+  // trailing skier behind the one directly ahead, bleeds a little speed, and spins
+  // BOTH skiers out on a fast side-on hit (T-bone). Never moves anyone along s. See
+  // the contact constants above.
   _resolveContacts() {
     const arr = [...this.skiers.values()];
     // Build this frame's contact sets fresh; `bump` events fire on the rising
@@ -505,7 +509,7 @@ export class SkiEngine {
       for (let j = i + 1; j < arr.length; j++) {
         const b = arr[j];
         if (b.finished) continue;
-        const rr = a.radius + b.radius;
+        const rr = (a.radius + b.radius) * SKIER_HITBOX_MUL; // tighter than a tree hit — shoulders can brush
         if (Math.abs(a.air - b.air) > rr) continue;   // one is flying clean over the other
         const ds = a.totalS - b.totalS, dl = a.lat - b.lat;
         const dist2 = ds * ds + dl * dl;
@@ -524,17 +528,23 @@ export class SkiEngine {
         // dead-stacked in one lane (ndl≈0) the lateral push vanishes, so add a
         // fixed nudge to unstack them — they ease apart over the next few frames.
         let dLat = BUMP_PUSH * pen * ndl;
-        if (Math.abs(ndl) < 0.2) dLat += BUMP_EPS * (a.id < b.id ? 1 : -1);
+        if (Math.abs(ndl) < 0.2) dLat += BUMP_EPS * (String(a.id) < String(b.id) ? 1 : -1); // string-compare → stable for numeric or 'me'-style ids
         a.lat += dLat; b.lat -= dLat;
 
-        // --- LONGITUDINAL block (the draft / pack feel) --------------------
-        // The trailing skier can't pass THROUGH the one ahead: clamp its speed to
-        // the leader's so it tucks in behind instead of tunnelling past.
-        if (ds > 0) { if (b.v > a.v) b.v = a.v; }     // a leads, b trails
-        else { if (a.v > b.v) a.v = b.v; }            // b leads, a trails
+        // --- LONGITUDINAL draft block (rear-ends only) ---------------------
+        // A trailing skier can't pass THROUGH the one directly ahead: clamp its
+        // speed to the leader's so it tucks in behind. ONLY when the contact is more
+        // along-slope than sideways (|nds| ≥ BUMP_BLOCK_NORMAL, i.e. within ~60° of
+        // straight-behind) — abreast skiers must not be speed-locked, which is
+        // exactly what knots two of them together riding side by side.
+        if (Math.abs(nds) >= BUMP_BLOCK_NORMAL) {
+          if (ds > 0) { if (b.v > a.v) b.v = a.v; }   // a leads, b trails
+          else { if (a.v > b.v) a.v = b.v; }          // b leads, a trails
+        }
 
         // --- SPEED scrub on contact ----------------------------------------
-        // Bleed a share of the closing speed from both (an inelastic-ish bump).
+        // Bleed a small share of the closing speed from both — light enough that a
+        // bump costs a little momentum but never stops you dead.
         const closing = Math.max(0, (bSV - aSV) * nds + (bLatV - aLatV) * ndl);
         const scrub = BUMP_DAMP * closing;
         a.v = Math.max(0, a.v - scrub);

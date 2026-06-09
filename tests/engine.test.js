@@ -345,9 +345,9 @@ test('overlapping skiers are pushed apart laterally without wiping out', async (
   const events = [];
   const e = await makeEngine([1, 2], track({ length: 300, width: 20 }), { onEvent: (ev) => events.push(ev) });
   const a = e.skiers.get(1), b = e.skiers.get(2);
-  a.totalS = 20; a.lat = 0.3; a.heading = 0; a.v = 8;
-  b.totalS = 20; b.lat = -0.3; b.heading = 0; b.v = 8;
-  const gap0 = Math.abs(a.lat - b.lat);                 // 0.6 < combined radius (1.1) → overlapping
+  a.totalS = 20; a.lat = 0.15; a.heading = 0; a.v = 8;
+  b.totalS = 20; b.lat = -0.15; b.heading = 0; b.v = 8;
+  const gap0 = Math.abs(a.lat - b.lat);                 // 0.3 < the skier-skier footprint (~0.8) → overlapping
   run(e, 0.2, () => { e.processInput(1, { s: 0, t: 1, j: 0 }); e.processInput(2, { s: 0, t: 1, j: 0 }); });
   const gap1 = Math.abs(a.lat - b.lat);
   assert.ok(gap1 > gap0 + 0.3, `contact spreads the pair laterally (${gap0.toFixed(2)} → ${gap1.toFixed(2)})`);
@@ -375,7 +375,7 @@ test('a fast side-on hit (T-bone) spins BOTH skiers out', async () => {
   const e = await makeEngine([1, 2], track({ length: 300, width: 20 }), { onEvent: (ev) => events.push(ev) });
   const victim = e.skiers.get(1), aggressor = e.skiers.get(2);
   victim.totalS = 40; victim.lat = 0; victim.heading = 0; victim.v = 10;       // holding a straight line
-  aggressor.totalS = 40; aggressor.lat = 1.0; aggressor.heading = 0.6; aggressor.v = 18; // carving hard across into them
+  aggressor.totalS = 40; aggressor.lat = 0.6; aggressor.heading = 0.6; aggressor.v = 18; // carving hard across into them
   e.update(1000 / 60);
   const tbones = events.filter((ev) => ev.type === 'crash' && ev.tbone);
   assert.ok(tbones.length >= 1, 'a fast side-on hit fires a T-bone crash');
@@ -383,6 +383,62 @@ test('a fast side-on hit (T-bone) spins BOTH skiers out', async () => {
   assert.ok(aggressor.spinT > 0, 'the aggressor goes down too — a T-bone is a tangle, both crash');
   const crashedIds = new Set(tbones.map((t) => t.id));
   assert.ok(crashedIds.has(1) && crashedIds.has(2), 'both skiers are reported in the crash');
+});
+
+test('a moderate side-graze stays a soft bump (no wipeout) and barely scrubs speed', async () => {
+  const events = [];
+  const e = await makeEngine([1, 2], track({ length: 300, width: 20 }), { onEvent: (ev) => events.push(ev) });
+  const a = e.skiers.get(1), b = e.skiers.get(2);
+  a.totalS = 40; a.lat = 0; a.heading = 0; a.v = 9;             // holding the line
+  b.totalS = 40; b.lat = 0.5; b.heading = 0.3; b.v = 9;          // easing across — overlap, lateral close < TBONE_CLOSING
+  const vBefore = b.v;
+  e.update(1000 / 60);
+  assert.ok(!a.spinT && !b.spinT, 'a moderate graze does NOT wipe anyone out');
+  assert.ok(events.some((ev) => ev.type === 'bump'), 'it registers as a bump');
+  assert.ok(!events.some((ev) => ev.type === 'crash'), 'and never a crash');
+  assert.ok(b.v > vBefore - 0.6, `the light damping barely dents speed (${vBefore.toFixed(1)} → ${b.v.toFixed(1)})`);
+});
+
+test('abreast skiers are not speed-locked — only a true rear-end drafts', async () => {
+  const e = await makeEngine([1, 2], track({ length: 300, width: 20 }), {});
+  const lead = e.skiers.get(1), fast = e.skiers.get(2);
+  // `fast` rides alongside `lead` (a hair behind, half a lane to the side) much
+  // quicker. The contact normal is mostly SIDEWAYS, so the draft-block must NOT
+  // clamp it to the slower skier — that side-by-side speed-lock is what knotted
+  // two skiers together. A rear-end (covered above) still blocks.
+  // A hair behind (so the OLD always-on block would have clamped it) but well to
+  // the side, so the contact normal is clearly lateral (|nds| ≈ 0.08) — robust to
+  // reasonable hitbox re-tuning.
+  lead.totalS = 40.05; lead.lat = 0;   lead.heading = 0; lead.v = 6;
+  fast.totalS = 40.0;  fast.lat = 0.6; fast.heading = 0; fast.v = 14;
+  e.update(1000 / 60);
+  assert.ok(fast.v > 11, `the faster abreast skier keeps its speed (${fast.v.toFixed(1)}), not clamped to the leader's 6`);
+});
+
+test('two stacked CPU skiers peel apart to opposite sides instead of locking', async () => {
+  const { AiController } = await import('../public/display/AiDriver.js');
+  const e = await makeEngine([1, 2], track({ length: 300, width: 20 }), {});
+  const a = e.skiers.get(1), b = e.skiers.get(2);
+  // Both seeded on the SAME line (same lane bias) so, without a peel rule, each
+  // homes onto lat 0 and they ride locked together. Skier 1 starts a hair to the
+  // positive side, so the cooperative peel keeps it there and shoves skier 2 the
+  // other way.
+  a.totalS = 10; a.lat = 0.05; a.heading = 0; a.v = 8;
+  b.totalS = 10; b.lat = -0.05; b.heading = 0; b.v = 8;
+  const botA = new AiController({ skill: 0.9, laneBias: 0 });
+  const botB = new AiController({ skill: 0.9, laneBias: 0 });
+  let maxGap = 0, minGapLate = Infinity;
+  run(e, 1.5, (i) => {
+    e.processInput(1, botA.drive(a, e));
+    e.processInput(2, botB.drive(b, e));
+    const gap = Math.abs(a.lat - b.lat);
+    maxGap = Math.max(maxGap, gap);
+    if (i > 60) minGapLate = Math.min(minGapLate, gap); // after they've had time to separate
+  });
+  assert.ok(maxGap > 1.8, `the stacked pair clearly separates (peaked ${maxGap.toFixed(2)}u apart) instead of staying stuck`);
+  assert.ok(minGapLate > 1.0, `and stays well clear of the ~0.8u contact range once apart (closest later gap ${minGapLate.toFixed(2)}u)`);
+  assert.ok(a.lat > b.lat, 'each peels AWAY from the other — skier 1 keeps the side it started on');
+  assert.ok(!a.spinT && !b.spinT, 'peeling apart never crashes them');
 });
 
 test('a skier in the air passes clean over one on the snow', async () => {
