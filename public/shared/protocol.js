@@ -46,8 +46,9 @@ var MSG = {
 
   // Display -> specific controller
   WELCOME: 'welcome',                 // {peerIndex, colorIndex, hostPeerIndex, roomState, players}
+  ROOM_FULL: 'room_full',             // join refused — no free seat (room full, or every seat held for a reconnect)
   LOBBY_UPDATE: 'lobby_update',       // roster/host snapshot
-  PLAYER_STATE: 'player_state',       // {position, of, progress[0..1], airborne, finished} — light HUD feed (~10Hz)
+  PLAYER_STATE: 'player_state',       // {position, of, progress[0..1], airborne, finished} — light HUD feed (~6.5 Hz, see main.js HUD_HZ_MS)
   PONG: 'pong',
 
   // Display -> all controllers (broadcast)
@@ -55,7 +56,7 @@ var MSG = {
   GAME_START: 'game_start',
   STANDINGS: 'standings',             // {over, hostPeerIndex, total, order:[{playerId,name,colorIndex,ai,finished,time}]}
                                       // pushed as each skier finishes (over=false) + at run end (over=true)
-  GAME_END: 'game_end',               // {results} — sent on return-to-lobby; controllers go back to the lobby
+  GAME_END: 'game_end',               // return-to-lobby signal (no payload); controllers go back to the lobby
   GAME_PAUSED: 'game_paused',         // run frozen — controllers show the pause overlay
   GAME_RESUMED: 'game_resumed'        // run resumed — controllers hide the pause overlay
 };

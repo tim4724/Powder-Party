@@ -120,7 +120,15 @@ export class DisplayNet extends GameNet {
         // throwaway placeholder slot the relay just handed this fresh connection.
         this._claimReconnect(from, data);
         const p = this.flow.get(from);
-        if (p && data.name) p.name = String(data.name).slice(0, 16);
+        if (!p) {
+          // No seat: _addPeer declined this peer (room full — possibly every
+          // free relay slot's seat is held for a reconnect). Say so explicitly
+          // instead of sending a half-empty WELCOME that strands the phone in
+          // a grey-livery lobby limbo.
+          this.party.sendTo(from, { type: MSG.ROOM_FULL });
+          break;
+        }
+        if (data.name) p.name = String(data.name).slice(0, 16);
         this.party.sendTo(from, this._welcomeFor(from));
         this._broadcastLobby();
         this.onRosterChange(this.roster(), this.flow.host);

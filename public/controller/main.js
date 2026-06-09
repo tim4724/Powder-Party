@@ -149,6 +149,15 @@ function handleMessage(data) {
       }
       break;
     }
+    case MSG.ROOM_FULL:
+      // The display had no seat for us (room full / seats held for reconnects).
+      // Drop the relay connection (frees our placeholder slot) and put the name
+      // screen back so the player can retry once a seat opens.
+      net.disconnect();
+      setJoining(false);
+      setStatus('Room is full — wait for a seat to open, then try again.');
+      show('name');
+      break;
     case MSG.LOBBY_UPDATE: {
       roster = data.players || [];
       hostPeerIndex = data.hostPeerIndex;
