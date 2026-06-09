@@ -159,6 +159,10 @@ export class TiltInput {
   _bindKeys() {
     if (typeof window === 'undefined') return;
     const set = (e, down) => {
+      // Never steal keys from a text field (the name input) — the
+      // preventDefault below would swallow "a"/"d"/arrows while typing a name.
+      const t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
       const k = e.key.toLowerCase();
       if (k === 'arrowleft' || k === 'a') { this._keyL = down; e.preventDefault(); }
       else if (k === 'arrowright' || k === 'd') { this._keyR = down; e.preventDefault(); }

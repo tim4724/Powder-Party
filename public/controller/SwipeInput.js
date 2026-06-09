@@ -172,7 +172,16 @@ export class SwipeInput {
   // same gesture angle a real flick would produce.
   _bindKeys() {
     if (typeof window === 'undefined') return;
+    // Never steal keys from a text field (the name input): these are
+    // window-level listeners, live from construction, and their preventDefault
+    // would otherwise swallow "s"/space/arrows while typing a name — and fire
+    // phantom brake/flick callbacks (buzz, HUD flashes) on every keystroke.
+    const typing = (e) => {
+      const t = e.target;
+      return !!(t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable));
+    };
     window.addEventListener('keydown', (e) => {
+      if (typing(e)) return;
       const k = e.key.toLowerCase();
       if (k === 's') {
         if (!this._keyBrake) { this._keyBrake = true; this._braking = true; this.onBrakeStart(); }
@@ -192,6 +201,7 @@ export class SwipeInput {
       }
     });
     window.addEventListener('keyup', (e) => {
+      if (typing(e)) return;
       const k = e.key.toLowerCase();
       if (k === 's') { this._keyBrake = false; this._endBrake(); e.preventDefault(); }
       else if (k === 'arrowup' || k === ' ') { this._keyUp = false; e.preventDefault(); }
