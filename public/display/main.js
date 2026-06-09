@@ -9,6 +9,7 @@ import { SLOPES } from '../shared/slopes.js';
 import { RunSession } from './RunSession.js';
 import { AiController, AI_PERSONALITIES } from './AiDriver.js';
 import { SlopeAudio } from './Audio.js';
+import { keepScreenOn } from '../shared/WakeLock.js';
 
 const {
   MSG, ROOM_STATE, COUNTDOWN_SECONDS, MAX_PLAYERS, SKIER_COLORS,
@@ -495,6 +496,9 @@ window.addEventListener('keydown', (e) => {
 });
 
 // ---- boot: test harness (no relay) OR live play --------------------------
+// Keep the shared screen awake for the whole session — the lobby QR is the
+// party's front door, so the lock isn't scoped to active races.
+keepScreenOn();
 const scenario = params.get('scenario');
 if (params.get('test') === '1' || scenario) {
   import('./TestHarness.js').then(({ runDisplayScenario }) => runDisplayScenario(

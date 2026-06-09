@@ -6,6 +6,7 @@ import { ControllerNet } from './Net.js';
 import { TiltInput } from './TiltInput.js';
 import { SwipeInput } from './SwipeInput.js';
 import { applyLatencyChip, renderWaitNote } from './ui.js';
+import { keepScreenOn, letScreenSleep } from '../shared/WakeLock.js';
 
 const { MSG, SKIER_COLORS } = window;
 const el = (id) => document.getElementById(id);
@@ -21,6 +22,9 @@ function show(name) {
   const prev = currentScreen;
   currentScreen = name;
   for (const k of Object.keys(screens)) screens[k].classList.toggle('hidden', k !== name);
+  // In-room the phone must not dim: carving is tilt-only, so a whole run can
+  // pass without a touch. The name screen lets the phone manage itself.
+  if (name === 'name') letScreenSleep(); else keepScreenOn();
   // Push history only when stepping UP a level (name → lobby). Same-level and
   // back transitions don't push, so there's exactly one entry to pop: pressing
   // back from anywhere in the room returns to the name screen in one step.
