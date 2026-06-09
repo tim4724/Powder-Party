@@ -21,10 +21,12 @@
 // which is stable and easy to tune). targetV is set by slope steepness, tuck,
 // and how hard you're carving; v eases toward it. All STARTING VALUES — tune in
 // playtest (see the test-plan notes in the README).
+// `export`ed constants are imported by AiDriver — the bot plans against the
+// same physics it drives, so a retune here can never silently strand it.
 const VMAX = 20;            // baseline top schuss speed (u/s) for the Racer benchmark
-const SIN_REF = 0.31;       // sin(18°) — the "reference pitch" steepNorm is 1.0 at
-const STEEP_MIN = 0.40;     // speed-cap floor on a near-flat runout (still glides out)
-const STEEP_MAX = 1.85;     // speed-cap ceiling on the steepest pitch (~35° tops out;
+export const SIN_REF = 0.31;       // sin(18°) — the "reference pitch" steepNorm is 1.0 at
+export const STEEP_MIN = 0.40;     // speed-cap floor on a near-flat runout (still glides out)
+export const STEEP_MAX = 1.85;     // speed-cap ceiling on the steepest pitch (~35° tops out;
                             // the slopes now run steeper, so the ceiling is raised to match → more speed)
 const NOTUCK_CAP = 0.78;    // upright, you only reach 78% of the pitch's top speed…
 const TUCK_CAP = 1.00;      // …tuck (squat) to unlock the full speed. THE core gain.
@@ -50,7 +52,7 @@ const TURN_RATE = 1.45;     // rad/s edge rate at full carve for the benchmark (
 const STEER_EXPO = 1.7;     // small tilt = gentle, full tilt = full lock
 const MAX_HEADING = 1.15;   // ~66° clamp — can never point uphill (always some descent)
 const STEER_SIGN = -1;      // tilt right → carve right (negated; matches AiDriver pursue)
-const TUCK_TURN_MUL = 0.45; // TUCK halves your carve authority — can't tuck AND turn hard
+export const TUCK_TURN_MUL = 0.45; // TUCK halves your carve authority — can't tuck AND turn hard
 const AIR_TURN_MUL = 0.55;  // mid-air you can lean/steer, but with reduced authority
 
 // ---- Off-piste (deep snow) ----------------------------------------------
@@ -90,7 +92,7 @@ const TBONE_CLOSING = 6.0;  // lateral closing speed (u/s) above which a side-on
                             // (well clear of the ~2u/s of incidental jostle, so light side-by-side contact stays a soft bump)
 
 // ---- Jump / air ---------------------------------------------------------
-const GRAV_AIR = 22.0;      // u/s² pulling you back to the snow while airborne (lower = more hang time for tricks)
+export const GRAV_AIR = 22.0;      // u/s² pulling you back to the snow while airborne (lower = more hang time for tricks)
 const RAMP_POP = 7.5;       // u/s up from hitting a ramp (auto-launch, ∝ speed → ~0.9u apex). NB: "flick up to jump" on the snow was removed — ramps launch you automatically.
 const LAND_CLEAN_ACROSS = 0.42; // |across| under this on touchdown = clean landing (keep speed + boost)
 const LAND_BOOST = 1.18;    // clean big-air landing multiplies speed briefly
@@ -106,8 +108,8 @@ const LAND_WIPE_ACROSS = 0.85;  // landing this sideways = wipeout
 // wipeout spin-out). A clean landing after ≥1 flip banks a small speed boost;
 // only ONE flip runs at a time. STARTING VALUES — tune by feel in the `tricks`
 // test scenario (see TestHarness / README).
-const TRICK_DURATION = 0.30;   // s for one full rotation — short enough to chain (airtime/0.30 = max flips, so speed + slope + a timed pop = more flips). Test: a rollover lands a double, a timed lip pop a triple.
-const TRICK_MIN_AIR = 0.55;    // height (u) a flip arms at — keeps tiny hops (apex <0.55) from auto-crashing. Test: a plain roll-over hop must NOT arm a trick.
+export const TRICK_DURATION = 0.30;   // s for one full rotation — short enough to chain (airtime/0.30 = max flips, so speed + slope + a timed pop = more flips). Test: a rollover lands a double, a timed lip pop a triple.
+export const TRICK_MIN_AIR = 0.55;    // height (u) a flip arms at — keeps tiny hops (apex <0.55) from auto-crashing. Test: a plain roll-over hop must NOT arm a trick.
 const TRICK_BOOST = 1.08;      // per-flip landing speed-ceiling boost (compounds, combo-capped). Test: gains from flips must stay well under a missed flip's CRASH_TIME cost.
 const TRICK_BOOST_T = 0.9;     // s the trick landing boost lasts (reuses the clean-landing boost machinery)
 const TRICK_MAX_COMBO = 3;     // boost compounds over at most this many flips in one air (a monster launch can't run away)

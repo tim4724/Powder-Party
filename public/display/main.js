@@ -50,6 +50,13 @@ let slope = makeSlope();
 const scene = new SceneRenderer(el('scene'), SKIER_COLORS);
 scene.orbit = true;
 const audio = new SlopeAudio();
+// Web Audio unlocks only via a user gesture ON THIS page — startRun is driven
+// by a phone message, which doesn't count, so without this the race can stay
+// silent until someone touches the display. resume() is idempotent; the
+// pointer listener is `once` (the keydown one stays — harmless, and it covers
+// a keyboard-only display).
+window.addEventListener('pointerdown', () => audio.resume(), { once: true });
+window.addEventListener('keydown', () => audio.resume(), { once: true });
 let sceneReady = false;
 const scenePromise = scene.load().then(() => {
   scene.setTrack(slope, { debug: params.get('centerline') === '1' });
@@ -303,7 +310,7 @@ scene.onFrame = (dt) => {
   const snap = session.getSnapshot();
   let packSpd = 0;
   for (const s of snap.skiers) {
-    if (s.pose) scene.setSkierPose(s.id, s.pose.pos, s.pose.forward, s.pose.up, s.carve, s.v, s.airborne, s.tuck, s.air, s.spin, s.crashed, s.trickActive, s.trickAngle, s.trickPhase, s.carveInput);
+    if (s.pose) scene.setSkierPose(s.id, s);
     packSpd = Math.max(packSpd, s.v);
     if (!raceEnded && (s.offPiste || (s.crashed && s.spin))) audio.scrape(0.8); // deep-snow hiss / wipeout
   }

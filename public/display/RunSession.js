@@ -35,6 +35,13 @@ export class RunSession {
   startCountdown(seconds) {
     this._countdownN = seconds;
     this._onCountdownTick(this._countdownN);
+    this._armCountdown();
+  }
+
+  // The ticking interval alone (no immediate announce) — shared by
+  // startCountdown and a resume mid-countdown, which must pick the count back
+  // up at the banked n WITHOUT re-announcing (and re-beeping) it.
+  _armCountdown() {
     this._countdownTimer = setInterval(() => {
       this._countdownN -= 1;
       this._onCountdownTick(this._countdownN);
@@ -74,7 +81,7 @@ export class RunSession {
     if (!this.paused || this._ended) return;
     this.paused = false;
     if (!this.racing && this._countdownN != null) {
-      this.startCountdown(this._countdownN);
+      this._armCountdown(); // continue from the banked n (no duplicate announce)
     } else if (this.racing) {
       if (this._countdownN === 0) { this._countdownN = null; this._onCountdownTick(-1); }
       if (this._raceRemainMs != null) { this._armRaceTimer(this._raceRemainMs); this._raceRemainMs = null; }

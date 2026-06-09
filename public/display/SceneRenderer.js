@@ -8,7 +8,7 @@
 //
 // Public API (called by main.js): constructor(container, colors), async load(),
 // setTrack(track,{debug}), addSkier(id,colorIndex,name,opts), removeSkier(id),
-// setSkierPose(...), setSkierHud(id,info), start(), stop(), onFrame, orbit.
+// setSkierPose(id, snap), setSkierHud(id,info), start(), stop(), onFrame, orbit.
 import * as THREE from 'three';
 import { mulberry32 } from '../shared/slopes.js';
 import { SkiTrails } from './SkiTrails.js';
@@ -708,14 +708,18 @@ export class SceneRenderer {
     return true;
   }
 
-  setSkierPose(id, pos, forward, up, carve = 0, spd = 0, airborne = false, tuck = 0, air = 0, spin = 0, crashed = false, trickActive = false, trickAngle = 0, trickPhase = 0, carveInput = 0) {
+  // Pose + per-frame visual state, fed one engine-snapshot skier (getSnapshot()
+  // shape): pose {pos,forward,up}, v, carve (turn-aligned) / carveInput (raw),
+  // tuck, airborne, air, spin, trickActive/trickAngle/trickPhase.
+  setSkierPose(id, s) {
     const c = this.skiers.get(id);
     if (!c) return;
-    c.spd = spd; c.airborne = airborne;
+    const pos = s.pose.pos;
+    c.spd = s.v; c.airborne = s.airborne;
     if (!c.pose) c.pose = { pos: new THREE.Vector3(), forward: new THREE.Vector3(), up: new THREE.Vector3() };
     c.pose.pos.copy(pos);
-    c.pose.forward.copy(forward).normalize();
-    c.pose.up.copy(up).normalize();
+    c.pose.forward.copy(s.pose.forward).normalize();
+    c.pose.up.copy(s.pose.up).normalize();
 
     c.group.position.copy(pos);
     // orientation basis: z = forward (down-slope), x = up × z, y = z × x
@@ -724,23 +728,23 @@ export class SceneRenderer {
     const y = this._sy.copy(z).cross(x).normalize();
     c.group.quaternion.setFromRotationMatrix(this._sBasis.makeBasis(x, y, z));
     // wipeout spin about the slope normal (cosmetic)
-    if (spin) c.group.rotateY(spin);
+    if (s.spin) c.group.rotateY(s.spin);
     // air trick: somersault the WHOLE skier about an ANALOG axis built from the
     // flick angle — pitch (local x) = front/back flip, yaw (local y) = spin, a
     // blend = a cork. The chase cam tracks pose.forward (not the group), so the
     // view holds steady while the skier flips.
-    if (trickActive) {
-      const tax = this._sTrickAxis.set(-Math.sin(trickAngle), Math.cos(trickAngle), 0).normalize();
-      c.group.rotateOnAxis(tax, trickPhase * _TAU);
+    if (s.trickActive) {
+      const tax = this._sTrickAxis.set(-Math.sin(s.trickAngle), Math.cos(s.trickAngle), 0).normalize();
+      c.group.rotateOnAxis(tax, s.trickPhase * _TAU);
     }
 
     // body: bank INTO the carve (negated — +carve is turn-aligned, and a positive
     // local-Z roll tilts the torso the opposite way), crouch + pitch when tucking
     const dt = this._frameDt || 0.016;
-    c.lean += (-carve * BANK_MAX - c.lean) * Math.min(1, dt * 12);
-    c.tuckAmt += ((tuck ? 1 : 0) - c.tuckAmt) * Math.min(1, dt * 10);
+    c.lean += (-s.carve * BANK_MAX - c.lean) * Math.min(1, dt * 12);
+    c.tuckAmt += ((s.tuck ? 1 : 0) - c.tuckAmt) * Math.min(1, dt * 10);
     c.body.rotation.z = c.lean;
-    c.body.rotation.x = c.tuckAmt * TUCK_PITCH + (airborne ? -0.2 : 0);
+    c.body.rotation.x = c.tuckAmt * TUCK_PITCH + (s.airborne ? -0.2 : 0);
     // squat: shrink toward the feet (pivot is at the base) rather than dropping the
     // body — keeps the whole skier above the snow, so it can't clip the surface.
     c.body.scale.setScalar(1 - c.tuckAmt * TUCK_SHRINK);
@@ -748,19 +752,19 @@ export class SceneRenderer {
     // contact shadow: lay it FLUSH on the (tilted) slope under the skier — normal
     // = slope up, lifted a hair ALONG that normal so it can't clip through the
     // surface (pose includes air height → subtract it to find the surface point).
-    c.blob.position.copy(pos).addScaledVector(c.pose.up, -air + 0.04);
+    c.blob.position.copy(pos).addScaledVector(c.pose.up, -s.air + 0.04);
     c.blob.quaternion.setFromUnitVectors(_zAxis, c.pose.up);
-    const sh = Math.max(0.35, 1 - air * 0.09); // shrink + fade with height
+    const sh = Math.max(0.35, 1 - s.air * 0.09); // shrink + fade with height
     c.blob.scale.set(sh, sh, 1);
     c.blob.material.opacity = 0.42 * sh;
 
     // on-screen steer bar: mirror the player's RAW carve input (the way they tilt),
     // not the turn-aligned value — same convention as the phone's carve bar.
-    if (c.steerFill) c.steerFill.style.transform = `translateX(${(carveInput * 50).toFixed(1)}%)`;
+    if (c.steerFill) c.steerFill.style.transform = `translateX(${(s.carveInput * 50).toFixed(1)}%)`;
 
     // ski tracks: carve a groove into the snow under the skis (no-op while
     // airborne — fed the already-normalised pose basis, surface point when grounded).
-    if (this.trails) this.trails.addPoint(id, pos, c.pose.forward, c.pose.up, airborne);
+    if (this.trails) this.trails.addPoint(id, pos, c.pose.forward, c.pose.up, s.airborne);
   }
 
   // Wipe all tracks (called at the start of each run so a fresh race starts clean).

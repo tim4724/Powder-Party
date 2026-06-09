@@ -228,7 +228,7 @@ export async function runDisplayScenario(cfg, ctx) {
     session.update(dt * 1000);
     const snap = session.getSnapshot();
     for (const s of snap.skiers) {
-      if (s.pose) scene.setSkierPose(s.id, s.pose.pos, s.pose.forward, s.pose.up, s.carve, s.v, s.airborne, s.tuck, s.air, s.spin, s.crashed, s.trickActive, s.trickAngle, s.trickPhase, s.carveInput);
+      if (s.pose) scene.setSkierPose(s.id, s);
       scene.setSkierHud(s.id, s);
     }
     // Run-over: auto-looping previews roll a fresh run; `solo` instead holds the

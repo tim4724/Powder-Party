@@ -13,8 +13,14 @@
 //
 // One source of truth for "drive the line," shared by the live race
 // (display/main.js driveBots) and the no-relay gallery preview (TestHarness).
-// Dependency-free (no THREE): it reads the vector frames `centerline.sampleAt`
-// returns and the plain scalar (s, lat) state on each skier.
+// THREE-free: it reads the vector frames `centerline.sampleAt` returns and the
+// plain scalar (s, lat) state on each skier. Its only import is the engine's
+// exported tuning constants, so the bot's model of the physics (carve ceiling,
+// gravity, trick gates) can never drift from the physics it actually flies.
+import {
+  SIN_REF, STEEP_MIN, STEEP_MAX, TUCK_TURN_MUL,
+  GRAV_AIR, TRICK_MIN_AIR, TRICK_DURATION,
+} from './engine/SkiEngine.js';
 
 const LOOKAHEAD = 8.0;    // world units down the line a bot aims at
 const STEER_GAIN = 1.7;   // carve per radian of heading error (proportional)
@@ -71,11 +77,10 @@ export function pursue(skier, centerline, { lookahead = LOOKAHEAD, gain = STEER_
 // is judged against a STABLE speed (vmax·steepNorm), NOT the live speed — else braking
 // would drop v, un-trip the test, and limit-cycle — so it flips only at real curve-in /
 // curve-out transitions, in sustained phases (not a per-frame flutter).
-const TUCK_TURN_MUL = 0.45;  // mirror SkiEngine.TUCK_TURN_MUL (tuck's carve-authority cut)
+// (TUCK_TURN_MUL / SIN_REF / STEEP_* are imported from the engine above.)
 const HOLD_FRAC = 1.40;      // brake once the bend needs this fraction of the tucked carve ceiling
                             // (lower → brakes earlier/more for turns, fewer understeer crashes)
 const TUCK_RESUME = 0.7;     // …re-tuck only once it eases back under this fraction of that (deadband)
-const SIN_REF = 0.31;        // mirror SkiEngine.SIN_REF (steepNorm reference pitch) for the speed ref
 
 // ---- Line selection (clear-lane planning) -------------------------------
 // A tree/skier carves a FORBIDDEN lateral band [lat ± need] for the stretch it
@@ -116,9 +121,9 @@ const DODGE_LOOK = 4.5;      // pursue lookahead while dodging — short = a har
 const HARD_DODGE_S = 7.0;    // a tree this close while dodging → stand up for full carve
 
 // ---- Air tricks ----------------------------------------------------------
-const GRAV_AIR = 22.0;       // MUST mirror SkiEngine.GRAV_AIR — used to estimate airtime
-const FLIP_MIN_AIR = 0.6;    // only flip once clearly above the engine's TRICK_MIN_AIR (0.55)
-const FLIP_DUR = 0.30;       // ~one back-flip rotation (engine TRICK_DURATION at m=0.6 ≈ 0.29s)
+// GRAV_AIR / TRICK_MIN_AIR / TRICK_DURATION come from the engine import above.
+const FLIP_MIN_AIR = TRICK_MIN_AIR + 0.05; // only flip once clearly above the engine's arm gate
+const FLIP_DUR = TRICK_DURATION; // ≥ one back-flip rotation (the engine's m=0.6 fallback spins a hair faster — errs safe)
 const FLIP_MARGIN = 0.22;    // airtime to spare beyond the rotation → never land mid-flip (a crash
                              // costs far more than the 8% boost, so the bot only flips when it's safe)
 const TRICK_SKILL_MIN = 0.78;// only the bolder bots bother seeking kickers / throwing a flip
@@ -159,7 +164,7 @@ export class AiController {
     // most bends railable, so this rarely trips. Judged at a STABLE speed
     // (vmax·steepNorm) with a deadband, so braking is sustained, not fluttering.
     const fr = centerline.sampleAt(Math.max(0, skier.totalS));
-    const steepNorm = clamp(Math.max(0, -fr.tangent.y) / SIN_REF, 0.40, 1.85);
+    const steepNorm = clamp(Math.max(0, -fr.tangent.y) / SIN_REF, STEEP_MIN, STEEP_MAX);
     const kv = cornerAhead(skier, centerline) * skier.vmax * steepNorm;
     const tuckCeil = skier.turn * TUCK_TURN_MUL;            // rad/s it can carve while tucked
     if (kv > tuckCeil * HOLD_FRAC) this._tuck = 0;
