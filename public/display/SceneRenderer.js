@@ -24,15 +24,24 @@ function _hashStr(s) {
 }
 
 // ---- camera + feel constants (starting values) --------------------------
-const CHASE_DIST = 7.4;     // how far behind the skier the cam sits
-const CHASE_HEIGHT = 4.4;   // how far above (raised so the slope ahead reads over the roll)
+const CHASE_DIST = 4.2;     // how far behind the skier the cam sits (tightened twice — 7.4 then 6.0 still read far)
+const CHASE_HEIGHT = 2.45;  // how far above (keeps ~the old 7.4:4.4 angle so the slope ahead still reads over the roll)
 const CHASE_LOOK = 11.0;    // how far ahead it looks
 const CHASE_TGT_UP = -0.6;  // aim slightly DOWN-slope (toward the piste ahead, not the horizon)
+const CAM_UP_WORLD = 0.5;   // height/up blend: 0 = rig fully in the slope frame (pitch-invariant), 1 = gravity
 const CAM_POS_RATE = 6.0;   // position damping (1-exp(-rate*dt))
 const CAM_TGT_RATE = 11.0;
-const BASE_FOV = 64;
-const FOV_GAIN = 0.45;      // FOV widens with speed (sells velocity)
+const MAX_CAM_DIST = 6.5;   // cap on cam→skier distance: the damped follow trails a moving skier by
+                            // ~v/CAM_POS_RATE (≈4u at race pace, more on boost), stretching the chase
+                            // well past the rig's intent — speed must not push the skier away
+const BASE_FOV = 58;        // calmer lens than the old 64 — wide-angle miniaturised the skier
+const FOV_GAIN = 0.3;       // FOV widens with speed (sells velocity; the counter-dolly holds the skier's size)
 const AIR_FOV = 6;          // extra FOV while airborne
+const TAN_HALF_BASE = Math.tan(BASE_FOV * Math.PI / 360); // counter-dolly reference (see _updateChase)
+const CELL_DOLLY = 0.75;    // short-cell compensation: the WHOLE rig (cam + look target) scales by
+                            // cellFrac^this in a half-height cell, recovering most of the skier's pixel
+                            // size while preserving the full-screen composition (all angles unchanged —
+                            // a lens-zoom was tried instead and cropped the skier at the cell bottom)
 const LOBBY_ORBIT_SPEED = 0.12; // rad/s
 
 const BANK_MAX = 0.5;       // body bank (rad) into a full carve
@@ -75,6 +84,7 @@ export class SceneRenderer {
     this._sTarget = new THREE.Vector3();
     this._sSurf = new THREE.Vector3();
     this._sTrickAxis = new THREE.Vector3();
+    this._sCamUp = new THREE.Vector3();
 
     this._initThree();
     this._initOverlay();
@@ -265,7 +275,11 @@ export class SceneRenderer {
     this._addFlanks(meshSamples, edgeLat, groundY);
 
     // Edge markers (alternating poles) along the GROOMED edge (±pisteHalf) — they
-    // mark where the deep snow starts and double as depth/speed cues.
+    // mark where the deep snow starts and double as depth/speed cues. They stand
+    // WORLD-vertical (like real slalom poles): plumb posts against the tilted
+    // piste are the strongest in-frame steepness cue the chase cam gets. The
+    // 0.05 base embed (1.1 tall, +0.5 lift) covers the downhill-edge gap a
+    // vertical pole leaves on the steepest pitch.
     const poleGeo = new THREE.CylinderGeometry(0.06, 0.06, 1.1, 6);
     const blue = new THREE.MeshStandardMaterial({ color: 0x2d9cdb });
     const red = new THREE.MeshStandardMaterial({ color: 0xe6492d });
@@ -277,7 +291,6 @@ export class SceneRenderer {
       const ez = s.pos.z + s.lateral.z * pisteHalf * side;
       const pole = new THREE.Mesh(poleGeo, side > 0 ? red : blue);
       pole.position.set(ex, ey + 0.5, ez);
-      pole.quaternion.setFromUnitVectors(_up, s.up);
       this.slopeGroup.add(pole);
     }
 
@@ -788,19 +801,41 @@ export class SceneRenderer {
     }
   }
 
-  _updateChase(c, dt) {
+  _updateChase(c, dt, cellFrac = 1) {
     const { pos, forward, up } = c.pose;
-    const want = this._sWant.copy(pos).addScaledVector(forward, -CHASE_DIST).addScaledVector(up, CHASE_HEIGHT);
-    const target = this._sTarget.copy(pos).addScaledVector(forward, CHASE_LOOK).addScaledVector(up, CHASE_TGT_UP);
+    // FOV first — it feeds the counter-dolly below.
+    const wantFov = BASE_FOV + (c.spd || 0) * FOV_GAIN + (c.airborne ? AIR_FOV : 0);
+    c.fov += (wantFov - c.fov) * (1 - Math.exp(-6 * dt));
+    // Cell compensation: a half-height cell (the 2×2 grid) renders the same view
+    // in half the pixels, so the skier reads twice as far away. Scale the whole
+    // rig (cam offset AND look target) in — a uniform scale preserves every
+    // angle of the full-screen composition, just from closer up.
+    const cell = Math.pow(cellFrac, CELL_DOLLY);
+    // Counter-dolly: as the FOV widens with speed, pull the chase offset in so
+    // the skier holds a constant angular size — speed reads as the world
+    // stretching wide (mild vertigo-zoom), not as the skier drifting away.
+    const dolly = (TAN_HALF_BASE / Math.tan(c.fov * Math.PI / 360)) * cell;
+    // Gravity-blended camera up: a rig built purely from the slope frame rotates
+    // WITH the terrain, so a 30° schuss framed identically to the 14° runout.
+    // Blending the height offset + cam.up toward world-up keeps the horizon
+    // honest and lets the piste visibly fall away on steeps. (A pitch-scaled
+    // look target was tried INSTEAD of the blend and felt worse — the constant
+    // down-slope aim stays.)
+    const camUp = this._sCamUp.copy(up).lerp(_up, CAM_UP_WORLD).normalize();
+    const want = this._sWant.copy(pos).addScaledVector(forward, -CHASE_DIST * dolly).addScaledVector(camUp, CHASE_HEIGHT * dolly);
+    const target = this._sTarget.copy(pos).addScaledVector(forward, CHASE_LOOK * cell).addScaledVector(up, CHASE_TGT_UP * cell);
     const aPos = 1 - Math.exp(-CAM_POS_RATE * dt);
     const aTgt = 1 - Math.exp(-CAM_TGT_RATE * dt);
     if (!c.init) { c.camPos.copy(want); c.camTarget.copy(target); c.init = true; }
     else { c.camPos.lerp(want, aPos); c.camTarget.lerp(target, aTgt); }
+    // Speed-lag cap (persistent, so the lag can't wind up past it; scaled with
+    // the cell rig like everything else).
+    const maxD = MAX_CAM_DIST * cell;
+    const d = c.camPos.distanceTo(pos);
+    if (d > maxD) c.camPos.sub(pos).multiplyScalar(maxD / d).add(pos);
     c.cam.position.copy(c.camPos);
-    const wantFov = BASE_FOV + (c.spd || 0) * FOV_GAIN + (c.airborne ? AIR_FOV : 0);
-    c.fov += (wantFov - c.fov) * (1 - Math.exp(-6 * dt));
     c.cam.fov = c.fov;
-    c.cam.up.copy(up);
+    c.cam.up.copy(camUp);
     c.cam.lookAt(c.camTarget);
   }
 
@@ -859,7 +894,7 @@ export class SceneRenderer {
       const col = i % cols, row = Math.floor(i / cols);
       const x = col * cw;
       const yBottom = H - (row + 1) * ch; // GL viewport origin = lower-left
-      this._updateChase(c, dt);
+      this._updateChase(c, dt, ch / H);
       c.cam.aspect = cw / ch; c.cam.updateProjectionMatrix();
       r.setViewport(x, yBottom, cw, ch);
       r.setScissor(x, yBottom, cw, ch);
