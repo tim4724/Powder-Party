@@ -786,9 +786,12 @@ export class SceneRenderer {
   setSkierHud(id, info) {
     const c = this.skiers.get(id);
     if (!c || !c.label) return;
-    c.finished = !!info.finished;   // gates the steer bar (hidden once finished, in _loop)
+    c.finished = !!(info.finished || info.dnf); // gates the steer bar (autopilot/parked skiers don't steer, in _loop)
     const stat = c.label.querySelector('.cell-label__stat');
-    if (info.finished) {
+    if (info.dnf) {
+      stat.textContent = 'DNF';
+      c.label.classList.add('is-finished');
+    } else if (info.finished) {
       stat.textContent = `P${info.position} · ${info.finishTime ? info.finishTime.toFixed(1) + 's' : 'done'}`;
       c.label.classList.add('is-finished');
     } else {

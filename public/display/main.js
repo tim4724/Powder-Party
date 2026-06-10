@@ -73,6 +73,7 @@ let humanIds = new Set();
 let paused = false;
 let raceEnded = false;       // results panel up (every human across) — world may still be coasting
 let raceEndedAt = 0;         // performance.now() when the panel went up — bounds the coast-out
+let coastSettled = false;    // one-shot: final board refresh once the coast-out comes to rest
 let lastHud = 0;
 
 // ---- net -----------------------------------------------------------------
@@ -82,6 +83,10 @@ const net = new DisplayNet({
   onReconnectChange: renderReconnect,   // dropped seats awaiting a rejoin → QR cards
   onPlayerRekey: rekeyPlayer,           // cross-device rejoin: move their skier to the new slot
   onControllerMessage,
+  // WELCOME's inRun flag: does this peer have a live (non-DNF) skier in the
+  // current run? A reconnecting phone that doesn't — its seat expired, or a
+  // rematch started without it — waits in its lobby instead of a dead game pad.
+  isInRun: (id) => { const s = session && session.engine.skiers.get(id); return !!s && !s.dnf; },
 });
 
 function onRoomReady({ joinUrl }) {
@@ -102,20 +107,29 @@ function onControllerMessage(from, data) {
   else if (data.type === MSG.RETURN_TO_LOBBY) { if (from === net.flow.host) returnToLobby(); }
 }
 
-// Pull a human's skier out of the live run: drop it from the engine so the run
-// can still reach raceOver (forceRemoveCar re-checks it and may end the run), and
-// remove its mesh. Without this a departed skier never finishes and the run only
-// ends via the MAX_RUN_MS failsafe. Fires on playerleave — a clean back-out
-// (LEAVE) or a dropped seat whose reconnect grace window elapsed — and when every
-// connected human is home but a dropped ghost is still "on track" (see onFrame).
-// A brief mid-run disconnect does NOT come through here: the skier is kept
-// descending (camera stays on it) so a quick reconnect resumes driving.
+// Forfeit a human's skier out of the live run: the engine marks it DNF so the
+// run can still reach raceOver (session.forfeit re-checks it and may end the
+// run). The skier is NOT removed — it keeps its split-screen cell (no layout
+// reshuffle for everyone else) and its DNF row in the results. Without this a
+// departed skier never finishes and the run only ends via the MAX_RUN_MS
+// failsafe. Fires on playerleave — a clean back-out (LEAVE) or a dropped seat
+// whose reconnect grace window elapsed — and when every connected human is home
+// but a dropped ghost is still "on track" (see onFrame). Once the run is decided
+// (raceEnded) or the skier already CROSSED THE LINE there is nothing to forfeit:
+// an earned result stands — rewriting the board after the fact is exactly the
+// "vanishing player" bug this guards against. A brief mid-run disconnect does
+// NOT come through here: the skier is kept descending (camera stays on it) so a
+// quick reconnect resumes driving.
 function forfeitSkier(peerIndex) {
   if (!session || !humanIds.has(peerIndex)) return;
+  const s = session.engine.skiers.get(peerIndex);
+  if (raceEnded || !s || s.finished) return;
   humanIds.delete(peerIndex);
-  _rcShown.delete(peerIndex);   // keep the reconnect-card bookkeeping in sync with the removed skier
-  session.forceRemoveCar(peerIndex);
-  scene.removeSkier(peerIndex);
+  session.forfeit(peerIndex);
+  // Flip the ghost to DNF on the phones' live board now — the next finish event
+  // may be a long way off. forfeit() may have just ended the run (last skier out),
+  // in which case endRun already broadcast the final (over) standings.
+  if (!raceEnded) broadcastStandings(false);
 }
 net.flow.on('playerleave', ({ peerIndex }) => forfeitSkier(peerIndex));
 
@@ -179,8 +193,11 @@ function renderRoster(roster, host) {
 }
 
 // ---- field build (humans + AI fill) -------------------------------------
-function buildField(humans) {
-  const used = new Set(humans.map((h) => h.colorIndex));
+// `reservedColors` keeps CPU liveries off colours owned by seats that aren't in
+// this field — a disconnected player still inside their reconnect grace window
+// must not come back to find a bot wearing their colour.
+function buildField(humans, reservedColors) {
+  const used = new Set(reservedColors || humans.map((h) => h.colorIndex));
   // Every skier handles identically (benchmark stats — no `stats` field); players
   // are distinguished only by livery colour, AI only by personality below.
   const field = humans.map((h) => ({
@@ -210,10 +227,11 @@ function buildField(humans) {
 function startRun() {
   if (session || !sceneReady) return;
   net.flow.transitionTo(ROOM_STATE.COUNTDOWN);
-  raceEnded = false; paused = false;
+  raceEnded = false; paused = false; coastSettled = false;
   aiBots = new Map();
-  const humans = net.roster().filter((p) => p.connected !== false);
-  currentField = buildField(humans);
+  const roster = net.roster();
+  const humans = roster.filter((p) => p.connected !== false);
+  currentField = buildField(humans, roster.map((p) => p.colorIndex));
   humanIds = new Set(currentField.filter((p) => !p.ai).map((p) => p.peerIndex));
 
   // add skier meshes (humans get a split-screen cell; CPU share the world)
@@ -288,10 +306,10 @@ scene.onFrame = (dt) => {
     session.update(dt * 1000);
     if (!raceEnded && session.racing && humansAllDone()) {
       // Every connected human is home. A dropped racer's UNFINISHED ghost can never
-      // cross the line (no input), so forfeit it now — otherwise the run would hang
-      // on it (raceOver never trips) until the MAX_RUN_MS failsafe. A ghost that
-      // already finished keeps its real result (it must NOT be dropped — that's the
-      // very "missing from results" bug this whole feature fixes).
+      // cross the line (no input), so forfeit it now — it stays on the board as a
+      // DNF row in its own cell — otherwise the run would hang on it (raceOver
+      // never trips) until the MAX_RUN_MS failsafe. A ghost that already finished
+      // keeps its real result (forfeitSkier refuses to touch it).
       for (const [id, s] of session.engine.skiers) {
         if (!aiBots.has(id) && net.flow.isDisconnected(id) && !s.finished) forfeitSkier(id);
       }
@@ -305,7 +323,11 @@ scene.onFrame = (dt) => {
     driveBots();
     session.engine.update(dt * 1000);
   } else {
-    return; // settled — hold the final frame under the results panel
+    // Settled — hold the final frame under the results panel. One last board
+    // render flips any lingering "…" (still skiing) rows to DNF: nothing can
+    // finish anymore, even when the engine's raceOver never tripped (timeout).
+    if (!coastSettled) { coastSettled = true; showResults(session.getResults(), currentField, true); }
+    return;
   }
 
   const snap = session.getSnapshot();
@@ -372,7 +394,7 @@ function standingsPayload(over) {
       return {
         playerId: r.playerId, name: p.name || 'Skier',
         colorIndex: p.colorIndex || 0, ai: !!p.ai,
-        finished: r.finished, time: r.time,
+        finished: r.finished, time: r.time, dnf: !!r.dnf,
       };
     }),
   };
@@ -392,21 +414,23 @@ function endRun(results) {
 
 // `field` is the full roster (incl. AI) used to name + colour the rows; defaults
 // to the live `currentField` but is passed explicitly by the test harness so the
-// preview shares this exact render path instead of re-implementing it.
-function showResults(results, field = currentField) {
+// preview shares this exact render path instead of re-implementing it. `settled`
+// forces the fully-over reading once the coast-out has come to rest (nothing can
+// finish anymore), covering the timeout end where raceOver never trips.
+function showResults(results, field = currentField, settled = false) {
   const list = el('results-list');
   if (list) {
     list.innerHTML = '';
     const byId = new Map(field.map((p) => [p.peerIndex, p]));
     // While the panel is up but skiers are still coasting in, an unfinished row is
-    // "still going" (…), not a DNF. DNF is reserved for when the run is fully over
-    // (everyone settled / timeout) and someone truly never crossed.
-    const fullyOver = !session || session.engine.raceOver;
+    // "still going" (…), not a DNF. DNF is reserved for a forfeited (dropped)
+    // skier and for when the run is fully over and someone truly never crossed.
+    const fullyOver = settled || !session || session.engine.raceOver;
     for (const r of results.results) {
       const p = byId.get(r.playerId) || {};
       const li = document.createElement('li');
       const color = SKIER_COLORS[(p.colorIndex || 0) % SKIER_COLORS.length];
-      const time = r.finished && r.time != null ? r.time.toFixed(1) + 's' : (fullyOver ? 'DNF' : '…');
+      const time = r.finished && r.time != null ? r.time.toFixed(1) + 's' : (r.dnf || fullyOver ? 'DNF' : '…');
       li.innerHTML =
         `<span class="res__rank">${r.rank}</span>` +
         `<span class="dot" style="background:${color}"></span>` +
@@ -427,7 +451,7 @@ function teardownRun() {
   for (const p of currentField) scene.removeSkier(p.peerIndex);
   _rcShown.clear(); // drop any stale reconnect-card bookkeeping before the next run
   currentField = []; aiBots = new Map(); humanIds = new Set();
-  raceEnded = false; paused = false;
+  raceEnded = false; paused = false; coastSettled = false;
   audio.stopWind();
   slope = makeSlope();
   window.__slope = slope;

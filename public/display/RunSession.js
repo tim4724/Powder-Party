@@ -110,10 +110,13 @@ export class RunSession {
 
   processInput(id, input) { this.engine.processInput(id, input); }
 
-  forceRemoveCar(id) {
-    const removed = this.engine.removeCar(id);
-    if (removed && this.racing && this.engine.raceOver) this._finish();
-    return removed;
+  // Forfeit a dropped player's skier: marked DNF in the engine (it KEEPS its
+  // results row and split-screen cell), and the run ends right here if that
+  // ghost was the last thing holding raceOver open.
+  forfeit(id) {
+    const ok = this.engine.forfeit(id);
+    if (ok && this.racing && this.engine.raceOver) this._finish();
+    return ok;
   }
 
   // Move a still-descending skier from one id to another (a dropped player

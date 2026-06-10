@@ -31,6 +31,10 @@ export class DisplayNet extends GameNet {
     // (oldId, newId) so the game layer can re-key their still-descending skier onto
     // the new slot. A same-device reconnect keeps its id and never needs this.
     this.onPlayerRekey = opts.onPlayerRekey || (() => {});
+    // Does this peer have a live skier in the current run? Stamped onto WELCOME as
+    // `inRun` so a reconnecting phone that ISN'T racing (seat expired mid-run, or a
+    // rematch started without it) waits in its lobby instead of a dead game pad.
+    this.isInRun = opts.isInRun || (() => false);
 
     // Dropped seats currently offering a reconnect QR, plus their grace timers.
     // peerIndex -> {peerIndex, name, colorIndex, url}; peerIndex -> timeout id.
@@ -194,7 +198,12 @@ export class DisplayNet extends GameNet {
   _resyncPeers(peers) {
     const present = new Set(peers);
     for (const p of this.flow.list()) {
-      if (!present.has(p.peerIndex)) this._expireSeat(p.peerIndex);
+      // The DISPLAY's relay link blipped — that says nothing about whether a
+      // missing phone is gone for good (its own reconnect may be racing ours), so
+      // route through the normal drop path: mid-run that holds the seat open with
+      // its reconnect QR and a fresh grace window, instead of expiring it on the
+      // spot and forfeiting the skier.
+      if (!present.has(p.peerIndex)) this._removePeer(p.peerIndex);
     }
     // Re-welcome everyone so their controllers clear any reconnect overlay.
     for (const p of this.flow.list()) this.party.sendTo(p.peerIndex, this._welcomeFor(p.peerIndex));
@@ -265,6 +274,7 @@ export class DisplayNet extends GameNet {
       colorIndex: p.colorIndex,
       hostPeerIndex: this.flow.host,
       roomState: this.roomState,
+      inRun: this.isInRun(peerIndex),
       players: this.roster()
     };
   }

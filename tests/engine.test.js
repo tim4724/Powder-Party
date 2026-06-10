@@ -338,6 +338,49 @@ test('rekeyCar moves a skier to a new id, keeping its state + results slot', asy
   assert.ok(!e.rekeyCar(1, 7), 'rekeyCar refuses to clobber a taken target id');
 });
 
+// A dropped player whose seat is gone for good is FORFEITED, not removed: the
+// skier parks as DNF but keeps its results row (and, on the display, its
+// split-screen cell), and stops holding raceOver open.
+test('forfeit parks a skier as DNF, keeps its results row, and lets raceOver trip', async () => {
+  const events = [];
+  const e = await makeEngine([1, 2], track({ length: 120 }), { onEvent: (ev) => events.push(ev) });
+  assert.ok(e.forfeit(2), 'forfeit returns true for a live skier');
+  assert.ok(!e.forfeit(2), 'an already-DNF skier cannot be forfeited again');
+  assert.ok(!e.forfeit(99), 'unknown id is a no-op');
+  assert.ok(!e.raceOver, 'skier 1 is still racing');
+
+  run(e, 30, () => e.processInput(1, { s: 0, t: 1, j: 0 }));
+  assert.ok(e.raceOver, 'raceOver trips with one finished + one DNF');
+  assert.ok(events.some((ev) => ev.type === 'race_over'), 'race_over event fired');
+  const res = e.getResults().results;
+  assert.equal(res.length, 2, 'the DNF skier still has a results row');
+  const dnf = res.find((r) => r.playerId === 2);
+  assert.ok(dnf.dnf && !dnf.finished && dnf.time == null, 'the row reads as a DNF, not a finish');
+  assert.equal(res.find((r) => r.playerId === 1).rank, 1, 'the finisher ranks ahead of the DNF');
+});
+
+test('a forfeited skier brakes to a stop, ignores input, and cannot finish', async () => {
+  const e = await makeEngine([1], track({ length: 120 }), {});
+  run(e, 4, () => e.processInput(1, { s: 0, t: 1, j: 0 })); // up to speed mid-slope
+  assert.ok(e.skiers.get(1).v > 5, 'moving before the forfeit');
+  e.forfeit(1);
+  run(e, 10, () => e.processInput(1, { s: 1, t: 1, j: 0 })); // a stale/laggy phone keeps streaming
+  const s = e.getSnapshot().skiers[0];
+  assert.ok(s.dnf, 'snapshot carries the dnf flag');
+  assert.equal(s.v, 0, 'parked on the slope');
+  assert.ok(!s.finished, 'never crosses the line');
+  assert.ok(e.raceOver, 'a lone DNF leaves nobody racing');
+});
+
+test('forfeit refuses to rewrite a finished result', async () => {
+  const e = await makeEngine([1], track({ length: 120 }), {});
+  run(e, 30, () => e.processInput(1, { s: 0, t: 1, j: 0 }));
+  assert.ok(e.skiers.get(1).finished, 'skier finished the run');
+  assert.ok(!e.forfeit(1), 'a crossed line is an earned result — no forfeit');
+  const r = e.getResults().results[0];
+  assert.ok(r.finished && !r.dnf && r.time > 0, 'the real time stands');
+});
+
 // --- skier-vs-skier contact ----------------------------------------------
 // These reach into `e.skiers` to place the pair precisely (the start grid keeps
 // them well apart), then step the engine and read the resolved state.

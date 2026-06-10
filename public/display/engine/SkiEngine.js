@@ -9,7 +9,7 @@
 // reuse unchanged):
 //   new SkiEngine(playerIds, { centerline, length, slopeWidth, ramps, obstacles }, { onEvent })
 //   update(dtMs) / processInput(id, {s,t,j}) / getSnapshot() / getResults()
-//   removeCar(id) / get raceOver
+//   removeCar(id) / forfeit(id) / get raceOver
 //
 // Pure JS — NO `import three`. It only calls clone()/addScaledVector()/
 // applyAxisAngle()/cross()/dot() on the vector frames `centerline.sampleAt`
@@ -207,6 +207,7 @@ export class SkiEngine {
         offPiste: false,
         finished: false,
         finishTime: null,
+        dnf: false,      // forfeited (dropped player, seat gone) — parked, but stays in the field/results
         rank: i + 1,
         pose: null,
         // resolved per-skier handling
@@ -229,6 +230,7 @@ export class SkiEngine {
     // Past the finish the run is decided: the phone can still STEER a little as
     // the skier coasts to a stop on the run-out, but tuck/jump/tricks are locked
     // out (no speeding up, no air) — "steer a bit, nothing more".
+    if (c.dnf) return; // forfeited seat — nobody drives this skier anymore
     if (c.finished) { if (Number.isFinite(msg.s)) c.carve = clamp(msg.s, -1, 1); return; }
     if (Number.isFinite(msg.s)) c.carve = clamp(msg.s, -1, 1);
     if (typeof msg.t === 'number') c.tuck = msg.t > 0.5 ? 1 : 0;
@@ -256,6 +258,24 @@ export class SkiEngine {
     const i = this.finishedOrder.indexOf(id);
     if (i >= 0) this.finishedOrder.splice(i, 1);
     this._rank();
+    return true;
+  }
+
+  // Forfeit a skier whose player isn't coming back: mark it DNF so the run can
+  // end without it, but KEEP it in the field — it stays in getSnapshot/getResults
+  // (a DNF row, not a vanished player) and its split-screen cell survives. The
+  // skier brakes to a stop like a finisher and is locked out of input, the finish
+  // line, obstacles/ramps and skier contacts. No-op for a finished skier — a
+  // crossed line is an earned result, never rewritten. May tip raceOver, so the
+  // race_over event fires here exactly like it does on a final finish crossing.
+  forfeit(id) {
+    const c = this.skiers.get(id);
+    if (!c || c.finished || c.dnf) return false;
+    c.dnf = true;
+    c.tuck = 0;
+    c.wantJump = false;
+    c.wantTrick = null;
+    if (this.raceOver) this.onEvent({ type: 'race_over' });
     return true;
   }
 
@@ -291,7 +311,7 @@ export class SkiEngine {
       // phone can still steer a little, but with nothing else to do, let the carve
       // relax toward straight so a finished skier — a bot, or a hands-off phone —
       // coasts straight to a halt instead of drifting off on a stale input.
-      if (c.finished) { c.tuck = 0; c.carve *= Math.max(0, 1 - 6 * dt); }
+      if (c.finished || c.dnf) { c.tuck = 0; c.carve *= Math.max(0, 1 - 6 * dt); }
 
       // --- WIPEOUT TICK (tree/rock spin-out) -------------------------------
       let spinning = c.spinT > 0;
@@ -303,7 +323,7 @@ export class SkiEngine {
         if (c.spinT <= 0) { c.spinT = 0; c.spin = 0; spinning = false; }
       }
       // Obstacles only bite on the snow (you can fly over a tree). Rising-edge.
-      if (!c.finished && !c.airborne) {
+      if (!c.finished && !c.dnf && !c.airborne) {
         if (this._enterObstacle(c) && !spinning) {
           c.spinT = c.spinDur = CRASH_TIME / c.control;   // better control = quicker recovery
           c.spin = 0; spinning = true;
@@ -331,7 +351,7 @@ export class SkiEngine {
       c.wantJump = false;
       // Ramps auto-launch anyone crossing them on the snow — you always catch air
       // off a kicker (∝ speed), no input needed.
-      if (!c.finished && !c.airborne && !spinning && this._enterRamp(c)) {
+      if (!c.finished && !c.dnf && !c.airborne && !spinning && this._enterRamp(c)) {
         launch += RAMP_POP * (0.45 + 0.55 * (c.v / c.vmax));
       }
       if (launch > 0) {
@@ -413,7 +433,7 @@ export class SkiEngine {
       } else if (c.airborne) {
         // No snow contact: hold speed (a hair of air drag).
         c.v = Math.max(0, c.v - 0.4 * dt);
-      } else if (c.finished) {
+      } else if (c.finished || c.dnf) {
         // Flat run-out past the line: stand up and scrub to a standstill. Brake at
         // FINISH_BRAKE normally, but firm up if a fast finisher would otherwise run
         // out of apron — so we ALWAYS halt before the centerline clamps (the whole
@@ -476,7 +496,7 @@ export class SkiEngine {
       }
 
       // --- FINISH (single line crossing at s = length) ---------------------
-      if (!c.finished && prevTotal < this.length && c.totalS >= this.length) {
+      if (!c.finished && !c.dnf && prevTotal < this.length && c.totalS >= this.length) {
         c.finished = true;
         c.finishTime = this.elapsed;
         c.tuck = 0;
@@ -486,7 +506,7 @@ export class SkiEngine {
         c.trickActive = false; c.trickAngle = 0; c.trickPhase = 0; c.trickCount = 0;
         this.finishedOrder.push(c.id);
         this.onEvent({ type: 'finish', id: c.id, rank: this.finishedOrder.length, time: c.finishTime });
-        if (this.finishedOrder.length >= this.skiers.size) this.onEvent({ type: 'race_over' });
+        if (this.raceOver) this.onEvent({ type: 'race_over' });
       }
     }
 
@@ -508,10 +528,10 @@ export class SkiEngine {
     const next = new Map(arr.map((c) => [c.id, new Set()]));
     for (let i = 0; i < arr.length; i++) {
       const a = arr[i];
-      if (a.finished) continue;               // finished skiers coast the runout on autopilot — don't jostle them
+      if (a.finished || a.dnf) continue;      // finished/parked skiers are out of the race — don't jostle them
       for (let j = i + 1; j < arr.length; j++) {
         const b = arr[j];
-        if (b.finished) continue;
+        if (b.finished || b.dnf) continue;
         const rr = (a.radius + b.radius) * SKIER_HITBOX_MUL; // tighter than a tree hit — shoulders can brush
         if (Math.abs(a.air - b.air) > rr) continue;   // one is flying clean over the other
         const ds = a.totalS - b.totalS, dl = a.lat - b.lat;
@@ -635,7 +655,7 @@ export class SkiEngine {
         spd: c.v / c.vmax,                 // normalized 0..~1.5
         progress: clamp(c.totalS / this.length, 0, 1),
         position: c.rank, of: this.skiers.size,
-        finished: c.finished, finishTime: c.finishTime,
+        finished: c.finished, finishTime: c.finishTime, dnf: c.dnf,
         // carve is TURN-ALIGNED (sign matches the actual turn so the renderer
         // leans the body the right way without knowing STEER_SIGN); carveInput
         // is the raw phone input (drives the on-screen carve bar).
@@ -656,10 +676,14 @@ export class SkiEngine {
     return {
       elapsed: this.elapsed,
       results: ranked.map((c, i) => ({
-        playerId: c.id, rank: i + 1, finished: c.finished, time: c.finishTime
+        playerId: c.id, rank: i + 1, finished: c.finished, time: c.finishTime, dnf: c.dnf
       }))
     };
   }
 
-  get raceOver() { return this.finishedOrder.length >= this.skiers.size; }
+  // Over when nobody is still racing — DNF skiers don't hold the run open.
+  get raceOver() {
+    for (const c of this.skiers.values()) if (!c.finished && !c.dnf) return false;
+    return true;
+  }
 }

@@ -141,15 +141,19 @@ function handleMessage(data) {
       // Land on the screen matching the live room state. Normally that's the
       // lobby, but a player who rejoins mid-run (reconnected, or scanned the
       // reconnect QR) must drop straight back into the run instead of stalling on
-      // the lobby — their skier is still on the slope waiting for input.
-      if (data.roomState === ROOM_STATE.COUNTDOWN || data.roomState === ROOM_STATE.PLAYING) {
+      // the lobby — their skier is still on the slope waiting for input. The
+      // display stamps inRun=false when we have NO live skier in this run (our
+      // seat expired, or a rematch started while we were gone): wait in the lobby
+      // then — a game pad driving nothing is a dead end.
+      const inRun = data.inRun !== false; // missing flag (older display) = assume racing
+      if ((data.roomState === ROOM_STATE.COUNTDOWN || data.roomState === ROOM_STATE.PLAYING) && inRun) {
         inResults = false;
         show('game');
         el('drive-hud').classList.remove('hidden');
         el('pause-btn').classList.remove('hidden');
         startDriving();   // resume streaming tilt to our still-descending skier
       } else {
-        show('lobby');    // lobby or results — the next countdown/board routes us onward
+        show('lobby');    // lobby, results or a run we're not in — the next countdown/board routes us onward
       }
       break;
     }
@@ -247,7 +251,7 @@ function renderResults(data) {
     const li = document.createElement('li');
     const isMe = o.playerId === net.peerIndex;
     if (isMe) li.classList.add('is-me');
-    if (!o.finished) li.classList.add('is-racing');
+    if (!o.finished && !o.dnf) li.classList.add('is-racing');
     const dot = document.createElement('span');
     dot.className = 'res-dot';
     dot.style.background = SKIER_COLORS[o.colorIndex] || '#888';
@@ -256,7 +260,7 @@ function renderResults(data) {
     name.textContent = o.name + (o.ai ? ' (CPU)' : isMe ? ' (You)' : '');
     const time = document.createElement('span');
     time.className = 'res-time';
-    time.textContent = o.finished ? `${o.time.toFixed(1)}s` : (data.over ? 'DNF' : 'Skiing…');
+    time.textContent = o.finished ? `${o.time.toFixed(1)}s` : (o.dnf || data.over ? 'DNF' : 'Skiing…');
     li.append(dot, name, time);
     list.appendChild(li);
   });
