@@ -86,9 +86,9 @@ export function hitSL(ds, dl, reach, halfS = 0, halfLat = 0) {
 }
 
 // ---- Skier-vs-skier contact ---------------------------------------------
-// Skiers are SOFT bumpers, not hazards. Their honest body circle (see
-// DEFAULT_STATS.radius) keeps shoulder-brushes from reading as hits — contact
-// starts where the skis visually touch. Overlapping in the (s,lat) plane shoves
+// Skiers are SOFT bumpers, not hazards. Their honest contact capsule (see
+// SKI_HALF / DEFAULT_STATS.radius) starts contact where the skis visually
+// touch — nose-to-tail included. Overlapping in the (s,lat) plane shoves
 // them apart LATERALLY (never along s — that would teleport race progress and
 // is exploitable) and a trailing skier can't tunnel through the one directly
 // ahead: it tucks in behind (the draft/pack feel). Contact bleeds only a LITTLE
@@ -129,10 +129,19 @@ const TRICK_BOOST_T = 0.9;     // s the trick landing boost lasts (reuses the cl
 const TRICK_MAX_COMBO = 3;     // boost compounds over at most this many flips in one air (a monster launch can't run away)
 
 // Default per-skier stats = the benchmark. glide/edge/control are multipliers
-// (1 = unchanged); radius is the body circle every hitSL contact uses — sized
-// to the actual asset (torso 0.24 / ski half-span 0.24, plus slack), so contact
-// starts roughly where things visually touch.
+// (1 = unchanged); radius is the half-WIDTH of the skier's contact capsule —
+// sized to the actual asset (torso 0.24 / ski half-span 0.24, plus slack), so
+// contact starts roughly where things visually touch.
 const DEFAULT_STATS = { glide: 1, edge: 1, control: 1, radius: 0.3 };
+
+// The skier's footprint is a CAPSULE along the heading (skis are long and
+// narrow — a circle either ghosts through ski-tip touches or bumps at a visible
+// gap), approximated as three radius-`radius` hitSL circles at these offsets
+// along the ski direction. Tip reach = SKI_HALF + radius = 0.75, the rendered
+// ski half-length; width stays 2×radius. Exported for the renderer (pole
+// contact + the ?hitbox=1 outline).
+export const SKI_HALF = 0.45;
+const CAP_OFFS = [-SKI_HALF, 0, SKI_HALF];
 function normStats(s) {
   const o = { ...DEFAULT_STATS, ...(s || {}) };
   o.glide = Math.max(0.2, o.glide);
@@ -554,11 +563,24 @@ export class SkiEngine {
       for (let j = i + 1; j < arr.length; j++) {
         const b = arr[j];
         if (b.finished || b.dnf) continue;
-        const rr = a.radius + b.radius; // same body circles as every other contact
+        const rr = a.radius + b.radius; // same capsules as every other contact
         if (Math.abs(a.air - b.air) > rr) continue;   // one is flying clean over the other
-        const ds = a.totalS - b.totalS, dl = a.lat - b.lat;
+        // Capsule vs capsule: the closest pair among each skier's sample
+        // circles. Its offset is the contact normal; the centre ds still
+        // decides who leads for the draft block below.
+        const ahs = Math.cos(a.heading), ahl = -Math.sin(a.heading);
+        const bhs = Math.cos(b.heading), bhl = -Math.sin(b.heading);
+        let ds = 0, dl = 0, d2 = Infinity;
+        for (const ea of CAP_OFFS) {
+          for (const eb of CAP_OFFS) {
+            const ts = (a.totalS + ea * ahs) - (b.totalS + eb * bhs);
+            const tl = (a.lat + ea * ahl) - (b.lat + eb * bhl);
+            const t2 = ts * ts + tl * tl;
+            if (t2 < d2) { d2 = t2; ds = ts; dl = tl; }
+          }
+        }
         if (!hitSL(ds, dl, rr)) continue;             // no overlap
-        const dist = Math.sqrt(ds * ds + dl * dl) || 1e-4;
+        const dist = Math.sqrt(d2) || 1e-4;
         const nds = ds / dist, ndl = dl / dist;       // contact normal, pointing b → a
         const pen = rr - dist;
         next.get(a.id).add(b.id); next.get(b.id).add(a.id);
@@ -582,8 +604,8 @@ export class SkiEngine {
         // straight-behind) — abreast skiers must not be speed-locked, which is
         // exactly what knots two of them together riding side by side.
         if (Math.abs(nds) >= BUMP_BLOCK_NORMAL) {
-          if (ds > 0) { if (b.v > a.v) b.v = a.v; }   // a leads, b trails
-          else { if (a.v > b.v) a.v = b.v; }          // b leads, a trails
+          if (a.totalS > b.totalS) { if (b.v > a.v) b.v = a.v; } // a leads, b trails
+          else { if (a.v > b.v) a.v = b.v; }                     // b leads, a trails
         }
 
         // --- SPEED scrub on contact ----------------------------------------
@@ -622,26 +644,35 @@ export class SkiEngine {
     for (const c of arr) c.contactIn = next.get(c.id);
   }
 
-  // Rising-edge overlap of a ramp (open run → no lap wrap on ds).
+  // Rising-edge overlap of a ramp (open run → no lap wrap on ds). Skier capsule
+  // vs the kicker box — ski tips touching the lip count, same as everywhere.
   _enterRamp(c) {
     if (!this.ramps.length) return false;
+    const hs = Math.cos(c.heading), hl = -Math.sin(c.heading);
     let entered = false;
     for (let i = 0; i < this.ramps.length; i++) {
       const r = this.ramps[i];
-      const inside = hitSL(c.totalS - r.s, c.lat - r.lat, c.radius, r.halfS, r.halfW);
+      let inside = false;
+      for (const e of CAP_OFFS) {
+        if (hitSL(c.totalS + e * hs - r.s, c.lat + e * hl - r.lat, c.radius, r.halfS, r.halfW)) { inside = true; break; }
+      }
       if (inside) { if (!c.rampIn.has(i)) { c.rampIn.add(i); entered = true; } }
       else c.rampIn.delete(i);
     }
     return entered;
   }
 
-  // Rising-edge overlap of a tree/rock (skier circle vs obstacle circle).
+  // Rising-edge overlap of a tree/rock (skier capsule vs obstacle circle).
   _enterObstacle(c) {
     if (!this.obstacles.length) return false;
+    const hs = Math.cos(c.heading), hl = -Math.sin(c.heading); // ski direction in (s, lat)
     let entered = false;
     for (let i = 0; i < this.obstacles.length; i++) {
       const o = this.obstacles[i];
-      const inside = hitSL(c.totalS - o.s, c.lat - o.lat, c.radius + o.radius);
+      let inside = false;
+      for (const e of CAP_OFFS) {
+        if (hitSL(c.totalS + e * hs - o.s, c.lat + e * hl - o.lat, c.radius + o.radius)) { inside = true; break; }
+      }
       if (inside) { if (!c.obsIn.has(i)) { c.obsIn.add(i); entered = true; } }
       else c.obsIn.delete(i);
     }
@@ -669,7 +700,7 @@ export class SkiEngine {
     const skiers = [];
     for (const c of this.skiers.values()) {
       skiers.push({
-        id: c.id, pose: c.pose, lat: c.lat, totalS: c.totalS, v: c.v, radius: c.radius,
+        id: c.id, pose: c.pose, lat: c.lat, totalS: c.totalS, v: c.v, radius: c.radius, heading: c.heading,
         spd: c.v / c.vmax,                 // normalized 0..~1.5
         progress: clamp(c.totalS / this.length, 0, 1),
         position: c.rank, of: this.skiers.size,

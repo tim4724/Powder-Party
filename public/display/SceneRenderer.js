@@ -12,7 +12,7 @@
 import * as THREE from 'three';
 import { mulberry32 } from '../shared/slopes.js';
 import { SkiTrails } from './SkiTrails.js';
-import { hitSL } from './engine/SkiEngine.js';
+import { hitSL, SKI_HALF } from './engine/SkiEngine.js';
 
 // FNV-1a hash of a slope's `def.id` → a uint32 seed, so the decorative forest is
 // deterministic per slope (same hill → same trees) instead of re-randomised on
@@ -56,6 +56,7 @@ const TUCK_SHRINK = 0.3;    // squat: body shrinks toward the feet when tucked (
 // was tried first and always clipped through the skier on the way down.)
 // Purely cosmetic — the engine never sees the poles. STARTING VALUES.
 const POLE_R = 0.06;        // the pole's footprint = its cylinder radius; contact runs through the engine's hitSL, the same primitive as every other object
+const CAP_OFFS = [-SKI_HALF, 0, SKI_HALF]; // the engine's capsule sampling, mirrored for the pole test
 const POLE_FWD = 0.75;      // fraction of skier speed the pole carries down-slope
 const POLE_OUT = 3.0;       // outward knock (u/s) at POLE_REF_V — clears the piste into the powder
 const POLE_POP = 4.5;       // upward pop (u/s) at POLE_REF_V
@@ -651,10 +652,10 @@ export class SceneRenderer {
   // ---- hitbox debug (?hitbox=1) ------------------------------------------
   // Wireframes of every collision footprint, drawn in the (s, lat) plane each
   // test really runs in. ONE rule everywhere (the engine's hitSL): contact the
-  // moment two outlines touch. A skier's ORANGE body ring against a RED
-  // obstacle ring (wipeout), a CYAN ramp box (launch), a GREEN pole dot
-  // (break-off), or another skier's orange ring (bump). Purely diagnostic;
-  // nothing here is read back.
+  // moment two outlines touch. A skier's ORANGE capsule (it yaws with the
+  // carve) against a RED obstacle ring (wipeout), a CYAN ramp box (launch), a
+  // GREEN pole dot (break-off), or another skier's orange capsule (bump).
+  // Purely diagnostic; nothing here is read back.
   _debugLoop(pts, color) {
     const g = new THREE.BufferGeometry().setFromPoints(pts);
     return new THREE.LineLoop(g, new THREE.LineBasicMaterial({ color }));
@@ -683,12 +684,15 @@ export class SceneRenderer {
     return this._debugLoop([corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)], color);
   }
 
-  // Skier-local ring (child of the skier group, so it rides the pose for free).
-  _debugSkierRing(radius, color) {
+  // Skier-local capsule outline (stadium along local +Z = the ski direction).
+  // Child of the skier group, whose basis already includes the carve heading —
+  // so the outline yaws with the skis for free.
+  _debugSkierCapsule(radius, halfLen, color) {
     const pts = [];
     for (let k = 0; k < 32; k++) {
       const a = (k / 32) * Math.PI * 2;
-      pts.push(new THREE.Vector3(Math.cos(a) * radius, 0.06, Math.sin(a) * radius));
+      const z = Math.sin(a) * radius;
+      pts.push(new THREE.Vector3(Math.cos(a) * radius, 0.06, z + (z >= 0 ? halfLen : -halfLen)));
     }
     return this._debugLoop(pts, color);
   }
@@ -820,14 +824,14 @@ export class SceneRenderer {
   // Pose + per-frame visual state, fed one engine-snapshot skier (getSnapshot()
   // shape): pose {pos,forward,up}, v, carve (turn-aligned) / carveInput (raw),
   // tuck, airborne, air, spin, trickActive/trickAngle/trickPhase, plus
-  // totalS/lat for the edge-pole contact test.
+  // totalS/lat/heading/radius for the edge-pole contact test.
   setSkierPose(id, s) {
     const c = this.skiers.get(id);
     if (!c) return;
     if (this._hitboxDebug && !c.hitRings) {
       // Built here, not in addSkier: the per-skier radius rides the snapshot.
-      // ONE ring — the body circle every contact (skier/tree/ramp/pole) uses.
-      c.hitRings = [this._debugSkierRing(s.radius || 0.3, 0xff8c00)];
+      // ONE capsule — the footprint every contact (skier/tree/ramp/pole) uses.
+      c.hitRings = [this._debugSkierCapsule(s.radius || 0.3, SKI_HALF, 0xff8c00)];
       for (const ring of c.hitRings) c.group.add(ring);
     }
     const pos = s.pose.pos;
@@ -886,11 +890,11 @@ export class SceneRenderer {
   }
 
   // Break-off contact: a grounded skier reaching an edge pole snaps it off its
-  // base. Same hitSL primitive as every engine collision — body circle (radius
-  // off the snapshot) vs the pole's footprint — but stays renderer-only: the
-  // engine never knows. The pole leaves the skier's path the same frame it's
-  // hit (no upright pole can ever overlap the skier); flight lives in
-  // _updatePoles.
+  // base. Same hitSL primitive + capsule sampling as every engine collision —
+  // tail/centre/nose circles (radius + heading off the snapshot) vs the pole's
+  // footprint — but stays renderer-only: the engine never knows. The pole
+  // leaves the skier's path the same frame it's hit (no upright pole can ever
+  // overlap the skier); flight lives in _updatePoles.
   _pokePoles(s, c) {
     const poles = this._poles;
     if (!poles || poles.length === 0 || s.totalS == null) return;
@@ -898,7 +902,8 @@ export class SceneRenderer {
     c._pokeS = s.totalS; // track through the air too — landing must not sweep the overflown stretch
     if (s.air > 0.9) return; // sailing over — the poles are only 1.1 tall
     const reach = (s.radius || 0.3) + POLE_R;
-    if (Math.abs(Math.abs(s.lat) - this._pisteHalf) > reach) return; // not on either edge line
+    // a hard carve swings the ski tips up to SKI_HALF sideways — allow for it
+    if (Math.abs(Math.abs(s.lat) - this._pisteHalf) > reach + SKI_HALF) return; // not near either edge line
     // Sweep the stretch covered since the last frame (as the rect core of the
     // same hitSL test) — the honest reach is narrower than one frame-step at
     // full schuss, so a point test would skip poles. A jump bigger than any
@@ -906,9 +911,14 @@ export class SceneRenderer {
     let halfS = Math.abs(s.totalS - prev) / 2;
     if (halfS > 2) halfS = 0;
     const mid = halfS > 0 ? (s.totalS + prev) / 2 : s.totalS;
+    const hs = Math.cos(s.heading || 0), hl = -Math.sin(s.heading || 0); // ski direction in (s, lat)
     for (const p of poles) {
       if (p.mode !== 0) continue;
-      if (!hitSL(p.s - mid, p.lat - s.lat, reach, halfS)) continue;
+      let touched = false;
+      for (const e of CAP_OFFS) {
+        if (hitSL(p.s - (mid + e * hs), p.lat - (s.lat + e * hl), reach, halfS)) { touched = true; break; }
+      }
+      if (!touched) continue;
       p.mode = 1;
       if (p.hitMark) p.hitMark.visible = false; // knocked off → no contact test until reset
       p.fs = p.s; p.flat = p.lat; p.h = 0.55; // flight tracks the pole's CENTRE
