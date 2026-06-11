@@ -10,6 +10,7 @@ import { RunSession } from './RunSession.js';
 import { AiController, AI_PERSONALITIES } from './AiDriver.js';
 import { SlopeAudio } from './Audio.js';
 import { keepScreenOn } from '../shared/WakeLock.js';
+import { initDebugMenu } from '../shared/DebugMenu.js';
 
 const {
   MSG, ROOM_STATE, COUNTDOWN_SECONDS, MAX_PLAYERS, SKIER_COLORS,
@@ -541,3 +542,28 @@ if (params.get('test') === '1' || scenario) {
 // debug hooks
 window.__net = net; window.__scene = scene; window.__slope = slope;
 window.__startRun = startRun; window.__session = () => session;
+
+// ⚙ debug menu — every query param this page reads (see makeSlope + the boot
+// branch above; scenario docs live atop TestHarness.js). Bare ?test=1 boots the
+// 'running' scenario, so show it as such (and keep it on a Go that tweaks
+// another field — rebuilt URLs say scenario=running explicitly).
+initDebugMenu([
+  { key: 'scenario', label: 'Scenario', type: 'select', hint: 'no-relay preview/lab — overrides live play',
+    value: params.get('test') === '1' && !scenario ? 'running' : undefined, options: [
+    ['', 'live (off)'],
+    ['running', 'running — CPU split-screen run'],
+    ['solo', 'solo — keyboard race vs CPU'],
+    ['tricks', 'tricks — trick lab (keyboard)'],
+    ['bump', 'bump — contact lab (keyboard)'],
+    ['slope', 'slope — orbiting slope preview'],
+    ['lobby', 'lobby — fake roster'],
+    ['countdown', 'countdown beat'],
+    ['paused', 'paused overlay'],
+    ['results', 'results board'],
+    ['reconnect', 'reconnect — rejoin QR card'],
+  ] },
+  { key: 'players', label: 'Players', type: 'number', min: 1, max: 4, hint: 'field size in scenarios (default 4, tricks 1)' },
+  { key: 'slope', label: 'Slope', type: 'select', hint: 'catalog slope — else a generated mountain', options: [['', 'generated'], ...Object.keys(SLOPES)] },
+  { key: 'seed', label: 'Seed', type: 'number', hint: 'pins the generated mountain (deterministic repro)' },
+  { key: 'centerline', label: 'Centerline overlay', type: 'check', hint: 'draw the slope centerline debug line' },
+]);
