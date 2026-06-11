@@ -147,7 +147,7 @@ export class TiltInput {
     this._carve += (target - this._carve) * SMOOTH;
 
     const s = clamp1(this._carve + this._key);
-    this.onCarve(+s.toFixed(3));
+    this.onCarve(Math.round(s * 1000) / 1000); // 3-decimal quantise, no string round-trip
   }
 
   // current carve (for the on-screen carve indicator)

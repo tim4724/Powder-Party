@@ -229,11 +229,14 @@
 
   PartyFastlane.prototype._sendDataPacket = function (peer, peerIdx) {
     var now = Date.now();
-    // Age out expired events. Ring entries are always consecutive in es:
-    // .filter only prunes from the oldest end (TTL is monotonic in enqueue
-    // order). This is what makes implicit seq encoding safe — receivers
+    // Age out expired events. The ring is newest-first (unshift) and TTL is
+    // monotonic in enqueue order, so expired entries are a strict suffix —
+    // truncate it in place (this runs every TICK_MS; no per-tick array
+    // allocation). This is what makes implicit seq encoding safe — receivers
     // can compute es[i] = ps - i without an explicit per-entry seq field.
-    peer.ring = peer.ring.filter(function (e) { return e.expires > now; });
+    var liveLen = peer.ring.length;
+    while (liveLen > 0 && peer.ring[liveLen - 1].expires <= now) liveLen--;
+    if (liveLen < peer.ring.length) peer.ring.length = liveLen;
 
     if (peer.ring.length === 0) {
       if (peer.sendTimer) { clearTimeout(peer.sendTimer); peer.sendTimer = null; }
@@ -323,10 +326,13 @@
   PartyFastlane.prototype._handleAck = function (peer, peerIdx, ack) {
     if (typeof ack.pa === 'number' && ack.pa > peer.lastAckedEs) {
       peer.lastAckedEs = ack.pa;
-      // pa is cumulative-highest-applied, so filtering out es <= pa always
-      // leaves a contiguous tail. This is what lets the receiver decode
-      // es[i] = ps - i without an explicit per-entry seq field.
-      peer.ring = peer.ring.filter(function (e) { return e.es > ack.pa; });
+      // pa is cumulative-highest-applied and the ring is newest-first, so the
+      // acked entries (es <= pa) are a strict suffix — truncate it in place,
+      // leaving the contiguous unacked head. This is what lets the receiver
+      // decode es[i] = ps - i without an explicit per-entry seq field.
+      var keepLen = peer.ring.length;
+      while (keepLen > 0 && peer.ring[keepLen - 1].es <= ack.pa) keepLen--;
+      if (keepLen < peer.ring.length) peer.ring.length = keepLen;
       if (peer.ring.length === 0 && peer.sendTimer) {
         clearTimeout(peer.sendTimer);
         peer.sendTimer = null;
