@@ -1,28 +1,22 @@
-// SceneRenderer — Three.js renderer for the downhill slope. Builds a procedural
-// snow ribbon from the centerline, primitive skiers (no GLB assets), per-player
-// split-screen chase cameras, and an orbiting lobby preview. Simplified from the
-// reference kart renderer: it renders each player's viewport DIRECTLY to the
-// canvas (no offscreen MSAA present pipeline) and skips the ground-conform
-// raycast — the procedural ribbon means the engine's poses already sit on the
-// surface (pose.pos already includes lateral offset + air height).
+// SceneRenderer — Three.js renderer for the downhill slope: per-player
+// split-screen chase cameras, primitive skiers (no GLB assets), and an orbiting
+// lobby preview. Each player's viewport renders DIRECTLY to the canvas (no
+// offscreen MSAA present pipeline) and there is no ground-conform raycast — the
+// engine's poses already sit on the procedural surface (pose.pos includes
+// lateral offset + air height). Static world construction lives in
+// SlopeScenery.js; the cosmetic edge-pole break-off in PoleField.js.
 //
-// Public API (called by main.js): constructor(container, colors), async load(),
+// Public API (called by main.js): constructor(container, colors),
 // setTrack(track,{debug,hitbox}), addSkier(id,colorIndex,name,opts), removeSkier(id),
 // setSkierPose(id, snap), setSkierHud(id,info), start(), stop(), onFrame, orbit.
 import * as THREE from 'three';
-import { mulberry32 } from '../shared/slopes.js';
 import { SkiTrails } from './SkiTrails.js';
-import { hitSL, SKI_HALF } from './engine/SkiEngine.js';
-
-// FNV-1a hash of a slope's `def.id` → a uint32 seed, so the decorative forest is
-// deterministic per slope (same hill → same trees) instead of re-randomised on
-// every setTrack. (Gameplay geometry is already seed-deterministic; this makes
-// the cosmetic scatter match it.)
-function _hashStr(s) {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
-  return h >>> 0;
-}
+import { SKI_HALF } from './engine/SkiEngine.js';
+import { PoleField } from './PoleField.js';
+import {
+  extendMeshSamples, addTerrain, addPeaks, addForests,
+  addRamp, addObstacle, addBanner, debugSkierCapsule,
+} from './SlopeScenery.js';
 
 // ---- camera + feel constants (starting values) --------------------------
 const CHASE_DIST = 4.2;     // how far behind the skier the cam sits (tightened twice — 7.4 then 6.0 still read far)
@@ -49,24 +43,6 @@ const BANK_MAX = 0.5;       // body bank (rad) into a full carve
 const TUCK_PITCH = 0.72;    // forward lean (rad) when fully tucked
 const TUCK_SHRINK = 0.3;    // squat: body shrinks toward the feet when tucked (0 = none)
 
-// Edge-pole break-off: a skier hitting an edge marker snaps it clean off its
-// base — it inherits the skier's momentum, tumbles off-piste, and sinks nose-
-// first into the deep snow, where it stays for the rest of the run (the next
-// run stands all poles back up — see clearTrails). (A bend-at-the-base spring
-// was tried first and always clipped through the skier on the way down.)
-// Purely cosmetic — the engine never sees the poles. STARTING VALUES.
-const POLE_R = 0.06;        // the pole's footprint = its cylinder radius; contact runs through the engine's hitSL, the same primitive as every other object
-const CAP_OFFS = [-SKI_HALF, 0, SKI_HALF]; // the engine's capsule sampling, mirrored for the pole test
-const POLE_FWD = 0.75;      // fraction of skier speed the pole carries down-slope
-const POLE_OUT = 3.0;       // outward knock (u/s) at POLE_REF_V — clears the piste into the powder
-const POLE_POP = 4.5;       // upward pop (u/s) at POLE_REF_V
-const POLE_G = 16;          // flight gravity (u/s², along the slope normal)
-const POLE_SPIN = 9;        // end-over-end tumble rate (rad/s) at POLE_REF_V, varied ±25% per hit
-const POLE_REF_V = 14;      // impact speed (u/s) giving the nominal knock — ~upright cruise
-const POLE_KICK_MIN = 0.35; // a slow brush still snaps the pole off, it just flops nearby
-const POLE_KICK_MAX = 1.4;  // full-tuck schuss sends it flying — capped so it stays in view
-const POLE_SINK = 0.3;      // nose-down pitch of the landed pole (tip ends under the snow)
-
 const _up = new THREE.Vector3(0, 1, 0);
 const _zAxis = new THREE.Vector3(0, 0, 1);
 const _TAU = Math.PI * 2;       // one full flip rotation
@@ -90,6 +66,7 @@ export class SceneRenderer {
     this._order = [];          // celled (human) skiers, stable split-screen order
     this.onFrame = null;
     this.onPoleHit = null;     // (kick 0.35..1.4) — an edge pole snapped off; impact-speed scale for SFX
+    this.poles = null;         // PoleField, built per setTrack
     this.orbit = false;
     this._running = false;
     this._last = 0;
@@ -102,11 +79,8 @@ export class SceneRenderer {
     this._sBasis = new THREE.Matrix4();
     this._sWant = new THREE.Vector3();
     this._sTarget = new THREE.Vector3();
-    this._sSurf = new THREE.Vector3();
     this._sTrickAxis = new THREE.Vector3();
     this._sCamUp = new THREE.Vector3();
-    this._sKick = new THREE.Vector3();
-    this._pOff = new THREE.Vector3();
 
     this._initThree();
     this._initOverlay();
@@ -126,7 +100,7 @@ export class SceneRenderer {
     r.toneMappingExposure = 1.25;
     r.autoClear = false;                  // we clear once per frame, then render N viewports
     r.shadowMap.enabled = true;
-    r.shadowMap.type = THREE.PCFSoftShadowMap;
+    r.shadowMap.type = THREE.PCFShadowMap; // (PCFSoft is deprecated in the vendored three and falls back to this)
     this.container.appendChild(r.domElement);
     this.renderer = r;
     this._blobTex = this._makeBlobTexture(); // soft contact-shadow sprite
@@ -147,7 +121,7 @@ export class SceneRenderer {
     key.position.set(8, 15, 6);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
-    key.shadow.autoUpdate = false;        // refreshed once per frame in _loop
+    key.shadow.autoUpdate = false;        // refreshed once per frame in _loop (not once per viewport)
     key.shadow.bias = -0.0005;
     key.shadow.normalBias = 0.06;
     scene.add(key); scene.add(key.target);
@@ -168,7 +142,7 @@ export class SceneRenderer {
     this.propGroup = new THREE.Group(); scene.add(this.propGroup);
     // Lobby-only decoration (instanced flank forest). Shown under the single
     // overview camera, hidden the moment skiers render in split-screen — so the
-    // race (up to 4 viewports) never pays for it. See _loop / _addOuterTrees.
+    // race (up to 4 viewports) never pays for it. See _loop / addForests.
     this.lobbyGroup = new THREE.Group(); scene.add(this.lobbyGroup);
 
     this.overview = new THREE.PerspectiveCamera(52, this._aspect(), 0.1, 1200);
@@ -208,10 +182,6 @@ export class SceneRenderer {
   _aspect() { return window.innerWidth / Math.max(1, window.innerHeight); }
   _onResize() { this.renderer.setSize(window.innerWidth, window.innerHeight); }
 
-  // No GLB assets — resolve immediately. (Kept async so main.js's load().then()
-  // sequence matches the reference.)
-  async load() { return Promise.resolve(); }
-
   // ---- world geometry --------------------------------------------------
   setTrack(track, opts = {}) {
     this._disposeGroup(this.slopeGroup);
@@ -224,135 +194,21 @@ export class SceneRenderer {
     const sw = track.slopeWidth || 11;
     const pisteHalf = sw / 2;          // groomed-piste edge (where poles + deep snow begin)
     const edgeLat = sw;                // deep snow extends a half-slope-width past = the reset line
-
-    // Extend the snow ribbon a short way BEHIND the start gate (s<0). The skiers
-    // sit at the clamped s=0 frame, but the chase cam is parked UP-slope of them,
-    // so without this the cam looks past the top edge into the void and the start
-    // grid appears to float on nothing. We extrapolate flat back along the first
-    // sample's up-slope direction (renderer-only — the physics centerline is
-    // unchanged) so the groomed run continues naturally above the gate.
-    const meshSamples = samples.slice();
-    {
-      const f0 = samples[0], BACK = 16, STEPS = 7;
-      for (let k = 1; k <= STEPS; k++) {
-        const d = (BACK * k) / STEPS;
-        meshSamples.unshift({
-          pos: f0.pos.clone().addScaledVector(f0.tangent, -d),
-          tangent: f0.tangent.clone(), up: f0.up.clone(), lateral: f0.lateral.clone(),
-          s: f0.s - d,
-        });
-      }
-    }
-
-    // Flat finish OUTRUN: the physics centerline now levels off into a flat apron
-    // past the finish (SlopeBuilder appends it), so the groomed piste + shoulders +
-    // valley walls already continue onto it via these samples. Extend a little
-    // further still — renderer-only — so the ground never terminates exactly where
-    // a skier can coast to, leaving the apron edge in view.
-    {
-      const fE = samples[samples.length - 1];
-      const flatT = new THREE.Vector3(fE.tangent.x, 0, fE.tangent.z);
-      if (flatT.lengthSq() < 1e-6) flatT.set(0, 0, 1);
-      flatT.normalize();
-      const up = new THREE.Vector3(0, 1, 0);
-      const lateral = flatT.clone().cross(up).normalize();
-      if (lateral.dot(fE.lateral) < 0) lateral.negate(); // align with the run's side → no twist at the join
-      const OUT = 18, STEPS = 4;
-      for (let k = 1; k <= STEPS; k++) {
-        const d = (OUT * k) / STEPS;
-        meshSamples.push({
-          pos: new THREE.Vector3(fE.pos.x + flatT.x * d, fE.pos.y, fE.pos.z + flatT.z * d),
-          tangent: flatT.clone(), up: up.clone(), lateral: lateral.clone(),
-          s: fE.s + d,
-        });
-      }
-    }
-
-    // Two-tone snow ribbon: 4 verts per sample at [-edge, -piste, +piste, +edge].
-    // The middle band (±piste) is bright groomed snow; the outer bands fade to a
-    // colder, deeper powder — a clear visual "you've left the run" without a wall.
-    // The run is carved into a snowy MOUNTAIN: a groomed piste (alternating
-    // corduroy passes) + deep-snow shoulders, then snow RISING into mountainside
-    // walls on each side — all built from the centerline so the whole valley
-    // cross-section descends with the run. Near-white, no warm tint.
-    const NB = 6;                       // groomer passes across the piste
-    const PASS = 0xffffff, GROOVE = 0xf6f9fc, DEEP = 0xedf2f8, WALL = 0xf4f8fd;
-    const n = samples.length;
     const groundY = track.groundY != null ? track.groundY : -2;
-    for (let p = 0; p < NB; p++) {      // groomed piste passes
-      const a = -pisteHalf + (2 * pisteHalf) * (p / NB);
-      const b = -pisteHalf + (2 * pisteHalf) * ((p + 1) / NB);
-      this._addSlopeStrip(meshSamples, a, b, 0, 0, p % 2 === 0 ? PASS : GROOVE);
-    }
-    this._addSlopeStrip(meshSamples, -edgeLat, -pisteHalf, 0, 0, DEEP); // deep-snow shoulders
-    this._addSlopeStrip(meshSamples, pisteHalf, edgeLat, 0, 0, DEEP);
-    this._addSlopeStrip(meshSamples, -(edgeLat + 26), -edgeLat, 14, 0, WALL); // mountainside walls
-    this._addSlopeStrip(meshSamples, -(edgeLat + 72), -(edgeLat + 26), 48, 14, WALL);
-    this._addSlopeStrip(meshSamples, edgeLat, edgeLat + 26, 0, 14, WALL);
-    this._addSlopeStrip(meshSamples, edgeLat + 26, edgeLat + 72, 14, 48, WALL);
-    // Mountainside FLANKS: sweep from the valley-wall tops outward and DOWN to the
-    // valley floor on both sides, so the elevated run sits on a solid massif
-    // instead of a thin ribbon floating over the flat ground — which the rotating
-    // lobby camera exposed from the side. The outer edge meets the ground plane
-    // (groundY) exactly, so the whole mountain reads as one piece.
-    this._addFlanks(meshSamples, edgeLat, groundY);
-
-    // Edge markers (alternating poles) along the GROOMED edge (±pisteHalf) — they
-    // mark where the deep snow starts and double as depth/speed cues. They stand
-    // WORLD-vertical (like real slalom poles): plumb posts against the tilted
-    // piste are the strongest in-frame steepness cue the chase cam gets. A
-    // skier hitting one snaps it off its base and sends it tumbling into the
-    // powder (_pokePoles / _updatePoles). The 0.05 base embed covers the
-    // downhill-edge gap a vertical pole leaves on the steepest pitch.
-    const poleGeo = new THREE.CylinderGeometry(0.06, 0.06, 1.1, 6);
-    poleGeo.translate(0, 0.55, 0); // origin at the base (flight code re-centres tumbles)
-    const blue = new THREE.MeshStandardMaterial({ color: 0x2d9cdb });
-    const red = new THREE.MeshStandardMaterial({ color: 0xe6492d });
-    this._poles = [];
-    this._activePoles = new Set();
     this._pisteHalf = pisteHalf;
-    this._cl = track.centerline;
-    this._clLength = track.length;
-    for (let i = 2; i < n - 2; i += 5) {
-      const s = samples[i];
-      const side = (i % 10 === 2) ? 1 : -1;
-      const ex = s.pos.x + s.lateral.x * pisteHalf * side;
-      const ey = s.pos.y + s.lateral.y * pisteHalf * side;
-      const ez = s.pos.z + s.lateral.z * pisteHalf * side;
-      const pole = new THREE.Mesh(poleGeo, side > 0 ? red : blue);
-      pole.position.set(ex, ey - 0.05, ez); // base-origin geo: -0.05 = the embed
-      this.slopeGroup.add(pole);
-      this._poles.push({
-        mesh: pole, s: s.s, lat: pisteHalf * side,
-        bx: ex, by: ey - 0.05, bz: ez,       // home pose, restored on the next run
-        mode: 0, // 0 standing · 1 tumbling through the air · 2 sunk in the snow
-        fs: 0, flat: 0, h: 0, vs: 0, vlat: 0, vh: 0, // flight state in (s, lat, height)
-        spinAxis: new THREE.Vector3(), spinRate: 0, spinAng: 0,
-        hitMark: null, // ?hitbox=1 wireframe (hidden while the pole is knocked over)
-      });
-      if (this._hitboxDebug) {
-        const mark = this._debugCircle(s, pisteHalf * side, POLE_R, 0x2bb673);
-        this.slopeGroup.add(mark);
-        this._poles[this._poles.length - 1].hitMark = mark;
-      }
-    }
 
-    // Props.
+    // Terrain ribbon + valley walls/flanks (renderer-extended samples), the
+    // breakable edge poles, then the props — all collidable footprints match
+    // what the engine resolves from the same track data.
+    addTerrain(this.slopeGroup, extendMeshSamples(samples), pisteHalf, edgeLat, groundY);
+    this.poles = new PoleField(this.slopeGroup, samples, pisteHalf, track.centerline, track.length, this._hitboxDebug);
+    this.poles.onHit = (kick) => { if (this.onPoleHit) this.onPoleHit(kick); };
+
     const cl = track.centerline;
-    for (const r of (track.ramps || [])) this._addRamp(cl, r);
-    for (const o of (track.obstacles || [])) this._addObstacle(cl, o);
-    if (this._hitboxDebug) {
-      // Same footprints + defaults the engine collides with (SkiEngine track
-      // setup): the ramp box and the obstacle circle, read with ONE rule —
-      // contact the moment the skier's orange ring touches the outline.
-      for (const r of (track.ramps || []))
-        this.propGroup.add(this._debugRect(cl.sampleAt(r.s), r.lat || 0, 1.5, (r.width || 2.4) / 2, 0x27c4f5));
-      for (const o of (track.obstacles || []))
-        this.propGroup.add(this._debugCircle(cl.sampleAt(o.s), o.lat || 0,
-          o.radius || (o.kind === 'rock' ? 0.7 : 0.8), 0xff2244));
-    }
-    this._addBanner(cl, 0.2, 0x2bb673, 'start');
-    this._addBanner(cl, track.length - 0.2, 0xf2b134, 'finish');
+    for (const r of (track.ramps || [])) addRamp(this.propGroup, cl, r, this._hitboxDebug);
+    for (const o of (track.obstacles || [])) addObstacle(this.propGroup, cl, o, this._hitboxDebug);
+    addBanner(this.propGroup, cl, 0.2, 0x2bb673);                 // start
+    addBanner(this.propGroup, cl, track.length - 0.2, 0xf2b134);  // finish
 
     // Overview framing for the lobby turntable + size the shadow camera.
     const box = new THREE.Box3();
@@ -370,9 +226,8 @@ export class SceneRenderer {
     this._orbitAngle = Math.atan2(ovOff.z, ovOff.x); // start the orbit where the static frame sits (no first-frame snap)
 
     // Valley floor: centre the snow plane UNDER the whole run and grow it to cover
-    // out past the peaks. (The default 1200² plane at the origin didn't even reach
-    // the lower end of a long slope, leaving a void the flanks now drape into.) It
-    // sits at the finish elevation so the flanks meet it seamlessly.
+    // out past the peaks. It sits at the finish elevation so the flanks meet it
+    // seamlessly.
     const groundSpan = Math.max(size.x, size.z) + this._ovRadius * 3;
     this.ground.position.set(this._trackCenter.x, groundY, this._trackCenter.z);
     this.ground.scale.set(groundSpan / 1200, groundSpan / 1200, 1);
@@ -387,12 +242,9 @@ export class SceneRenderer {
     sc.updateProjectionMatrix();
     k.shadow.needsUpdate = true;
 
-    // Scale fog + the overview far-plane to the ACTUAL track size. The slope is
-    // procedural now — a long, tall descent — so the old fixed distances (tuned
-    // for the ~300u hill) fogged the whole run AND every distant peak to flat
-    // white, which is what made the lobby orbit look broken/incomplete. Key it
-    // off the lobby orbit radius so the encircling peaks stay crisp up close and
-    // only haze out in the far distance.
+    // Scale fog + the far-planes to the ACTUAL track size, keyed off the lobby
+    // orbit radius — so the encircling peaks stay crisp up close and only haze
+    // out in the far distance, on any length of run.
     const R = this._ovRadius || 200;
     this.scene.fog.near = R * 0.55;
     this.scene.fog.far = R * 2.9;
@@ -404,298 +256,9 @@ export class SceneRenderer {
     // already exist (skiers are normally added after setTrack, but be safe).
     for (const c of this.skiers.values()) { if (c.cam) { c.cam.far = this._camFar; c.cam.updateProjectionMatrix(); } }
 
-    // distant snow peaks + an alpine pine forest on the banks → a snowy mountain
-    this._addPeaks(this._trackCenter, size);
-    // Seed the decorative scatter off the slope id so the SAME hill always grows
-    // the SAME forest (two independent streams so tweaking one doesn't shift the other).
-    const sceneSeed = _hashStr(track.def && track.def.id ? track.def.id : 'slope');
-    this._addScenery(samples, edgeLat, mulberry32(sceneSeed));
-    this._addOuterTrees(samples, edgeLat, groundY, mulberry32(sceneSeed ^ 0x9e3779b9));
-  }
-
-  // One snow strip from lateral offset offA→offB, optionally rising in world-Y
-  // (riseA→riseB) to form mountainside terrain. computeVertexNormals so the flat
-  // piste AND the tilted walls both light correctly.
-  _addSlopeStrip(samples, offA, offB, riseA, riseB, color) {
-    const n = samples.length;
-    const pos = new Float32Array(n * 2 * 3);
-    for (let i = 0; i < n; i++) {
-      const s = samples[i], a = i * 6;
-      pos[a] = s.pos.x + s.lateral.x * offA; pos[a + 1] = s.pos.y + s.lateral.y * offA + riseA; pos[a + 2] = s.pos.z + s.lateral.z * offA;
-      pos[a + 3] = s.pos.x + s.lateral.x * offB; pos[a + 4] = s.pos.y + s.lateral.y * offB + riseB; pos[a + 5] = s.pos.z + s.lateral.z * offB;
-    }
-    const sidx = [];
-    for (let i = 0; i < n - 1; i++) { const p = i * 2; sidx.push(p, p + 1, p + 2, p + 1, p + 3, p + 2); }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    g.setIndex(sidx);
-    g.computeVertexNormals();
-    const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color, side: THREE.DoubleSide, roughness: 0.9, metalness: 0 }));
-    m.receiveShadow = true;
-    this.slopeGroup.add(m);
-    return m;
-  }
-
-  // Mountainside flanks: a strip per side from the outer wall ring (lateral
-  // ±(edgeLat+72), world-Y = sample + 48 — matching the top wall strip) sweeping
-  // out and DOWN to the valley floor (absolute groundY). Closes the sky-gap under
-  // the elevated run so it reads as a solid mountain from every orbit angle.
-  _addFlanks(samples, edgeLat, groundY) {
-    const offInner = edgeLat + 72, riseInner = 48, offOuter = edgeLat + 240;
-    const mat = new THREE.MeshStandardMaterial({ color: 0xeef3f9, side: THREE.DoubleSide, roughness: 1, metalness: 0 });
-    const n = samples.length;
-    for (const sign of [-1, 1]) {
-      const oi = sign * offInner, oo = sign * offOuter;
-      const pos = new Float32Array(n * 2 * 3);
-      for (let i = 0; i < n; i++) {
-        const s = samples[i], a = i * 6;
-        pos[a] = s.pos.x + s.lateral.x * oi; pos[a + 1] = s.pos.y + s.lateral.y * oi + riseInner; pos[a + 2] = s.pos.z + s.lateral.z * oi;
-        pos[a + 3] = s.pos.x + s.lateral.x * oo; pos[a + 4] = groundY; pos[a + 5] = s.pos.z + s.lateral.z * oo;
-      }
-      const idx = [];
-      for (let i = 0; i < n - 1; i++) { const p = i * 2; idx.push(p, p + 1, p + 2, p + 1, p + 3, p + 2); }
-      const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-      g.setIndex(idx);
-      g.computeVertexNormals();
-      const m = new THREE.Mesh(g, mat);
-      m.receiveShadow = true;
-      this.slopeGroup.add(m);
-    }
-  }
-
-  // Lobby-only flank forest: trees on the OUTER mountainside (between the valley
-  // walls and the floor). INSTANCED — the whole forest is 4 draw calls no matter
-  // the count, lives in lobbyGroup (hidden during the race → zero cost in the
-  // split-screen passes), and casts no shadow. Density falls off where the flank
-  // is steep (bare cliffs near the top of the run, forest lower down) for a
-  // natural treeline.
-  _addOuterTrees(samples, edgeLat, groundY, rnd) {
-    const offInner = edgeLat + 72, riseInner = 48, span = (edgeLat + 240) - offInner; // matches _addFlanks
-    const place = [];
-    const n = samples.length;
-    for (let i = 4; i < n - 4; i += 2) {
-      const s = samples[i];
-      const steep = ((s.pos.y + riseInner) - groundY) / span;   // flank height / width here
-      const density = Math.max(0, 1 - steep / 2.1);             // sparse on steep upper flanks
-      for (const sign of [-1, 1]) {
-        if (rnd() > density * 0.8) continue;
-        const t = 0.34 + 0.62 * rnd();                         // bias to the outer (gentler) flank, off the lip
-        const off = sign * (offInner + t * span);
-        place.push({
-          x: s.pos.x + s.lateral.x * off,
-          y: (s.pos.y + riseInner) + t * (groundY - (s.pos.y + riseInner)),
-          z: s.pos.z + s.lateral.z * off,
-          rotY: rnd() * Math.PI * 2,
-          scl: 0.85 + rnd() * 1.7,
-        });
-      }
-    }
-    if (!place.length) return;
-
-    const N = place.length;
-    const bark = new THREE.MeshStandardMaterial({ color: 0x6b4a2f, roughness: 1 });
-    const foliage = new THREE.MeshStandardMaterial({ color: 0x2f7d52, roughness: 1, flatShading: true });
-    // one InstancedMesh per tree part, all sharing the per-tree transforms.
-    const parts = [new THREE.InstancedMesh(new THREE.CylinderGeometry(0.18, 0.24, 1.2, 6).translate(0, 0.6, 0), bark, N)];
-    for (let c = 0; c < 3; c++) {
-      parts.push(new THREE.InstancedMesh(new THREE.ConeGeometry(1.3 - c * 0.32, 1.5, 7).translate(0, 1.4 + c * 0.85, 0), foliage, N));
-    }
-    const up = new THREE.Vector3(0, 1, 0), q = new THREE.Quaternion();
-    const p = new THREE.Vector3(), sc = new THREE.Vector3(), m4 = new THREE.Matrix4();
-    for (let k = 0; k < N; k++) {
-      const t = place[k];
-      q.setFromAxisAngle(up, t.rotY); p.set(t.x, t.y, t.z); sc.setScalar(t.scl);
-      m4.compose(p, q, sc);
-      for (const im of parts) im.setMatrixAt(k, m4);
-    }
-    for (const im of parts) {
-      im.instanceMatrix.needsUpdate = true;
-      im.castShadow = false; im.receiveShadow = false;
-      im.frustumCulled = false; // instances span the whole mountain; the origin-centred bound would wrongly cull
-      this.lobbyGroup.add(im);
-    }
-  }
-
-  // World-Y height of the mountainside at a lateral distance |off| from centre
-  // (matches the wall strips built in setTrack), for sitting trees on the banks.
-  _riseAt(absO, edgeLat) {
-    if (absO <= edgeLat) return 0;
-    if (absO <= edgeLat + 26) return 14 * (absO - edgeLat) / 26;
-    return 14 + 34 * Math.min(1, (absO - edgeLat - 26) / 46);
-  }
-
-  // A FULL ring of big low-poly snow peaks encircling the run — the distant
-  // range that frames the lobby orbit from every angle. (The old sparse 8-cone
-  // arc, sized for the small hill, left gaps the rotating camera exposed and sat
-  // inside the new orbit radius.) Placed safely beyond the orbit and BASED ON THE
-  // VALLEY FLOOR so they tower like real mountains rather than float as chips.
-  _addPeaks(center, size) {
-    const R = (this._ovRadius || 200) * 1.45;     // ring radius — well outside the camera orbit
-    const floor = this.ground.position.y;         // valley floor (finish level)
-    // emissive lifts the shaded faces toward a cool snowy white (distant peaks are
-    // hazy/bright), so they read as snow mountains rather than dark grey pyramids.
-    const snow = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xc6d2e0, emissiveIntensity: 0.18, roughness: 1, flatShading: true });
-    const N = 16;
-    for (let i = 0; i < N; i++) {
-      // even spacing + alternating jitter → organic but never a gap.
-      const ang = (i / N) * Math.PI * 2 + (i % 2 ? 0.17 : -0.13);
-      const dist = R * (0.92 + (i % 3) * 0.16);
-      const h = 210 + (i % 4) * 50 + (i % 2) * 44;  // ~210..390
-      const r = h * 0.62;
-      const cone = new THREE.Mesh(new THREE.ConeGeometry(r, h, 5, 1), snow);
-      cone.position.set(center.x + Math.cos(ang) * dist, floor + h / 2, center.z + Math.sin(ang) * dist);
-      cone.rotation.y = ang * 1.7;
-      this.slopeGroup.add(cone);
-    }
-  }
-
-  // Scatter an alpine pine forest over the mountainside banks (decorative, not
-  // collidable — the engine's obstacles are separate).
-  _addScenery(samples, edgeLat, rnd) {
-    const n = samples.length;
-    const foliage = new THREE.MeshStandardMaterial({ color: 0x2f7d52, roughness: 1, flatShading: true });
-    const bark = new THREE.MeshStandardMaterial({ color: 0x6b4a2f });
-    const worldUp = new THREE.Vector3(0, 1, 0);
-    for (let i = 4; i < n - 4; i += 3) {
-      const s = samples[i];
-      for (const side of [-1, 1]) {
-        if (rnd() < 0.5) continue;
-        const off = side * (edgeLat + 3 + rnd() * 58);
-        const tree = new THREE.Group();
-        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.24, 1.2, 6), bark);
-        trunk.position.y = 0.6; tree.add(trunk);
-        for (let c = 0; c < 3; c++) {
-          const cone = new THREE.Mesh(new THREE.ConeGeometry(1.3 - c * 0.32, 1.5, 7), foliage);
-          cone.position.y = 1.4 + c * 0.85; tree.add(cone);
-        }
-        tree.scale.setScalar(0.8 + rnd() * 1.9);
-        tree.rotation.y = rnd() * Math.PI * 2; // random yaw so the bank trees don't all face the same way
-        tree.position.copy(s.pos).addScaledVector(s.lateral, off).addScaledVector(worldUp, this._riseAt(Math.abs(off), edgeLat));
-        this.slopeGroup.add(tree);
-      }
-    }
-  }
-
-  _addRamp(cl, r) {
-    const f = cl.sampleAt(r.s);
-    // A LOW kicker, sized to the air scale (launch apex ~0.9u) so the skier
-    // clears it instead of driving through a too-tall box. Built as a box, tilted
-    // so its top face ramps up along the slope tangent.
-    const w = (r.width || 2.4), len = 3.0, h = 0.5;
-    const geo = new THREE.BoxGeometry(w, h, len);
-    const ramp = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x7fc4ec, roughness: 0.8 }));
-    ramp.castShadow = true; ramp.receiveShadow = true;
-    const lateral = f.lateral.clone().normalize();
-    const tangent = f.tangent.clone().normalize();
-    const up = f.up.clone().normalize();
-    ramp.position.copy(f.pos).addScaledVector(lateral, r.lat).addScaledVector(up, h * 0.25);
-    // Build a RIGHT-handed basis (x = up × tangent, NOT `lateral` = tangent × up,
-    // which would be left-handed → setFromRotationMatrix mis-orients the wedge).
-    const rx = new THREE.Vector3().crossVectors(up, tangent).normalize();
-    ramp.quaternion.setFromRotationMatrix(this._sBasis.makeBasis(rx, up, tangent));
-    ramp.rotateX(-0.32); // tip the lip up
-    this.propGroup.add(ramp);
-  }
-
-  _addObstacle(cl, o) {
-    const f = cl.sampleAt(o.s);
-    const up = f.up.clone().normalize();
-    const g = new THREE.Group();
-    if (o.kind === 'rock') {
-      const rock = new THREE.Mesh(
-        new THREE.IcosahedronGeometry(o.radius || 0.7, 0), // same default the engine collides at
-        new THREE.MeshStandardMaterial({ color: 0x8a93a1, roughness: 1, flatShading: true })
-      );
-      rock.castShadow = true; rock.scale.set(1, 0.7, 1);
-      g.add(rock);
-    } else {
-      const trunk = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.12, 0.16, 0.9, 6),
-        new THREE.MeshStandardMaterial({ color: 0x7a5230 })
-      );
-      trunk.position.y = 0.45; trunk.castShadow = true;
-      g.add(trunk);
-      const foliage = new THREE.MeshStandardMaterial({ color: 0x2f8f5b, roughness: 1, flatShading: true });
-      for (let i = 0; i < 3; i++) {
-        const cone = new THREE.Mesh(new THREE.ConeGeometry(0.95 - i * 0.22, 1.0, 7), foliage);
-        cone.position.y = 1.0 + i * 0.55; cone.castShadow = true;
-        g.add(cone);
-      }
-    }
-    g.position.copy(f.pos).addScaledVector(f.lateral, o.lat);
-    g.quaternion.setFromUnitVectors(_up, up);
-    this.propGroup.add(g);
-  }
-
-  _addBanner(cl, s, color, kind) {
-    const f = cl.sampleAt(Math.max(0, Math.min(cl.length, s)));
-    const lateral = f.lateral.clone().normalize();
-    const up = f.up.clone().normalize();
-    const halfW = 5.2;
-    const poleGeo = new THREE.CylinderGeometry(0.12, 0.12, 3.2, 8);
-    const mat = new THREE.MeshStandardMaterial({ color });
-    for (const side of [-1, 1]) {
-      const pole = new THREE.Mesh(poleGeo, mat);
-      pole.position.copy(f.pos).addScaledVector(lateral, side * halfW).addScaledVector(up, 1.6);
-      pole.quaternion.setFromUnitVectors(_up, up);
-      pole.castShadow = true;
-      this.propGroup.add(pole);
-    }
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(halfW * 2, 0.7, 0.18), mat);
-    bar.position.copy(f.pos).addScaledVector(up, 3.0);
-    const tangent = f.tangent.clone().normalize();
-    const bx = new THREE.Vector3().crossVectors(up, tangent).normalize(); // right-handed
-    bar.quaternion.setFromRotationMatrix(this._sBasis.makeBasis(bx, up, tangent));
-    this.propGroup.add(bar);
-  }
-
-  // ---- hitbox debug (?hitbox=1) ------------------------------------------
-  // Wireframes of every collision footprint, drawn in the (s, lat) plane each
-  // test really runs in. ONE rule everywhere (the engine's hitSL): contact the
-  // moment two outlines touch. A skier's ORANGE capsule (it yaws with the
-  // carve) against a RED obstacle ring (wipeout), a CYAN ramp box (launch), a
-  // GREEN pole dot (break-off), or another skier's orange capsule (bump).
-  // Purely diagnostic; nothing here is read back.
-  _debugLoop(pts, color) {
-    const g = new THREE.BufferGeometry().setFromPoints(pts);
-    return new THREE.LineLoop(g, new THREE.LineBasicMaterial({ color }));
-  }
-
-  // Circle on the slope surface around (frame.s, lat) — flat in the local frame,
-  // lifted a hair along the normal so it doesn't z-fight the snow.
-  _debugCircle(f, lat, radius, color) {
-    const pts = [];
-    for (let k = 0; k < 32; k++) {
-      const a = (k / 32) * Math.PI * 2;
-      pts.push(f.pos.clone()
-        .addScaledVector(f.lateral, lat + Math.cos(a) * radius)
-        .addScaledVector(f.tangent, Math.sin(a) * radius)
-        .addScaledVector(f.up, 0.06));
-    }
-    return this._debugLoop(pts, color);
-  }
-
-  // Axis-aligned (s, lat) rectangle on the slope surface around (frame.s, lat).
-  _debugRect(f, lat, halfS, halfLat, color) {
-    const corner = (ds, dl) => f.pos.clone()
-      .addScaledVector(f.tangent, ds * halfS)
-      .addScaledVector(f.lateral, lat + dl * halfLat)
-      .addScaledVector(f.up, 0.06);
-    return this._debugLoop([corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)], color);
-  }
-
-  // Skier-local capsule outline (stadium along local +Z = the ski direction).
-  // Child of the skier group, whose basis already includes the carve heading —
-  // so the outline yaws with the skis for free.
-  _debugSkierCapsule(radius, halfLen, color) {
-    const pts = [];
-    for (let k = 0; k < 32; k++) {
-      const a = (k / 32) * Math.PI * 2;
-      const z = Math.sin(a) * radius;
-      pts.push(new THREE.Vector3(Math.cos(a) * radius, 0.06, z + (z >= 0 ? halfLen : -halfLen)));
-    }
-    return this._debugLoop(pts, color);
+    // distant snow peaks + the alpine forests → a snowy mountain
+    addPeaks(this.slopeGroup, this._trackCenter, this._ovRadius, this.ground.position.y);
+    addForests(this.slopeGroup, this.lobbyGroup, samples, edgeLat, groundY, track.def && track.def.id);
   }
 
   // ---- skiers ----------------------------------------------------------
@@ -829,11 +392,11 @@ export class SceneRenderer {
   setSkierPose(id, s) {
     const c = this.skiers.get(id);
     if (!c) return;
-    if (this._hitboxDebug && !c.hitRings) {
+    if (this._hitboxDebug && !c.hitRing) {
       // Built here, not in addSkier: the per-skier radius rides the snapshot.
       // ONE capsule — the footprint every contact (skier/tree/ramp/pole) uses.
-      c.hitRings = [this._debugSkierCapsule(s.radius || 0.3, SKI_HALF, 0xff8c00)];
-      for (const ring of c.hitRings) c.group.add(ring);
+      c.hitRing = debugSkierCapsule(s.radius || 0.3, SKI_HALF, 0xff8c00);
+      c.group.add(c.hitRing);
     }
     const pos = s.pose.pos;
     c.spd = s.v; c.airborne = s.airborne;
@@ -887,103 +450,14 @@ export class SceneRenderer {
     // airborne — fed the already-normalised pose basis, surface point when grounded).
     if (this.trails) this.trails.addPoint(id, pos, c.pose.forward, c.pose.up, s.airborne);
 
-    this._pokePoles(s, c);
-  }
-
-  // Break-off contact: a grounded skier reaching an edge pole snaps it off its
-  // base. Same hitSL primitive + capsule sampling as every engine collision —
-  // tail/centre/nose circles (radius + heading off the snapshot) vs the pole's
-  // footprint — but stays renderer-only: the engine never knows. The pole
-  // leaves the skier's path the same frame it's hit (no upright pole can ever
-  // overlap the skier); flight lives in _updatePoles.
-  _pokePoles(s, c) {
-    const poles = this._poles;
-    if (!poles || poles.length === 0 || s.totalS == null) return;
-    const prev = c._pokeS != null ? c._pokeS : s.totalS;
-    c._pokeS = s.totalS; // track through the air too — landing must not sweep the overflown stretch
-    if (s.air > 0.9) return; // sailing over — the poles are only 1.1 tall
-    const reach = (s.radius || 0.3) + POLE_R;
-    // a hard carve swings the ski tips up to SKI_HALF sideways — allow for it
-    if (Math.abs(Math.abs(s.lat) - this._pisteHalf) > reach + SKI_HALF) return; // not near either edge line
-    // Sweep the stretch covered since the last frame (as the rect core of the
-    // same hitSL test) — the honest reach is narrower than one frame-step at
-    // full schuss, so a point test would skip poles. A jump bigger than any
-    // real step is a run-reset teleport, not travel.
-    let halfS = Math.abs(s.totalS - prev) / 2;
-    if (halfS > 2) halfS = 0;
-    const mid = halfS > 0 ? (s.totalS + prev) / 2 : s.totalS;
-    const hs = Math.cos(s.heading || 0), hl = -Math.sin(s.heading || 0); // ski direction in (s, lat)
-    for (const p of poles) {
-      if (p.mode !== 0) continue;
-      let touched = false;
-      for (const e of CAP_OFFS) {
-        if (hitSL(p.s - (mid + e * hs), p.lat - (s.lat + e * hl), reach, halfS)) { touched = true; break; }
-      }
-      if (!touched) continue;
-      p.mode = 1;
-      if (p.hitMark) p.hitMark.visible = false; // knocked off → no contact test until reset
-      p.fs = p.s; p.flat = p.lat; p.h = 0.55; // flight tracks the pole's CENTRE
-      // The whole launch scales with impact speed: a braking skier nudges the
-      // pole over, a tucked one at full schuss sends it cartwheeling.
-      const kick = Math.min(POLE_KICK_MAX, Math.max(POLE_KICK_MIN, (s.v || 0) / POLE_REF_V));
-      p.vs = (s.v || 0) * POLE_FWD;
-      p.vlat = Math.sign(p.lat) * POLE_OUT * kick * (0.8 + 0.4 * Math.random()); // outward, into the powder
-      p.vh = POLE_POP * kick;
-      p.spinRate = POLE_SPIN * kick * (0.75 + 0.5 * Math.random());
-      p.spinAng = 0;
-      // end-over-end: tumble about the horizontal axis ⊥ the knock direction
-      const f = this._cl.sampleAt(p.s);
-      const v = this._sKick.copy(f.tangent).multiplyScalar(p.vs).addScaledVector(f.lateral, p.vlat);
-      p.spinAxis.crossVectors(_up, v).normalize();
-      this._activePoles.add(p);
-      if (this.onPoleHit) this.onPoleHit(kick); // clack SFX — renderer-only event, so it can't ride onRaceEvent
-    }
-  }
-
-  // Flight + respawn for broken-off poles. Flight runs in the slope's
-  // (s, lat, height) frame — gravity along the local normal — so the tumble
-  // follows the descending terrain and lands on the snow whatever the pitch.
-  // Standing poles cost nothing: only members of _activePoles update.
-  _updatePoles(dt) {
-    const active = this._activePoles;
-    if (!active || active.size === 0) return;
-    for (const p of active) { // active = airborne poles only
-      p.vh -= POLE_G * dt;
-      p.fs += p.vs * dt; p.flat += p.vlat * dt; p.h += p.vh * dt;
-      p.spinAng += p.spinRate * dt;
-      const f = this._cl.sampleAt(Math.max(0, Math.min(this._clLength, p.fs)));
-      if (p.h < 0.1 && p.vh < 0) {
-        // touchdown: lie along the knock direction, nose sunk into the snow —
-        // and stay there (done moving → out of the active set)
-        p.mode = 2;
-        const lie = this._sKick.copy(f.tangent).multiplyScalar(p.vs).addScaledVector(f.lateral, p.vlat);
-        lie.addScaledVector(f.up, -POLE_SINK * lie.length()).normalize();
-        p.mesh.quaternion.setFromUnitVectors(_up, lie);
-        p.mesh.position.copy(f.pos).addScaledVector(f.lateral, p.flat).addScaledVector(f.up, 0.04)
-          .addScaledVector(lie, -0.55); // base-origin geo: centre the lie on the landing point
-        active.delete(p);
-      } else {
-        p.mesh.quaternion.setFromAxisAngle(p.spinAxis, p.spinAng);
-        const off = this._pOff.set(0, 0.55, 0).applyQuaternion(p.mesh.quaternion); // origin → centre
-        p.mesh.position.copy(f.pos).addScaledVector(f.lateral, p.flat).addScaledVector(f.up, p.h).sub(off);
-      }
-    }
+    if (this.poles) this.poles.poke(s, c);
   }
 
   // Wipe all tracks + stand every knocked pole back up (called at the start of
   // each run so a fresh race starts on fresh snow).
   clearTrails() {
     if (this.trails) this.trails.clear();
-    if (this._poles) {
-      for (const p of this._poles) {
-        if (p.mode === 0) continue;
-        p.mode = 0;
-        p.mesh.position.set(p.bx, p.by, p.bz);
-        p.mesh.quaternion.identity();
-        if (p.hitMark) p.hitMark.visible = true;
-      }
-      this._activePoles.clear();
-    }
+    if (this.poles) this.poles.reset();
   }
 
   setSkierHud(id, info) {
@@ -1024,9 +498,7 @@ export class SceneRenderer {
     // Gravity-blended camera up: a rig built purely from the slope frame rotates
     // WITH the terrain, so a 30° schuss framed identically to the 14° runout.
     // Blending the height offset + cam.up toward world-up keeps the horizon
-    // honest and lets the piste visibly fall away on steeps. (A pitch-scaled
-    // look target was tried INSTEAD of the blend and felt worse — the constant
-    // down-slope aim stays.)
+    // honest and lets the piste visibly fall away on steeps.
     const camUp = this._sCamUp.copy(up).lerp(_up, CAM_UP_WORLD).normalize();
     const want = this._sWant.copy(pos).addScaledVector(forward, -CHASE_DIST * dolly).addScaledVector(camUp, CHASE_HEIGHT * dolly);
     const target = this._sTarget.copy(pos).addScaledVector(forward, CHASE_LOOK * cell).addScaledVector(up, CHASE_TGT_UP * cell);
@@ -1060,7 +532,7 @@ export class SceneRenderer {
     this._last = t;
     this._frameDt = dt;
     if (this.onFrame) this.onFrame(dt);
-    this._updatePoles(dt); // after onFrame: same-frame response to this tick's pokes
+    if (this.poles) this.poles.update(dt); // after onFrame: same-frame response to this tick's pokes
 
     const W = window.innerWidth, H = window.innerHeight;
     const r = this.renderer;

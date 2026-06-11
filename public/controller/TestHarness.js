@@ -4,7 +4,7 @@
 // livery and lay out the requested screen from fake data.
 //
 // Pure DOM: the controller has no 3D scene, so nothing async to await.
-import { applyLatencyChip, renderWaitNote } from './ui.js';
+import { applyLatencyChip, renderWaitNote, renderResultsBoard } from './ui.js';
 
 const FAKE_NAMES = ['Mia', 'Theo', 'Ava', 'Leo', 'Zoe', 'Max', 'Ivy', 'Sam'];
 
@@ -23,43 +23,17 @@ export function runControllerScenario(opts) {
   const myColor = COLORS[color % COLORS.length];
   document.documentElement.style.setProperty('--car', myColor);
 
-  // Results board — mirrors main.js renderResults + renderResultFoot. `over=false`
-  // is the "you just finished, others still out" state (some rows "Skiing…", a
-  // waiting footer); `over=true` is the final board. The footer is host-gated:
-  // the host gets "Play again" + "New game", everyone else gets a note telling
-  // them which host to wait on (so non-hosts can't restart the room).
-  function renderResultsBoard(order, over, isHost) {
+  // Results board — the REAL render path (ui.js renderResultsBoard) fed fake
+  // rows. `over=false` is the "you just finished, others still out" state;
+  // `over=true` is the final board. A finisher other than this player is
+  // fabricated as host so the non-host footer shows the tinted name treatment.
+  function showBoard(order, over, isHost) {
     show('results');
-    const list = el('result-list'); list.innerHTML = '';
-    order.forEach((o) => {
-      const li = document.createElement('li');
-      if (o.me) li.classList.add('is-me');
-      if (!o.finished) li.classList.add('is-racing');
-      const dot = document.createElement('span'); dot.className = 'res-dot';
-      dot.style.background = COLORS[o.colorIndex] || '#888';
-      const name = document.createElement('span'); name.className = 'res-name';
-      name.textContent = o.name + (o.ai ? ' (CPU)' : o.me ? ' (You)' : '');
-      const time = document.createElement('span'); time.className = 'res-time';
-      time.textContent = o.finished ? `${o.time.toFixed(1)}s` : (over ? 'DNF' : 'Skiing…');
-      li.append(dot, name, time);
-      list.appendChild(li);
-    });
-    const hostControls = over && isHost;
-    el('again-btn').classList.toggle('hidden', !hostControls);
-    el('newgame-btn').classList.toggle('hidden', !hostControls);
-    const wait = el('result-wait');
-    if (!over) {
-      wait.classList.remove('hidden');
-      wait.textContent = 'Waiting for the other skiers to finish…';
-    } else if (isHost) {
-      wait.classList.add('hidden');
-    } else {
-      wait.classList.remove('hidden');
-      // Fabricate a host (a finisher other than this player) so the preview shows
-      // the tinted name treatment, mirroring main.js renderResultFoot.
-      const host = order.find((o) => !o.me);
-      renderWaitNote(wait, { name: host && host.name, color: host && COLORS[host.colorIndex] }, ' to start the next run…');
-    }
+    const host = order.find((o) => !o.me);
+    renderResultsBoard(order, {
+      over, isHost,
+      host: host && { name: host.name, color: COLORS[host.colorIndex] },
+    }, COLORS);
   }
 
   // Latency chip preview — no relay here, so feed it a static reading.
@@ -142,7 +116,7 @@ export function runControllerScenario(opts) {
       // Your skier crossed the line — the phone flips to the results board with
       // your finished row while the rest are still out (not the drive HUD).
       setLatency(19, true);
-      renderResultsBoard([
+      showBoard([
         { name: FAKE_NAMES[color], colorIndex: color, time: 31.2, me: true, finished: true },
         { name: FAKE_NAMES[(color + 1) % FAKE_NAMES.length], colorIndex: (color + 1) % COLORS.length, finished: false },
         { name: 'Bolt', colorIndex: (color + 2) % COLORS.length, ai: true, finished: false },
@@ -163,7 +137,7 @@ export function runControllerScenario(opts) {
     case 'results':
       // Final board (run over), viewed as the host so "Play again" + "New game" show.
       setLatency(20, true);
-      renderResultsBoard([
+      showBoard([
         { name: FAKE_NAMES[(color + 1) % FAKE_NAMES.length], colorIndex: (color + 1) % COLORS.length, time: 28.4, finished: true },
         { name: FAKE_NAMES[color],                           colorIndex: color,                       time: 31.2, me: true, finished: true },
         { name: 'Bolt',                                      colorIndex: (color + 2) % COLORS.length, time: 33.9, ai: true, finished: true },
@@ -176,7 +150,7 @@ export function runControllerScenario(opts) {
       // "Waiting for <host> to start the next run…" note (the leading finisher is
       // the fabricated host, so the tinted name treatment shows).
       setLatency(20, true);
-      renderResultsBoard([
+      showBoard([
         { name: FAKE_NAMES[(color + 1) % FAKE_NAMES.length], colorIndex: (color + 1) % COLORS.length, time: 28.4, finished: true },
         { name: FAKE_NAMES[color],                           colorIndex: color,                       time: 31.2, me: true, finished: true },
         { name: 'Bolt',                                      colorIndex: (color + 2) % COLORS.length, time: 33.9, ai: true, finished: true },

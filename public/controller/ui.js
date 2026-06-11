@@ -19,6 +19,49 @@ export function applyLatencyChip(chipEl, halfMs, viaFastlane) {
   }
 }
 
+// The results board: standings rows into #result-list + the footer (host's
+// "Play again"/"New game" vs a waiting note). ONE render path for the live
+// phone (main.js) and the gallery preview (TestHarness.js).
+// `rows` come in rank order: { name, colorIndex, ai, me, finished, dnf, time }.
+// `host` is { name, color } (or falsy → "the host"), shown to non-hosts once
+// the run is over.
+export function renderResultsBoard(rows, { over, isHost, host }, colors) {
+  const list = document.getElementById('result-list');
+  list.innerHTML = '';
+  for (const o of rows) {
+    const li = document.createElement('li');
+    if (o.me) li.classList.add('is-me');
+    if (!o.finished && !o.dnf) li.classList.add('is-racing');
+    const dot = document.createElement('span');
+    dot.className = 'res-dot';
+    dot.style.background = colors[o.colorIndex] || '#888';
+    const name = document.createElement('span');
+    name.className = 'res-name';
+    name.textContent = o.name + (o.ai ? ' (CPU)' : o.me ? ' (You)' : '');
+    const time = document.createElement('span');
+    time.className = 'res-time';
+    time.textContent = o.finished ? `${o.time.toFixed(1)}s` : (o.dnf || over ? 'DNF' : 'Skiing…');
+    li.append(dot, name, time);
+    list.appendChild(li);
+  }
+  // Footer: while skiers are still out, a waiting note for everyone. Once the
+  // run is over, the host gets the restart buttons; everyone else is told who
+  // to wait on.
+  const hostControls = over && isHost;
+  document.getElementById('again-btn').classList.toggle('hidden', !hostControls);
+  document.getElementById('newgame-btn').classList.toggle('hidden', !hostControls);
+  const wait = document.getElementById('result-wait');
+  if (!over) {
+    wait.classList.remove('hidden');
+    wait.textContent = 'Waiting for the other skiers to finish…';
+  } else if (isHost) {
+    wait.classList.add('hidden');
+  } else {
+    wait.classList.remove('hidden');
+    renderWaitNote(wait, host || {}, ' to start the next run…');
+  }
+}
+
 // "Waiting for NAME<suffix>" — NAME is the host, tinted in their livery colour
 // (matching the in-race name plate). Built from DOM nodes so a player-supplied
 // name is always inserted as text, never markup. Falls back to "the host" until

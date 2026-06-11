@@ -72,9 +72,8 @@ function keyboardDriver() {
   return { read: () => ({ s: (st.right ? 1 : 0) - (st.left ? 1 : 0), t: st.brake ? 0 : 1, j: jSeq, f: { n: fSeq, a: fAngle, m: fMag } }) };
 }
 
-export async function runDisplayScenario(cfg, ctx) {
-  const { scene, slope, scenePromise, SKIER_COLORS, AiController, AI_PERSONALITIES, RunSession, renderRoster, showResults, buildReconnectCard, audio, showSoundHint } = ctx;
-  await scenePromise;
+export function runDisplayScenario(cfg, ctx) {
+  const { scene, slope, AiController, AI_PERSONALITIES, RunSession, renderRoster, showResults, buildReconnectCard, audio, showSoundHint } = ctx;
 
   const N = Math.max(1, Math.min(4, cfg.players || 4));
   const scn = cfg.scenario || 'running';

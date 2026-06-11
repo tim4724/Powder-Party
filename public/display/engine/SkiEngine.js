@@ -177,7 +177,7 @@ export class SkiEngine {
     // Course features, resolved to arclength `s` (the display passes them as a
     // fraction of run length → s; tests pass s directly). Ramps launch you;
     // obstacles wipe you out. Both collide via hitSL: a ramp's footprint is the
-    // rendered kicker BOX (3.0 long × `width` wide — SceneRenderer._addRamp
+    // rendered kicker BOX (3.0 long × `width` wide — SlopeScenery.addRamp
     // draws the same numbers), an obstacle's its radius; you're on either the
     // moment your body circle touches it.
     this.ramps = (track.ramps || []).map((r) => ({

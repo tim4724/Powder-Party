@@ -76,12 +76,9 @@ function showSoundHint() {
   // then the context unlocks on its own and the hint should clear itself.
   const t = setInterval(() => { if (audio.ready) { d.remove(); clearInterval(t); } }, 500);
 }
-let sceneReady = false;
-const scenePromise = scene.load().then(() => {
-  scene.setTrack(slope, { debug: params.get('centerline') === '1', hitbox: params.get('hitbox') === '1' });
-  sceneReady = true;
-  scene.start();
-});
+const trackOpts = { hitbox: params.get('hitbox') === '1' }; // ?hitbox=1 — wireframe collision footprints
+scene.setTrack(slope, trackOpts);
+scene.start();
 
 // ---- run state -----------------------------------------------------------
 let session = null;
@@ -243,7 +240,7 @@ function buildField(humans, reservedColors) {
 
 // ---- run lifecycle -------------------------------------------------------
 function startRun() {
-  if (session || !sceneReady) return;
+  if (session) return;
   net.flow.transitionTo(ROOM_STATE.COUNTDOWN);
   raceEnded = false; paused = false; coastSettled = false;
   aiBots = new Map();
@@ -468,7 +465,7 @@ function teardownRun() {
   audio.stopWind();
   slope = makeSlope();
   window.__slope = slope;
-  if (sceneReady) scene.setTrack(slope, { debug: params.get('centerline') === '1', hitbox: params.get('hitbox') === '1' });
+  scene.setTrack(slope, trackOpts);
 }
 
 function returnToLobby() {
@@ -484,7 +481,7 @@ function returnToLobby() {
 // run; startRun rebuilds the field from the current roster and broadcasts the
 // countdown, which pulls every phone off its results board into the new race.
 function playAgain() {
-  if (!sceneReady || !session) return;
+  if (!session) return;
   teardownRun();
   startRun();
 }
@@ -543,7 +540,7 @@ if (params.get('test') === '1' || scenario) {
     { scenario: scenario || 'running', players: parseInt(params.get('players'), 10) || (scenario === 'tricks' ? 1 : 4), host: parseInt(params.get('host'), 10) || 0 },
     // Inject the REAL render fns so the harness previews the live DOM path rather
     // than a hand-copy (which drifts — see renderRoster/showResults).
-    { scene, slope, scenePromise, SKIER_COLORS, AiController, AI_PERSONALITIES, RunSession, renderRoster, showResults, buildReconnectCard, audio, showSoundHint }
+    { scene, slope, AiController, AI_PERSONALITIES, RunSession, renderRoster, showResults, buildReconnectCard, audio, showSoundHint }
   ));
 } else {
   showLobby();
@@ -577,5 +574,5 @@ initDebugMenu([
   { key: 'players', label: 'Players', type: 'number', min: 1, max: 4, hint: 'field size in scenarios (default 4, tricks 1)' },
   { key: 'slope', label: 'Slope', type: 'select', hint: 'catalog slope — else a generated mountain', options: [['', 'generated'], ...Object.keys(SLOPES)] },
   { key: 'seed', label: 'Seed', type: 'number', hint: 'pins the generated mountain (deterministic repro)' },
-  { key: 'centerline', label: 'Centerline overlay', type: 'check', hint: 'draw the slope centerline debug line' },
+  { key: 'hitbox', label: 'Hitbox overlay', type: 'check', hint: 'wireframe collision footprints in the (s, lat) plane' },
 ]);

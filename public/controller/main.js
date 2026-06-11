@@ -5,7 +5,7 @@
 import { ControllerNet } from './Net.js';
 import { TiltInput } from './TiltInput.js';
 import { SwipeInput } from './SwipeInput.js';
-import { applyLatencyChip, renderWaitNote } from './ui.js';
+import { applyLatencyChip, renderWaitNote, renderResultsBoard } from './ui.js';
 import { keepScreenOn, letScreenSleep } from '../shared/WakeLock.js';
 import { initDebugMenu } from '../shared/DebugMenu.js';
 
@@ -244,50 +244,17 @@ function showResultsScreen() {
   show('results');
 }
 
-// Render the standings rows + the footer (host's "New run" vs a waiting note).
+// Render the standings rows + the footer (shared with the gallery preview —
+// see renderResultsBoard in ui.js).
 function renderResults(data) {
-  const list = el('result-list');
-  list.innerHTML = '';
-  (data.order || []).forEach((o) => {
-    const li = document.createElement('li');
-    const isMe = o.playerId === net.peerIndex;
-    if (isMe) li.classList.add('is-me');
-    if (!o.finished && !o.dnf) li.classList.add('is-racing');
-    const dot = document.createElement('span');
-    dot.className = 'res-dot';
-    dot.style.background = SKIER_COLORS[o.colorIndex] || '#888';
-    const name = document.createElement('span');
-    name.className = 'res-name';
-    name.textContent = o.name + (o.ai ? ' (CPU)' : isMe ? ' (You)' : '');
-    const time = document.createElement('span');
-    time.className = 'res-time';
-    time.textContent = o.finished ? `${o.time.toFixed(1)}s` : (o.dnf || data.over ? 'DNF' : 'Skiing…');
-    li.append(dot, name, time);
-    list.appendChild(li);
-  });
-  renderResultFoot(data);
-}
-
-// Footer: while skiers are still out, a waiting note for everyone. Once the run is
-// over, the host gets "Play again" (rematch, fresh slope) + "New game" (back to the
-// lobby); everyone else is told who to wait on.
-function renderResultFoot(data) {
-  const again = el('again-btn');
-  const btn = el('newgame-btn');
-  const wait = el('result-wait');
-  const hostControls = data.over && amHost;
-  again.classList.toggle('hidden', !hostControls);
-  btn.classList.toggle('hidden', !hostControls);
-  if (!data.over) {
-    wait.classList.remove('hidden');
-    wait.textContent = 'Waiting for the other skiers to finish…';
-  } else if (amHost) {
-    wait.classList.add('hidden');
-  } else {
-    wait.classList.remove('hidden');
-    const host = (data.order || []).find((o) => o.playerId === hostPeerIndex);
-    renderWaitNote(wait, { name: host && host.name, color: host && SKIER_COLORS[host.colorIndex] }, ' to start the next run…');
-  }
+  const order = data.order || [];
+  const rows = order.map((o) => (o.playerId === net.peerIndex ? { ...o, me: true } : o));
+  const host = order.find((o) => o.playerId === hostPeerIndex);
+  renderResultsBoard(rows, {
+    over: !!data.over,
+    isHost: amHost,
+    host: host && { name: host.name, color: SKIER_COLORS[host.colorIndex] },
+  }, SKIER_COLORS);
 }
 
 function applyLivery() {
