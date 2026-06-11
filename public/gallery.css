@@ -112,6 +112,13 @@ button.card-btn { padding: 2px 6px; min-height: 20px; font-size: 11px; line-heig
   z-index: 1;
 }
 
+/* Sound gallery — text cards with play buttons instead of iframes. */
+.sound-desc { font-size: 11px; color: #8a8aa8; line-height: 1.45; }
+.sound-btns { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: auto; }
+.sound-btns button.card-btn { padding: 6px 10px; min-height: 28px; }
+input[type="range"] { accent-color: #5060c0; }
+.sound-btns input[type="range"] { flex: 1; min-width: 80px; }
+
 /* Mobile: one card per row + compact, touch-friendly header.
    - Header becomes a 3-col grid: title spans the top row, and Display /
      Controller / ⚙ share the row beneath. Option groups hide behind the

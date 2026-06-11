@@ -52,13 +52,30 @@ let slope = makeSlope();
 const scene = new SceneRenderer(el('scene'), SKIER_COLORS);
 scene.orbit = true;
 const audio = new SlopeAudio();
+// Pole break-offs are renderer-only (the engine never sees the edge poles), so
+// their clack hooks in here rather than through onRaceEvent. Quiet once the
+// results panel is up, like every other run sound.
+scene.onPoleHit = (kick) => { if (!raceEnded) audio.pole(kick); };
 // Web Audio unlocks only via a user gesture ON THIS page — startRun is driven
 // by a phone message, which doesn't count, so without this the race can stay
-// silent until someone touches the display. resume() is idempotent; the
-// pointer listener is `once` (the keydown one stays — harmless, and it covers
-// a keyboard-only display).
-window.addEventListener('pointerdown', () => audio.resume(), { once: true });
-window.addEventListener('keydown', () => audio.resume(), { once: true });
+// silent until someone touches the display. Either gesture unlocks audio and
+// clears the hint toast (each listener is `once`; the survivor firing later is
+// a harmless idempotent repeat).
+const unlockAudio = () => { audio.resume(); const h = el('sound-hint'); if (h) h.remove(); };
+window.addEventListener('pointerdown', unlockAudio, { once: true });
+window.addEventListener('keydown', unlockAudio, { once: true });
+// A run starting while audio is still locked would just be silently silent —
+// say why, until the first gesture lifts both the lock and the hint.
+function showSoundHint() {
+  if (audio.ready || el('sound-hint')) return;
+  const d = document.createElement('div');
+  d.id = 'sound-hint';
+  d.textContent = '🔈 Click or press a key for sound';
+  document.body.appendChild(d);
+  // Some displays allow audio without a gesture (kiosk autoplay permission) —
+  // then the context unlocks on its own and the hint should clear itself.
+  const t = setInterval(() => { if (audio.ready) { d.remove(); clearInterval(t); } }, 500);
+}
 let sceneReady = false;
 const scenePromise = scene.load().then(() => {
   scene.setTrack(slope, { debug: params.get('centerline') === '1', hitbox: params.get('hitbox') === '1' });
@@ -246,6 +263,7 @@ function startRun() {
     onRaceEnd: endRun,
   });
   audio.resume();
+  showSoundHint();
   showRace();
   session.startCountdown(COUNTDOWN_SECONDS);
 }
@@ -373,13 +391,7 @@ function onRaceEvent(e) {
   // Run decided: the world keeps moving behind the results panel, but stay silent
   // so a stray CPU jump/crash doesn't rattle over the board.
   if (raceEnded) return;
-  if (e.type === 'jump') audio.jump();
-  else if (e.type === 'trick_start') audio.trick();             // whoosh as the flip kicks off
-  else if (e.type === 'trick_done') audio.trickLand();          // chime per completed rotation
-  else if (e.type === 'land') audio.land(!!e.clean);
-  else if (e.type === 'crash') audio.scrape(1);
-  else if (e.type === 'bump') audio.bump();       // soft skier-on-skier contact
-  else if (e.type === 'reset') audio.land(false); // ski-patrol plop back onto the piste
+  audio.raceEvent(e);
 }
 
 function standingsPayload(over) {
@@ -531,7 +543,7 @@ if (params.get('test') === '1' || scenario) {
     { scenario: scenario || 'running', players: parseInt(params.get('players'), 10) || (scenario === 'tricks' ? 1 : 4), host: parseInt(params.get('host'), 10) || 0 },
     // Inject the REAL render fns so the harness previews the live DOM path rather
     // than a hand-copy (which drifts — see renderRoster/showResults).
-    { scene, slope, scenePromise, SKIER_COLORS, AiController, AI_PERSONALITIES, RunSession, renderRoster, showResults, buildReconnectCard }
+    { scene, slope, scenePromise, SKIER_COLORS, AiController, AI_PERSONALITIES, RunSession, renderRoster, showResults, buildReconnectCard, audio, showSoundHint }
   ));
 } else {
   showLobby();
@@ -540,7 +552,7 @@ if (params.get('test') === '1' || scenario) {
 }
 
 // debug hooks
-window.__net = net; window.__scene = scene; window.__slope = slope;
+window.__net = net; window.__scene = scene; window.__slope = slope; window.__audio = audio;
 window.__startRun = startRun; window.__session = () => session;
 
 // ⚙ debug menu — every query param this page reads (see makeSlope + the boot

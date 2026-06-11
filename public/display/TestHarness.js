@@ -73,7 +73,7 @@ function keyboardDriver() {
 }
 
 export async function runDisplayScenario(cfg, ctx) {
-  const { scene, slope, scenePromise, SKIER_COLORS, AiController, AI_PERSONALITIES, RunSession, renderRoster, showResults, buildReconnectCard } = ctx;
+  const { scene, slope, scenePromise, SKIER_COLORS, AiController, AI_PERSONALITIES, RunSession, renderRoster, showResults, buildReconnectCard, audio, showSoundHint } = ctx;
   await scenePromise;
 
   const N = Math.max(1, Math.min(4, cfg.players || 4));
@@ -158,23 +158,29 @@ export async function runDisplayScenario(cfg, ctx) {
   // `solo` latches its results board once (shown from onRaceEnd below) so it isn't
   // re-rendered every frame; cleared on replay.
   let soloOver = false;
+  // main.js gates pole clacks on ITS raceEnded (always false in test mode) —
+  // re-gate on solo's results board so coasting CPU stay quiet behind it.
+  scene.onPoleHit = (kick) => { if (!soloOver) audio.pole(kick); };
   let session = newSession();
   seedField(session);
   window.__harness = () => session;       // current session (reassigned on restart) — for automated checks
   window.__scene = scene;                 // renderer handle (pole flex etc.) — for automated checks
   function newSession() {
     const s = new RunSession(field, slope, {
-      onRaceEvent: () => {},
+      // Same SFX as live play (Audio.raceEvent) — the labs exist to FEEL the
+      // jump/flip/bump loop, and sound is half of that feedback.
+      onRaceEvent: (e) => audio.raceEvent(e),
       onCountdownTick: (n) => {
         const c = el('countdown');
         if (c) { c.textContent = n > 0 ? String(n) : n === 0 ? 'GO!' : ''; c.classList.toggle('is-go', n === 0); }
+        if (n >= 0) audio.countdown(n);
       },
-      onRaceStart: () => {},
+      onRaceStart: () => audio.startWind(),
       // `solo` lands on the real results board the instant the run ends. This fires on
       // a normal finish (whole field across → real times) AND on the MAX_RUN_MS
       // failsafe, so a stuck run still shows results instead of freezing on a dead
       // frame. The other previews ignore this and auto-loop from onFrame instead.
-      onRaceEnd: (results) => { if (scn === 'solo' && !soloOver) { soloOver = true; showResults(results, field); } },
+      onRaceEnd: (results) => { if (scn === 'solo' && !soloOver) { soloOver = true; audio.stopWind(); audio.finish(); showResults(results, field); } },
     });
     return s;
   }
@@ -228,10 +234,16 @@ export async function runDisplayScenario(cfg, ctx) {
     driveBots(session);
     session.update(dt * 1000);
     const snap = session.getSnapshot();
+    let packSpd = 0;
     for (const s of snap.skiers) {
       if (s.pose) scene.setSkierPose(s.id, s);
       scene.setSkierHud(s.id, s);
+      packSpd = Math.max(packSpd, s.v);
+      if (!soloOver && (s.offPiste || (s.crashed && s.spin))) audio.scrape(0.8); // deep-snow hiss / wipeout
     }
+    // Wind tracks pack speed exactly as in live play; once solo's results board
+    // is up the run goes quiet (stopWind fired from onRaceEnd, skip the scrapes).
+    if (!soloOver) audio.setWind(Math.min(1, packSpd / 26));
     // Run-over: auto-looping previews roll a fresh run; `solo` instead holds the
     // results board (shown from onRaceEnd) until the player replays.
     if ((scn === 'running' || scn === 'slope' || scn === 'tricks' || scn === 'bump' || scn === 'reconnect') && session.engine.raceOver) {
@@ -244,6 +256,7 @@ export async function runDisplayScenario(cfg, ctx) {
   };
 
   if (scn === 'countdown') {
+    showSoundHint();
     session.startCountdown(3);
   } else if (scn === 'paused') {
     session.racing = true; // skip the countdown delay; step synchronously
@@ -256,6 +269,7 @@ export async function runDisplayScenario(cfg, ctx) {
     session.fastForwardToEnd(() => driveBots(session));
     showResults(session.getResults(), field);
   } else { // running / slope / tricks / bump / solo — start the run, onFrame loops it
+    showSoundHint();
     session.startCountdown(scn === 'solo' ? 3 : 1); // solo gets a real 3-2-1 race start
   }
 }

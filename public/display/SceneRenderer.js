@@ -89,6 +89,7 @@ export class SceneRenderer {
     this.skiers = new Map();
     this._order = [];          // celled (human) skiers, stable split-screen order
     this.onFrame = null;
+    this.onPoleHit = null;     // (kick 0.35..1.4) — an edge pole snapped off; impact-speed scale for SFX
     this.orbit = false;
     this._running = false;
     this._last = 0;
@@ -935,6 +936,7 @@ export class SceneRenderer {
       const v = this._sKick.copy(f.tangent).multiplyScalar(p.vs).addScaledVector(f.lateral, p.vlat);
       p.spinAxis.crossVectors(_up, v).normalize();
       this._activePoles.add(p);
+      if (this.onPoleHit) this.onPoleHit(kick); // clack SFX — renderer-only event, so it can't ride onRaceEvent
     }
   }
 

@@ -86,7 +86,7 @@ The phone controller previews a single screen the same way, off the relay:
 ### Gallery
 
 A no-relay preview surface that tiles every screen as a scaled iframe of the real page (each
-driven by its `TestHarness`), so UI regressions are visible at a glance. Three tabs:
+driven by its `TestHarness`), so UI regressions are visible at a glance. Four tabs:
 
 - `/gallery.html` — **Display**: every big-screen state (lobby → countdown → run → paused →
   results) across aspect ratios (16:9 / 21:9 / 4:3 / 1:1) and skier counts.
@@ -94,6 +94,8 @@ driven by its `TestHarness`), so UI regressions are visible at a glance. Three t
   orientation, and "browser chrome" on/off, with a "view as" picker to preview all liveries.
 - `/gallery-slopes.html` — **Slopes**: one orbiting card per slope in `shared/slopes.js`,
   with an optional centerline overlay.
+- `/gallery-sounds.html` — **Sounds**: one card per SFX, played through the real
+  `SlopeAudio` synth and labelled with the game event that fires it.
 
 ## Project structure
 
@@ -110,14 +112,14 @@ public/
     RunSession.js          #   lifecycle (countdown / run / finish / pause)
     AiDriver.js            #   pure-pursuit CPU skiers
     SceneRenderer.js       #   Three.js slope + skiers + split-screen chase cams
-    Audio.js               #   Web-Audio wind / carve / jump SFX
+    Audio.js               #   Web-Audio synth SFX (wind / jumps / crashes / poles)
     Net.js, main.js        #   relay + lobby + game loop
     TestHarness.js         #   no-relay preview scenarios
   controller/              # the phone (tilt + swipe)
     TiltInput.js           #   gyro → carve
     SwipeInput.js          #   hold → brake, flick (in the air) → trick
     Net.js, main.js, ui.js
-  gallery*.{html,js}       # no-relay preview gallery (Display / Phone / Slopes tabs)
+  gallery*.{html,js}       # no-relay preview gallery (Display / Phone / Slopes / Sounds tabs)
   gallery.css              #   shared gallery chrome
 partyplug/                 # reusable party-game transport kit (served under /partyplug/)
 vendor/three/              # vendored Three.js (served under /vendor/)

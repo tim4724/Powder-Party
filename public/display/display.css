@@ -136,6 +136,18 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #cfeaf8; }
   border-radius: 8px; image-rendering: pixelated;
 }
 
+/* Audio-unlock hint — shown when a run starts before any local gesture has
+   unlocked Web Audio; removed by main.js on the first click/keypress. */
+#sound-hint {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(1rem + env(safe-area-inset-bottom));
+  z-index: 40; pointer-events: none;
+  padding: 0.45rem 0.9rem;
+  font-family: var(--font-body); font-weight: 800; font-size: 0.85rem;
+  color: var(--ink); background: rgba(255, 255, 255, 0.85);
+  border-radius: var(--r-pill); box-shadow: var(--shadow-pop);
+}
+
 @media (max-width: 860px) {
   #lobby { flex-direction: column; justify-content: center; gap: 2vh; }
   .lobby__card { flex: none; max-width: 90vw; }
