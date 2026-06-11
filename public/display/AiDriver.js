@@ -222,7 +222,7 @@ export class AiController {
       const abreast = Math.abs(ds) < SKIER_ABREAST;
       if (!ahead && !abreast) continue;
       const need = skier.radius + b.radius + 0.4;
-      bands.push({ lo: b.lat - need, hi: b.lat + need });
+      bands.push({ lo: b.lat - need, hi: b.lat + need, soft: true }); // soft: a kicker line may barge through
       if (abreast && Math.abs(b.lat - cur) < PEEL_STACK) {
         const side = cur - b.lat; // which side of them we're already on
         peel += Math.abs(side) > 1e-3 ? Math.sign(side)
@@ -238,25 +238,32 @@ export class AiController {
     const drift = cl.sampleAt(s0 + RACE_LOOK).pos.clone().sub(f0.pos).dot(f0.lateral);
     const raceLat = clamp(drift * RACE_GAIN * (0.5 + 0.6 * this.skill), -RACE_MAX, RACE_MAX);
     let pref = this.laneBias * LANE_HOLD + raceLat;
+    let rampPull = false;
     if (this.tricks) {
       for (const r of ramps) {
         const ds = r.s - s0;
-        if (ds > 0 && ds < RAMP_LOOK && Math.abs(r.lat - cur) < RAMP_REACH) { pref = r.lat; break; }
+        if (ds > 0 && ds < RAMP_LOOK && Math.abs(r.lat - cur) < RAMP_REACH) { pref = r.lat; rampPull = true; break; }
       }
     }
-    if (peel) pref += peel * PEEL_BIAS;   // shove off a skier we're riding right on top of
+    if (peel && !rampPull) pref += peel * PEEL_BIAS; // shove off a skier we're riding right on top of
     pref = clamp(pref, -maxLane, maxLane);
-    if (!bands.length) return { lat: pref, urgent: false };
+    // Lining up a kicker outranks skier avoidance: the trigger is only as wide
+    // as the kicker box now, and a rival's band beside it would push the line
+    // just past the lip. Skiers are SOFT bumpers (a bump barely costs momentum;
+    // missing the ramp costs the launch), so hold the line and let the engine's
+    // push-apart sort out the traffic. Trees stay hard — they wipe you out.
+    const avoid = rampPull ? bands.filter((b) => !b.soft) : bands;
+    if (!avoid.length) return { lat: pref, urgent: false };
 
     // Candidate targets: the preferred line, where we already are, the piste edges,
     // and each band boundary. Keep the cheapest one that clears every band.
     const cands = [pref, cur, -maxLane, maxLane];
-    for (const b of bands) { cands.push(b.lo, b.hi); }
+    for (const b of avoid) { cands.push(b.lo, b.hi); }
     let best = null, bestCost = Infinity;
     for (let L of cands) {
       L = clamp(L, -maxLane, maxLane);
       let blocked = false;
-      for (const b of bands) { if (L > b.lo + 1e-6 && L < b.hi - 1e-6) { blocked = true; break; } }
+      for (const b of avoid) { if (L > b.lo + 1e-6 && L < b.hi - 1e-6) { blocked = true; break; } }
       if (blocked) continue;
       let cost = PREF_W * Math.abs(L - pref) + SWERVE_W * Math.abs(L - cur);
       if (Math.abs(L) > softEdge) cost += EDGE_W * (Math.abs(L) - softEdge);

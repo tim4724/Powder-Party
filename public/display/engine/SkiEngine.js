@@ -82,7 +82,7 @@ const SPIN_TURNS = 2;       // cosmetic whole turns over CRASH_TIME (multiple of
 // then BOTH skiers on the snow spin out (it's a tangle); a plain rear-end just blocks.
 // Air is a separate dimension, so a skier clearing the field overhead passes clean
 // through. STARTING VALUES — tune by feel.
-const SKIER_HITBOX_MUL = 0.72; // skier-skier footprint as a fraction of the summed obstacle radii (tighter than a tree hit)
+export const SKIER_HITBOX_MUL = 0.72; // skier-skier footprint as a fraction of the summed obstacle radii (tighter than a tree hit; exported for the ?hitbox=1 debug rings)
 const BUMP_PUSH = 0.5;      // share of the lateral overlap each skier is pushed out per frame
 const BUMP_EPS = 0.12;      // min lateral split (u) to unstack a dead nose-to-tail jam (ndl≈0)
 const BUMP_DAMP = 0.05;     // fraction of the closing speed bled from BOTH skiers on contact (very low → a bump barely costs momentum)
@@ -151,9 +151,11 @@ export class SkiEngine {
 
     // Course features, resolved to arclength `s` (the display passes them as a
     // fraction of run length → s; tests pass s directly). Ramps launch you;
-    // obstacles wipe you out. Both are circles in the (s, lat) plane.
+    // obstacles wipe you out. A ramp's footprint is the rendered kicker BOX
+    // (3.0 long × `width` wide — SceneRenderer._addRamp draws the same numbers,
+    // so the trigger is exactly the box you see); obstacles are circles.
     this.ramps = (track.ramps || []).map((r) => ({
-      s: r.s, lat: r.lat || 0, radius: r.radius || 1.4, width: r.width || 2.2
+      s: r.s, lat: r.lat || 0, halfS: 1.5, halfW: (r.width || 2.4) / 2
     }));
     this.obstacles = (track.obstacles || []).map((o) => ({
       s: o.s, lat: o.lat || 0, radius: o.radius || 0.7, kind: o.kind || 'tree'
@@ -608,7 +610,7 @@ export class SkiEngine {
     for (let i = 0; i < this.ramps.length; i++) {
       const r = this.ramps[i];
       const ds = c.totalS - r.s, dl = c.lat - r.lat;
-      const inside = (ds * ds + dl * dl) < (r.radius * r.radius);
+      const inside = Math.abs(ds) < r.halfS && Math.abs(dl) < r.halfW;
       if (inside) { if (!c.rampIn.has(i)) { c.rampIn.add(i); entered = true; } }
       else c.rampIn.delete(i);
     }
@@ -651,7 +653,7 @@ export class SkiEngine {
     const skiers = [];
     for (const c of this.skiers.values()) {
       skiers.push({
-        id: c.id, pose: c.pose, lat: c.lat, v: c.v,
+        id: c.id, pose: c.pose, lat: c.lat, totalS: c.totalS, v: c.v, radius: c.radius,
         spd: c.v / c.vmax,                 // normalized 0..~1.5
         progress: clamp(c.totalS / this.length, 0, 1),
         position: c.rank, of: this.skiers.size,

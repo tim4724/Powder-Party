@@ -33,8 +33,8 @@ export const SLOPES = {
       { kind: 'straight', len: 32, pitch: 14 },            // flattening runout to the finish
     ],
     ramps: [
-      { at: 0.335, lat: 0, radius: 2.4 },
-      { at: 0.72,  lat: 0, radius: 2.4 },
+      { at: 0.335, lat: 0, width: 2.4 },
+      { at: 0.72,  lat: 0, width: 2.4 },
     ],
     obstacles: [
       { at: 0.12, lat: -2.6, kind: 'tree' },
@@ -63,11 +63,11 @@ export const SLOPES = {
       { kind: 'straight', len: 32, pitch: 12 },         // mellow runout to the finish
     ],
     ramps: [                                            // evenly spaced, all on the fall line (lat 0)
-      { at: 0.16, lat: 0, radius: 2.6 },
-      { at: 0.34, lat: 0, radius: 2.6 },
-      { at: 0.52, lat: 0, radius: 2.6 },
-      { at: 0.70, lat: 0, radius: 2.6 },
-      { at: 0.84, lat: 0, radius: 2.6 },
+      { at: 0.16, lat: 0, width: 2.6 },
+      { at: 0.34, lat: 0, width: 2.6 },
+      { at: 0.52, lat: 0, width: 2.6 },
+      { at: 0.70, lat: 0, width: 2.6 },
+      { at: 0.84, lat: 0, width: 2.6 },
     ],
     obstacles: [],
   },
@@ -204,7 +204,7 @@ export function generateSlope(seed, opts = {}) {
   const ramps = [];
   for (const at of cand) {
     if (ramps.length >= rampCount) break;
-    if (ramps.every((r) => Math.abs(r.at - at) > 0.12)) ramps.push({ at: r3(at), lat: 0, radius: 2.4 });
+    if (ramps.every((r) => Math.abs(r.at - at) > 0.12)) ramps.push({ at: r3(at), lat: 0, width: 2.4 });
   }
   ramps.sort((a, b) => a.at - b.at);
 

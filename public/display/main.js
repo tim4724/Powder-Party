@@ -61,7 +61,7 @@ window.addEventListener('pointerdown', () => audio.resume(), { once: true });
 window.addEventListener('keydown', () => audio.resume(), { once: true });
 let sceneReady = false;
 const scenePromise = scene.load().then(() => {
-  scene.setTrack(slope, { debug: params.get('centerline') === '1' });
+  scene.setTrack(slope, { debug: params.get('centerline') === '1', hitbox: params.get('hitbox') === '1' });
   sceneReady = true;
   scene.start();
 });
@@ -456,7 +456,7 @@ function teardownRun() {
   audio.stopWind();
   slope = makeSlope();
   window.__slope = slope;
-  if (sceneReady) scene.setTrack(slope, { debug: params.get('centerline') === '1' });
+  if (sceneReady) scene.setTrack(slope, { debug: params.get('centerline') === '1', hitbox: params.get('hitbox') === '1' });
 }
 
 function returnToLobby() {

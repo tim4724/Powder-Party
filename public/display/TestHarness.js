@@ -161,6 +161,7 @@ export async function runDisplayScenario(cfg, ctx) {
   let session = newSession();
   seedField(session);
   window.__harness = () => session;       // current session (reassigned on restart) — for automated checks
+  window.__scene = scene;                 // renderer handle (pole flex etc.) — for automated checks
   function newSession() {
     const s = new RunSession(field, slope, {
       onRaceEvent: () => {},
