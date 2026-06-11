@@ -71,18 +71,32 @@ const CRASH_TIME = 1.1;     // seconds of lost control per wipeout (benchmark)
 const SPIN_DRAG = 9.0;      // u/s² speed bleed while wiping out (coasts to a near-stop)
 const SPIN_TURNS = 2;       // cosmetic whole turns over CRASH_TIME (multiple of 2π → lands on 0)
 
+// ---- THE collision primitive ---------------------------------------------
+// Every contact test in the game — skier/skier, skier/tree, skier/ramp, and the
+// renderer's skier/pole — is this ONE comparison: a rounded-rectangle overlap
+// in the locally-flat (s, lat) plane. A footprint is a rect core (halfS/halfLat,
+// both 0 for round things) padded by `reach` — the skier's body circle plus the
+// object's own radius. Contact = the gap to the core is inside `reach`. So the
+// rule is always "the skier's circle touches the footprint", never a bare
+// centre-point trigger. (Exported: SceneRenderer reuses it for the edge poles.)
+export function hitSL(ds, dl, reach, halfS = 0, halfLat = 0) {
+  const x = Math.max(0, Math.abs(ds) - halfS);
+  const y = Math.max(0, Math.abs(dl) - halfLat);
+  return x * x + y * y < reach * reach;
+}
+
 // ---- Skier-vs-skier contact ---------------------------------------------
-// Skiers are SOFT bumpers, not hazards. Their contact footprint is TIGHTER than
-// their obstacle radius (SKIER_HITBOX_MUL) — brushing shoulders shouldn't read as a
-// hit. Overlapping in the (s,lat) plane shoves them apart LATERALLY (never along s —
-// that would teleport race progress and is exploitable) and a trailing skier can't
-// tunnel through the one directly ahead: it tucks in behind (the draft/pack feel).
-// Contact bleeds only a LITTLE speed — light enough that a bump costs momentum but
-// never stops your run. Only a FAST, side-on hit (a T-bone) actually wipes out — and
-// then BOTH skiers on the snow spin out (it's a tangle); a plain rear-end just blocks.
-// Air is a separate dimension, so a skier clearing the field overhead passes clean
+// Skiers are SOFT bumpers, not hazards. Their honest body circle (see
+// DEFAULT_STATS.radius) keeps shoulder-brushes from reading as hits — contact
+// starts where the skis visually touch. Overlapping in the (s,lat) plane shoves
+// them apart LATERALLY (never along s — that would teleport race progress and
+// is exploitable) and a trailing skier can't tunnel through the one directly
+// ahead: it tucks in behind (the draft/pack feel). Contact bleeds only a LITTLE
+// speed — light enough that a bump costs momentum but never stops your run.
+// Only a FAST, side-on hit (a T-bone) actually wipes out — and then BOTH skiers
+// on the snow spin out (it's a tangle); a plain rear-end just blocks. Air is a
+// separate dimension, so a skier clearing the field overhead passes clean
 // through. STARTING VALUES — tune by feel.
-export const SKIER_HITBOX_MUL = 0.72; // skier-skier footprint as a fraction of the summed obstacle radii (tighter than a tree hit; exported for the ?hitbox=1 debug rings)
 const BUMP_PUSH = 0.5;      // share of the lateral overlap each skier is pushed out per frame
 const BUMP_EPS = 0.12;      // min lateral split (u) to unstack a dead nose-to-tail jam (ndl≈0)
 const BUMP_DAMP = 0.05;     // fraction of the closing speed bled from BOTH skiers on contact (very low → a bump barely costs momentum)
@@ -115,8 +129,10 @@ const TRICK_BOOST_T = 0.9;     // s the trick landing boost lasts (reuses the cl
 const TRICK_MAX_COMBO = 3;     // boost compounds over at most this many flips in one air (a monster launch can't run away)
 
 // Default per-skier stats = the benchmark. glide/edge/control are multipliers
-// (1 = unchanged); radius is the obstacle-overlap footprint (world units).
-const DEFAULT_STATS = { glide: 1, edge: 1, control: 1, radius: 0.55 };
+// (1 = unchanged); radius is the body circle every hitSL contact uses — sized
+// to the actual asset (torso 0.24 / ski half-span 0.24, plus slack), so contact
+// starts roughly where things visually touch.
+const DEFAULT_STATS = { glide: 1, edge: 1, control: 1, radius: 0.3 };
 function normStats(s) {
   const o = { ...DEFAULT_STATS, ...(s || {}) };
   o.glide = Math.max(0.2, o.glide);
@@ -151,14 +167,18 @@ export class SkiEngine {
 
     // Course features, resolved to arclength `s` (the display passes them as a
     // fraction of run length → s; tests pass s directly). Ramps launch you;
-    // obstacles wipe you out. A ramp's footprint is the rendered kicker BOX
-    // (3.0 long × `width` wide — SceneRenderer._addRamp draws the same numbers,
-    // so the trigger is exactly the box you see); obstacles are circles.
+    // obstacles wipe you out. Both collide via hitSL: a ramp's footprint is the
+    // rendered kicker BOX (3.0 long × `width` wide — SceneRenderer._addRamp
+    // draws the same numbers), an obstacle's its radius; you're on either the
+    // moment your body circle touches it.
     this.ramps = (track.ramps || []).map((r) => ({
       s: r.s, lat: r.lat || 0, halfS: 1.5, halfW: (r.width || 2.4) / 2
     }));
     this.obstacles = (track.obstacles || []).map((o) => ({
-      s: o.s, lat: o.lat || 0, radius: o.radius || 0.7, kind: o.kind || 'tree'
+      // default footprints match the rendered props at body height: a tree's
+      // low canopy reaches ~0.8 from the trunk where it meets a shoulder; a
+      // rock is its 0.7 icosahedron.
+      s: o.s, lat: o.lat || 0, radius: o.radius || (o.kind === 'rock' ? 0.7 : 0.8), kind: o.kind || 'tree'
     }));
 
     // Start line: spread the field evenly across the groomed piste in DISTINCT
@@ -534,12 +554,11 @@ export class SkiEngine {
       for (let j = i + 1; j < arr.length; j++) {
         const b = arr[j];
         if (b.finished || b.dnf) continue;
-        const rr = (a.radius + b.radius) * SKIER_HITBOX_MUL; // tighter than a tree hit — shoulders can brush
+        const rr = a.radius + b.radius; // same body circles as every other contact
         if (Math.abs(a.air - b.air) > rr) continue;   // one is flying clean over the other
         const ds = a.totalS - b.totalS, dl = a.lat - b.lat;
-        const dist2 = ds * ds + dl * dl;
-        if (dist2 >= rr * rr) continue;               // no overlap
-        const dist = Math.sqrt(dist2) || 1e-4;
+        if (!hitSL(ds, dl, rr)) continue;             // no overlap
+        const dist = Math.sqrt(ds * ds + dl * dl) || 1e-4;
         const nds = ds / dist, ndl = dl / dist;       // contact normal, pointing b → a
         const pen = rr - dist;
         next.get(a.id).add(b.id); next.get(b.id).add(a.id);
@@ -609,23 +628,20 @@ export class SkiEngine {
     let entered = false;
     for (let i = 0; i < this.ramps.length; i++) {
       const r = this.ramps[i];
-      const ds = c.totalS - r.s, dl = c.lat - r.lat;
-      const inside = Math.abs(ds) < r.halfS && Math.abs(dl) < r.halfW;
+      const inside = hitSL(c.totalS - r.s, c.lat - r.lat, c.radius, r.halfS, r.halfW);
       if (inside) { if (!c.rampIn.has(i)) { c.rampIn.add(i); entered = true; } }
       else c.rampIn.delete(i);
     }
     return entered;
   }
 
-  // Rising-edge overlap of a tree/rock (footprint = skier radius + obstacle radius).
+  // Rising-edge overlap of a tree/rock (skier circle vs obstacle circle).
   _enterObstacle(c) {
     if (!this.obstacles.length) return false;
     let entered = false;
     for (let i = 0; i < this.obstacles.length; i++) {
       const o = this.obstacles[i];
-      const ds = c.totalS - o.s, dl = c.lat - o.lat;
-      const rr = o.radius + c.radius;
-      const inside = (ds * ds + dl * dl) < rr * rr;
+      const inside = hitSL(c.totalS - o.s, c.lat - o.lat, c.radius + o.radius);
       if (inside) { if (!c.obsIn.has(i)) { c.obsIn.add(i); entered = true; } }
       else c.obsIn.delete(i);
     }

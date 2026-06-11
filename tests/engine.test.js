@@ -388,12 +388,12 @@ test('overlapping skiers are pushed apart laterally without wiping out', async (
   const events = [];
   const e = await makeEngine([1, 2], track({ length: 300, width: 20 }), { onEvent: (ev) => events.push(ev) });
   const a = e.skiers.get(1), b = e.skiers.get(2);
-  a.totalS = 20; a.lat = 0.15; a.heading = 0; a.v = 8;
-  b.totalS = 20; b.lat = -0.15; b.heading = 0; b.v = 8;
-  const gap0 = Math.abs(a.lat - b.lat);                 // 0.3 < the skier-skier footprint (~0.8) → overlapping
+  a.totalS = 20; a.lat = 0.1; a.heading = 0; a.v = 8;
+  b.totalS = 20; b.lat = -0.1; b.heading = 0; b.v = 8;
+  const gap0 = Math.abs(a.lat - b.lat);                 // 0.2 < the skier-skier footprint (0.6) → overlapping
   run(e, 0.2, () => { e.processInput(1, { s: 0, t: 1, j: 0 }); e.processInput(2, { s: 0, t: 1, j: 0 }); });
   const gap1 = Math.abs(a.lat - b.lat);
-  assert.ok(gap1 > gap0 + 0.3, `contact spreads the pair laterally (${gap0.toFixed(2)} → ${gap1.toFixed(2)})`);
+  assert.ok(gap1 > gap0 + 0.25, `contact spreads the pair laterally (${gap0.toFixed(2)} → ${gap1.toFixed(2)})`);
   assert.ok(!a.spinT && !b.spinT, 'a soft side-by-side bump does NOT wipe anyone out');
   assert.ok(events.some((ev) => ev.type === 'bump'), 'a bump event fires on first contact');
   assert.ok(!events.some((ev) => ev.type === 'crash'), 'no crash from a soft bump');

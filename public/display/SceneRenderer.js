@@ -12,7 +12,7 @@
 import * as THREE from 'three';
 import { mulberry32 } from '../shared/slopes.js';
 import { SkiTrails } from './SkiTrails.js';
-import { SKIER_HITBOX_MUL } from './engine/SkiEngine.js';
+import { hitSL } from './engine/SkiEngine.js';
 
 // FNV-1a hash of a slope's `def.id` → a uint32 seed, so the decorative forest is
 // deterministic per slope (same hill → same trees) instead of re-randomised on
@@ -55,8 +55,7 @@ const TUCK_SHRINK = 0.3;    // squat: body shrinks toward the feet when tucked (
 // run stands all poles back up — see clearTrails). (A bend-at-the-base spring
 // was tried first and always clipped through the skier on the way down.)
 // Purely cosmetic — the engine never sees the poles. STARTING VALUES.
-const POLE_HIT_S = 1.0;     // contact half-length along the run (u): ski half-length 0.75 + pole + a frame-step margin (~0.4u/frame at full schuss)
-const POLE_HIT_LAT = 0.35;  // contact half-width across the run (u): ski span 0.24 + pole 0.06 + a touch of slack
+const POLE_R = 0.06;        // the pole's footprint = its cylinder radius; contact runs through the engine's hitSL, the same primitive as every other object
 const POLE_FWD = 0.75;      // fraction of skier speed the pole carries down-slope
 const POLE_OUT = 3.0;       // outward knock (u/s) at POLE_REF_V — clears the piste into the powder
 const POLE_POP = 4.5;       // upward pop (u/s) at POLE_REF_V
@@ -327,12 +326,12 @@ export class SceneRenderer {
         mode: 0, // 0 standing · 1 tumbling through the air · 2 sunk in the snow
         fs: 0, flat: 0, h: 0, vs: 0, vlat: 0, vh: 0, // flight state in (s, lat, height)
         spinAxis: new THREE.Vector3(), spinRate: 0, spinAng: 0,
-        hitRect: null, // ?hitbox=1 wireframe (hidden while the pole is knocked over)
+        hitMark: null, // ?hitbox=1 wireframe (hidden while the pole is knocked over)
       });
       if (this._hitboxDebug) {
-        const rect = this._debugRect(s, pisteHalf * side, POLE_HIT_S, POLE_HIT_LAT, 0x2bb673);
-        this.slopeGroup.add(rect);
-        this._poles[this._poles.length - 1].hitRect = rect;
+        const mark = this._debugCircle(s, pisteHalf * side, POLE_R, 0x2bb673);
+        this.slopeGroup.add(mark);
+        this._poles[this._poles.length - 1].hitMark = mark;
       }
     }
 
@@ -341,14 +340,14 @@ export class SceneRenderer {
     for (const r of (track.ramps || [])) this._addRamp(cl, r);
     for (const o of (track.obstacles || [])) this._addObstacle(cl, o);
     if (this._hitboxDebug) {
-      // Same shapes + defaults the engine applies (SkiEngine track setup). The
-      // ramp trigger IS the kicker box (centre trigger: fires when the skier's
-      // centre enters); obstacles are a body circle (wipeout when it touches
-      // the skier's orange ring).
+      // Same footprints + defaults the engine collides with (SkiEngine track
+      // setup): the ramp box and the obstacle circle, read with ONE rule —
+      // contact the moment the skier's orange ring touches the outline.
       for (const r of (track.ramps || []))
         this.propGroup.add(this._debugRect(cl.sampleAt(r.s), r.lat || 0, 1.5, (r.width || 2.4) / 2, 0x27c4f5));
       for (const o of (track.obstacles || []))
-        this.propGroup.add(this._debugCircle(cl.sampleAt(o.s), o.lat || 0, o.radius || 0.7, 0xff2244));
+        this.propGroup.add(this._debugCircle(cl.sampleAt(o.s), o.lat || 0,
+          o.radius || (o.kind === 'rock' ? 0.7 : 0.8), 0xff2244));
     }
     this._addBanner(cl, 0.2, 0x2bb673, 'start');
     this._addBanner(cl, track.length - 0.2, 0xf2b134, 'finish');
@@ -651,11 +650,11 @@ export class SceneRenderer {
 
   // ---- hitbox debug (?hitbox=1) ------------------------------------------
   // Wireframes of every collision footprint, drawn in the (s, lat) plane each
-  // test really runs in. Touching body circles = that pair collides: a skier's
-  // ORANGE ring against a RED obstacle ring (wipeout), two skiers' YELLOW rings
-  // against each other (bump — the 0.72-shrunk footprint). CYAN ramp circles and
-  // GREEN pole rectangles are centre triggers: they fire the moment the skier's
-  // centre crosses the line. Purely diagnostic; nothing here is read back.
+  // test really runs in. ONE rule everywhere (the engine's hitSL): contact the
+  // moment two outlines touch. A skier's ORANGE body ring against a RED
+  // obstacle ring (wipeout), a CYAN ramp box (launch), a GREEN pole dot
+  // (break-off), or another skier's orange ring (bump). Purely diagnostic;
+  // nothing here is read back.
   _debugLoop(pts, color) {
     const g = new THREE.BufferGeometry().setFromPoints(pts);
     return new THREE.LineLoop(g, new THREE.LineBasicMaterial({ color }));
@@ -827,11 +826,8 @@ export class SceneRenderer {
     if (!c) return;
     if (this._hitboxDebug && !c.hitRings) {
       // Built here, not in addSkier: the per-skier radius rides the snapshot.
-      const r = s.radius || 0.55;
-      c.hitRings = [
-        this._debugSkierRing(r, 0xff8c00),                    // obstacle footprint
-        this._debugSkierRing(r * SKIER_HITBOX_MUL, 0xffe14d), // skier-skier bump circle
-      ];
+      // ONE ring — the body circle every contact (skier/tree/ramp/pole) uses.
+      c.hitRings = [this._debugSkierRing(s.radius || 0.3, 0xff8c00)];
       for (const ring of c.hitRings) c.group.add(ring);
     }
     const pos = s.pose.pos;
@@ -886,24 +882,35 @@ export class SceneRenderer {
     // airborne — fed the already-normalised pose basis, surface point when grounded).
     if (this.trails) this.trails.addPoint(id, pos, c.pose.forward, c.pose.up, s.airborne);
 
-    this._pokePoles(s);
+    this._pokePoles(s, c);
   }
 
   // Break-off contact: a grounded skier reaching an edge pole snaps it off its
-  // base. The test runs in the engine's (s, lat) plane — the same space all its
-  // collisions use — but stays renderer-only: the engine never knows. The pole
-  // leaves the skier's path the same frame it's hit (no upright pole can ever
-  // overlap the skier); flight + respawn live in _updatePoles.
-  _pokePoles(s) {
+  // base. Same hitSL primitive as every engine collision — body circle (radius
+  // off the snapshot) vs the pole's footprint — but stays renderer-only: the
+  // engine never knows. The pole leaves the skier's path the same frame it's
+  // hit (no upright pole can ever overlap the skier); flight lives in
+  // _updatePoles.
+  _pokePoles(s, c) {
     const poles = this._poles;
     if (!poles || poles.length === 0 || s.totalS == null) return;
+    const prev = c._pokeS != null ? c._pokeS : s.totalS;
+    c._pokeS = s.totalS; // track through the air too — landing must not sweep the overflown stretch
     if (s.air > 0.9) return; // sailing over — the poles are only 1.1 tall
-    if (Math.abs(Math.abs(s.lat) - this._pisteHalf) > POLE_HIT_LAT) return; // not on either edge line
+    const reach = (s.radius || 0.3) + POLE_R;
+    if (Math.abs(Math.abs(s.lat) - this._pisteHalf) > reach) return; // not on either edge line
+    // Sweep the stretch covered since the last frame (as the rect core of the
+    // same hitSL test) — the honest reach is narrower than one frame-step at
+    // full schuss, so a point test would skip poles. A jump bigger than any
+    // real step is a run-reset teleport, not travel.
+    let halfS = Math.abs(s.totalS - prev) / 2;
+    if (halfS > 2) halfS = 0;
+    const mid = halfS > 0 ? (s.totalS + prev) / 2 : s.totalS;
     for (const p of poles) {
       if (p.mode !== 0) continue;
-      if (Math.abs(p.s - s.totalS) > POLE_HIT_S || Math.abs(p.lat - s.lat) > POLE_HIT_LAT) continue;
+      if (!hitSL(p.s - mid, p.lat - s.lat, reach, halfS)) continue;
       p.mode = 1;
-      if (p.hitRect) p.hitRect.visible = false; // knocked off → no contact test until reset
+      if (p.hitMark) p.hitMark.visible = false; // knocked off → no contact test until reset
       p.fs = p.s; p.flat = p.lat; p.h = 0.55; // flight tracks the pole's CENTRE
       // The whole launch scales with impact speed: a braking skier nudges the
       // pole over, a tucked one at full schuss sends it cartwheeling.
@@ -961,7 +968,7 @@ export class SceneRenderer {
         p.mode = 0;
         p.mesh.position.set(p.bx, p.by, p.bz);
         p.mesh.quaternion.identity();
-        if (p.hitRect) p.hitRect.visible = true;
+        if (p.hitMark) p.hitMark.visible = true;
       }
       this._activePoles.clear();
     }
