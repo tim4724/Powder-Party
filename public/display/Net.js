@@ -348,7 +348,7 @@ export class DisplayNet extends GameNet {
     // The extras hook is best-effort sugar — if it throws, the joining phone
     // must still get its WELCOME (a dropped one hangs the join silently).
     let extras = null;
-    try { extras = this.welcomeExtras(peerIndex); } catch (_) {}
+    try { extras = this.welcomeExtras(peerIndex); } catch (e) { console.warn('[DisplayNet] welcomeExtras threw', e); }
     return {
       type: MSG.WELCOME,
       peerIndex,

@@ -304,7 +304,9 @@ input[type=text]:disabled { opacity: 0.6; }
 .result-list .res-time { margin-left: auto; color: var(--ink-3); font-weight: 700; font-variant-numeric: tabular-nums; }
 .result-list li.is-racing .res-time { font-style: italic; } /* still on the slope — "Skiing…" */
 /* late joiner — seated but not in this run: unranked (–), dashed + quieter, so
-   the row reads as "queued for the rematch", not a result. */
+   the row reads as "queued for the rematch", not a result. Relies on joiners
+   always trailing the ranked rows (standingsPayload appends them last) — a
+   joiner at :first-child would catch the gold leader color above. */
 .result-list li.is-joining { border-style: dashed; opacity: 0.8; counter-increment: none; }
 .result-list li.is-joining::before { content: '–'; }
 .result-list li.is-joining .res-time { font-style: italic; }
