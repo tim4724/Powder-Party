@@ -1,6 +1,7 @@
 node_modules/
 .playwright-mcp/
 test-results/
+playwright-report/
 *.log
 .DS_Store
 # Local-only Claude Code state — keeps the .claude/ root committable for shared

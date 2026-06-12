@@ -697,6 +697,7 @@ if (params.get('test') === '1' || scenario) {
 // debug hooks
 window.__net = net; window.__scene = scene; window.__slope = slope; window.__audio = audio;
 window.__startRun = startRun; window.__session = () => session;
+window.__driveBots = driveBots; // lets the E2E suite fast-forward a LIVE run: __session().fastForwardToEnd(__driveBots)
 
 // ⚙ debug menu — every query param this page reads (see makeSlope + the boot
 // branch above; scenario docs live atop TestHarness.js). Bare ?test=1 boots the

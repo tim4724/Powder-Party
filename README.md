@@ -135,13 +135,22 @@ scripts/capture-artwork.js # headless 4-player split-screen hero shot → artwor
 ## Testing
 
 ```bash
-npm test     # node:test — SkiEngine physics + partyplug transport
+npm test          # node:test — SkiEngine physics + partyplug transport
+npm run test:e2e  # Playwright — real display + phone pages over the real relay
 ```
 
 The engine is THREE-free so the unit tests feed it a lightweight centerline stub and assert on
 the physics: gravity descent + finish, the tuck speed gain, carve-scrub, tree wipeouts,
 jumps + ramp auto-launch, air flips (land clean for a boost, land mid-flip and wash out, the
 min-air gate), ranking, and skier removal.
+
+The E2E suite (`tests/e2e`) drives the REAL pages end to end — the display page creates a live
+room on the relay, controller pages join it by room code at phone viewport, and runs are
+skipped with the display's own fast-forward lever (real physics, real broadcasts). It covers
+the full lifecycle (start → results → play again → new game), the late-join flow (waiting
+screen → "next run" board rows → rematch fold-in), same-device rejoin mid-run and during
+results, and the device-choice screen with its bail toasts (stale room via the boot probe,
+full room, back-gesture restore). One-time setup: `npx playwright install chromium`.
 
 ## Tuning
 
