@@ -298,6 +298,10 @@ export class DisplayNet extends GameNet {
   // ---- outbound protocol ----
   _welcomeFor(peerIndex) {
     const p = this.flow.get(peerIndex) || {};
+    // The extras hook is best-effort sugar — if it throws, the joining phone
+    // must still get its WELCOME (a dropped one hangs the join silently).
+    let extras = null;
+    try { extras = this.welcomeExtras(peerIndex); } catch (_) {}
     return {
       type: MSG.WELCOME,
       peerIndex,
@@ -306,7 +310,7 @@ export class DisplayNet extends GameNet {
       roomState: this.roomState,
       inRun: this.isInRun(peerIndex),
       players: this.roster(),
-      ...(this.welcomeExtras(peerIndex) || {})
+      ...(extras || {})
     };
   }
   _broadcastLobby() {

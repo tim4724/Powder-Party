@@ -224,11 +224,16 @@ function handleMessage(data) {
     }
     case MSG.ROOM_FULL:
       // The display had no seat for us (room full, or every seat held for a
-      // reconnect). Drop the relay connection (frees our placeholder slot) and
-      // land on the device chooser with the reason — the same dead end as the
-      // relay-level "Room is full" above.
+      // reconnect). Unlike the PRE-join fulls (the boot probe / relay-level
+      // "Room is full", which bail a fresh device to the device chooser), this
+      // lands after the player typed a name — and held seats free up when a
+      // reconnect grace expires. Drop the relay connection (frees our
+      // placeholder slot) and keep the name screen + room code so they can
+      // simply retry.
       net.disconnect();
-      location.replace('/?bail=game_full');
+      setJoining(false);
+      setStatus('Room is full — wait for a seat to open, then try again.');
+      show('name');
       break;
     case MSG.LOBBY_UPDATE: {
       roster = data.players || [];

@@ -42,3 +42,25 @@ test('lobby → run → results → play again → new game routes every screen'
 
   await phone.close();
 });
+
+test('the results board folds to the lobby when every racer has left', async ({ page, browser, baseURL }) => {
+  const roomCode = await createRoom(page);
+
+  const phone = await newPhone(browser, baseURL);
+  const host = await joinController(phone, roomCode, 'Mia');
+  await host.waitForSelector(visible('lobby'));
+  await startRun(host, page);
+  await fastForwardRun(page);
+  await host.waitForSelector(visible('results'));
+
+  // The back gesture is an intentional leave (MSG.LEAVE — the seat is freed
+  // outright, no reconnect grace). The only human who raced is gone, so the
+  // board is orphaned — nobody left on it can restart it — and the display
+  // folds back to its lobby front door (releaseOrphanedResults).
+  await host.goBack();
+  await host.waitForSelector(visible('name'));
+  await expect(page.locator('#lobby')).toBeVisible();
+  await expect(page.locator('#results')).toBeHidden();
+
+  await phone.close();
+});

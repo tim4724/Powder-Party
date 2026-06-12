@@ -648,7 +648,7 @@ function showBailToast(text) {
     // users — skipped while the media query keeps the overlay hidden (desktop
     // viewports land on the lobby silently, which is the intended behaviour).
     document.documentElement.classList.remove('device-choice-dismissed');
-    if (dcShare.getBoundingClientRect().width > 0) { try { dcShare.focus(); } catch (_) { /* old browsers */ } }
+    if (dcShare && dcShare.getBoundingClientRect().width > 0) { try { dcShare.focus(); } catch (_) { /* old browsers */ } }
     const clean = new URLSearchParams(location.search);
     clean.delete('bail');
     const qs = clean.toString();
