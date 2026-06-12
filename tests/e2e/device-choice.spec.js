@@ -30,6 +30,21 @@ test('phone on the display URL: chooser shows, continue dismisses, back restores
   await phone.close();
 });
 
+test('closing the big screen bails joined phones out at once', async ({ page, browser, baseURL }) => {
+  const roomCode = await createRoom(page);
+  const phone = await newPhone(browser, baseURL);
+  const ctrl = await joinController(phone, roomCode, 'Mia');
+  await ctrl.waitForSelector(visible('lobby'));
+  // Navigating the display away fires its pagehide goodbye (DISPLAY_CLOSED).
+  // The 20s ceiling proves the phone takes the instant exit, not the 30s
+  // display-gone fallback timer.
+  await page.goto('about:blank');
+  await ctrl.waitForURL((u) => u.pathname === '/', { timeout: 20000, waitUntil: 'domcontentloaded' });
+  await expect(ctrl.locator('#device-choice')).toBeVisible();
+  await expect(ctrl.locator('#dc-toast')).toHaveText('The game has ended.');
+  await phone.close();
+});
+
 test('the fifth phone bails out of a full room', async ({ page, browser, baseURL }) => {
   const roomCode = await createRoom(page);
   const phones = [];

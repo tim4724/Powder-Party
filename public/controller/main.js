@@ -114,8 +114,10 @@ el('conn-retry').addEventListener('click', () => {
 });
 
 // ---- "game ended" bail ----
-// The display leaving the room usually means the big screen was closed — the
-// game is over. Its own relay blips heal well inside the grace window (a fresh
+// A deliberately closed big screen announces itself (the DISPLAY_CLOSED goodbye
+// → instant bail in handleMessage); this timer covers the goodbyes that never
+// arrive — a crashed tab, a dead battery, an unload-time send the OS dropped.
+// The display's own relay blips heal well inside the grace window (a fresh
 // WELCOME disarms this), but once it's clearly not coming back, waiting forever
 // behind the "hang tight" overlay is a dead end: hand the phone to the display
 // page's device chooser instead, with the reason as a toast (?bail=game_ended).
@@ -303,6 +305,14 @@ function handleMessage(data) {
       setPauseOverlay(false);
       el('pause-btn').classList.add('hidden');
       show('lobby');
+      break;
+    case MSG.DISPLAY_CLOSED:
+      // The big screen said goodbye on its way out (pagehide) — the game is
+      // over for certain, so skip the display-gone grace wait and take the
+      // "game ended" exit at once. The peer_left(0) that follows would only
+      // arm the 30s fallback timer; same destination, just now.
+      net.disconnect();
+      location.replace('/?bail=game_ended');
       break;
   }
 }

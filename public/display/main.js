@@ -693,6 +693,13 @@ if (params.get('test') === '1' || scenario) {
   showLobby();
   renderRoster([], null);
   net.start();
+  // Goodbye on the way out: closing/navigating the big screen ends the game
+  // (a reload creates a brand-new room), so tell the phones NOW — they bail
+  // straight to the device chooser instead of sitting out the display-gone
+  // grace window. Best-effort: an unload-time WS send can be dropped (crash,
+  // dead battery, iOS killing the page), which is exactly what the
+  // controller's bail timer still covers.
+  window.addEventListener('pagehide', () => net.broadcast({ type: MSG.DISPLAY_CLOSED }));
 }
 
 // debug hooks

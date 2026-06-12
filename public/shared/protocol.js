@@ -64,7 +64,9 @@ var MSG = {
                                       // {newPlayer:true} rows — queued for the next run, not results
   GAME_END: 'game_end',               // return-to-lobby signal (no payload); controllers go back to the lobby
   GAME_PAUSED: 'game_paused',         // run frozen — controllers show the pause overlay
-  GAME_RESUMED: 'game_resumed'        // run resumed — controllers hide the pause overlay
+  GAME_RESUMED: 'game_resumed',       // run resumed — controllers hide the pause overlay
+  DISPLAY_CLOSED: 'display_closed'    // big screen closing for good (pagehide goodbye) — controllers
+                                      // bail straight to the device chooser, no display-gone grace wait
 };
 
 // Message types that ride the low-latency WebRTC fastlane (unreliable,

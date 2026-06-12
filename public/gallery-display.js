@@ -4,19 +4,19 @@
 // through a real session. Cards-per-row is set by the header control.
 //
 // Card shape:
-//   { key, title, animated?, extra? }
+//   { key, title, animated? }
 // `animated` cards run an endless CPU-driven loop (tagged "live"); the rest are
-// one-shot snapshots. `extra` adds URL params (the device-choice card stages its
-// bail toast). The display harness reads `players`; it doesn't take a
+// one-shot snapshots. The display harness reads `players`; it doesn't take a
 // host marker, so there's no per-slot "view as" control here (unlike Phone).
+// The device chooser is a phone-only moment (the media query never trips on a
+// big screen), so its card lives in the Phone gallery, not here.
 var DISPLAY_CARDS = [
   { key: 'lobby',     title: 'Lobby' },
   { key: 'countdown', title: 'Countdown', animated: true },
   { key: 'running',   title: 'Run',       animated: true },
   { key: 'reconnect', title: 'Reconnect', animated: true },
   { key: 'paused',    title: 'Paused' },
-  { key: 'results',   title: 'Results' },
-  { key: 'device-choice', title: 'Device choice', extra: { bail: 'game_ended' } }
+  { key: 'results',   title: 'Results' }
 ];
 
 var state = Gallery.loadState();
