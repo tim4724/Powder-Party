@@ -57,6 +57,13 @@ const net = new ControllerNet({
     // the name screen (the button is hidden), but it prevents a player getting
     // stuck on a disabled button — display gone, kicked, or reconnect exhausted.
     setJoining(false);
+    // The "game ended" bail only counts down while display_gone is the LATEST
+    // link state. Any other transition supersedes it — above all our OWN socket
+    // dropping ('reconnecting'/'lost'): navigating an offline phone would land
+    // on a browser error page with a misleading reason. If the link recovers
+    // while the display is still away, the joined snapshot re-raises
+    // display_gone (see ControllerNet) and the countdown re-arms.
+    if (state !== 'display_gone') disarmBail();
     // In-room (lobby/game/results) the name-screen status line is off-screen, so a
     // dropped link needs the full-screen #conn overlay; on the name screen the
     // status text under the form is enough.
@@ -78,10 +85,8 @@ const net = new ControllerNet({
       setStatus('Error: ' + info);
     } else if (state === 'display_gone') {
       setStatus('Waiting for the big screen…');
-      if (inRoom) {
-        showConn('Waiting for the big screen…', 'The host’s screen dropped — hang tight, it’ll reconnect you.', false);
-        armBail(); // not back within the grace window → the game has ended
-      }
+      if (inRoom) showConn('Waiting for the big screen…', 'The host’s screen dropped — hang tight, it’ll reconnect you.', false);
+      armBail(); // not back within the grace window → the game has ended (also covers a fresh join into an abandoned room, still on the name screen)
     } else if (state === 'replaced') {
       setStatus('Opened on another tab.');
       if (inRoom) showConn('Opened on another tab', 'This seat is now controlled from another tab or device.', false);
@@ -195,6 +200,7 @@ function handleMessage(data) {
         el('drive-hud').classList.remove('hidden');
         el('pause-btn').classList.remove('hidden');
         startDriving();   // resume streaming tilt to our still-descending skier
+        setPauseOverlay(!!data.paused); // rejoining a frozen run lands behind the pause overlay, in sync with the big screen
       } else if (waitingForRun) {
         renderWaiting();
         show('waiting');
@@ -466,7 +472,9 @@ if (_scenario) {
 // (?scenario=) never touch the relay, and a code-less page can't be probed.
 if (!_scenario && net.roomCode) {
   net.probeRoom().then((state) => {
-    if (currentScreen !== 'name') return;
+    // Already past the name screen, or a join is in flight (disabled form):
+    // the display/relay's own answer wins over a possibly-stale probe.
+    if (currentScreen !== 'name' || el('join-btn').disabled) return;
     if (state === 'not_found') { net.disconnect(); location.replace('/?bail=room_not_found'); }
     else if (state === 'full' && !net.isReturning) { net.disconnect(); location.replace('/?bail=game_full'); }
   });

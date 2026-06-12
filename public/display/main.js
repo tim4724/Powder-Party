@@ -104,8 +104,14 @@ const net = new DisplayNet({
   isInRun: (id) => { const s = session && session.engine.skiers.get(id); return !!s && !s.dnf; },
   // Once the run is decided, stamp the final standings onto every WELCOME so a
   // phone arriving during RESULTS (fresh joiner or a reconnect) lands on the
-  // results board the big screen is showing, not a misleading lobby.
-  welcomeExtras: () => (raceEnded && session ? { standings: standingsPayload(true) } : null),
+  // results board the big screen is showing, not a misleading lobby. Mid-run,
+  // stamp the frozen state instead, so a rejoiner's phone comes back showing
+  // the pause overlay rather than a live HUD over a frozen world.
+  welcomeExtras: () => {
+    if (!session) return null;
+    if (raceEnded) return { standings: standingsPayload(true) };
+    return paused ? { paused: true } : null;
+  },
 });
 
 function onRoomReady({ joinUrl }) {
@@ -586,7 +592,20 @@ function showRace() {
 function dismissDeviceChoice() {
   document.documentElement.classList.add('device-choice-dismissed');
 }
-el('dc-continue') && el('dc-continue').addEventListener('click', dismissDeviceChoice);
+// Continuing on this device is a navigation step: push a history entry so the
+// phone's back gesture restores the chooser (the popstate below syncs the root
+// class with the entry's state) instead of leaving the site. The test-mode
+// pre-dismiss at boot stays history-less on purpose — gallery iframes never
+// navigate. try: pushState can throw in a sandboxed iframe.
+el('dc-continue') && el('dc-continue').addEventListener('click', () => {
+  dismissDeviceChoice();
+  try { history.pushState({ dcDismissed: true }, ''); } catch (_) { /* sandboxed iframe */ }
+});
+window.addEventListener('popstate', (e) => {
+  // testMode guard: a spurious popstate (old Safari fires one on load) must
+  // never strip the boot pre-dismiss off a gallery/preview iframe.
+  if (!testMode) document.documentElement.classList.toggle('device-choice-dismissed', !!(e.state && e.state.dcDismissed));
+});
 // "Open on a large screen": hand the bare site URL to the native share sheet, or
 // copy it where share isn't available — either way the phone's job is just to
 // ferry the link to a TV/laptop browser.

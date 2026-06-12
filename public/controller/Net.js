@@ -110,6 +110,13 @@ export class ControllerNet extends GameNet {
         this.rejoinToken = null; // one-shot: a later retry/reconnect joins as itself, not a re-claim
         this._startPing();
         this.onJoined(this.peerIndex);
+        // The joined snapshot says who's in the room. Without the display
+        // (slot 0) this join would otherwise hang silently — the HELLO above
+        // went to nobody and no WELCOME will ever land — so surface it as
+        // display_gone, same as a live peer_left(0). Covers both a fresh join
+        // into an abandoned room and our own socket recovering while the
+        // display is still away (peer_left only fires on a live connection).
+        if (Array.isArray(msg.peers) && msg.peers.indexOf(0) < 0) this.onStatus('display_gone');
       } else if (type === 'error') {
         this.onStatus('error', msg.message);
       } else if (type === 'peer_left' && msg.index === 0) {
