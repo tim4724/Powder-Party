@@ -18,10 +18,13 @@ module.exports = defineConfig({
   // Each test burns a real relay room — keep local parallelism friendly.
   workers: process.env.CI ? 4 : 2,
   reporter: 'list',
-  timeout: 90000,
+  // Generous budgets: every join/board-flip rides the real relay, and shared
+  // CI runners add seconds of latency that never show locally.
+  timeout: 120000,
+  expect: { timeout: 15000 },
   use: {
     baseURL: `http://localhost:${PORT}`,
-    actionTimeout: 5000,
+    actionTimeout: 15000,
     // The pages talk TLS to the live relay; behind a TLS-intercepting proxy
     // (CI sandboxes / corporate networks) the chain is rewritten — accept it.
     // Local game traffic is plain http either way.
