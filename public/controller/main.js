@@ -456,3 +456,18 @@ if (_scenario) {
     color: _int(_params.get('color'), 0)
   }));
 }
+
+// Probe the relay for this room BEFORE the player invests in a name: a stale
+// QR / dead link bails to the device chooser now (room_not_found), and a full
+// room likewise — but only for a FRESH device (a returning clientId / ?claim=
+// rejoin swaps into its own existing relay slot, so "full" isn't fatal there).
+// A slow probe racing a successful join must not evict the player, so the
+// verdict is dropped once we've moved past the name screen. Gallery previews
+// (?scenario=) never touch the relay, and a code-less page can't be probed.
+if (!_scenario && net.roomCode) {
+  net.probeRoom().then((state) => {
+    if (currentScreen !== 'name') return;
+    if (state === 'not_found') { net.disconnect(); location.replace('/?bail=room_not_found'); }
+    else if (state === 'full' && !net.isReturning) { net.disconnect(); location.replace('/?bail=game_full'); }
+  });
+}
