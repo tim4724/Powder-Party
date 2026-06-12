@@ -15,8 +15,10 @@ module.exports = defineConfig({
   testDir: './tests/e2e',
   fullyParallel: true,
   retries: 0,
-  // Each test burns a real relay room — keep local parallelism friendly.
-  workers: process.env.CI ? 4 : 2,
+  // Each test burns a real relay room, and every display page renders WebGL
+  // (SwiftShader in CI — heavy). More than 2 workers starves a shared runner
+  // to the point of flaky clicks and stalled load events.
+  workers: 2,
   reporter: 'list',
   // Generous budgets: every join/board-flip rides the real relay, and shared
   // CI runners add seconds of latency that never show locally.

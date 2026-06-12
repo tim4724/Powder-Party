@@ -11,7 +11,7 @@ test('a stale room link bails to the device chooser with a toast', async ({ brow
   // Valid code shape, no such room — the boot-time relay probe 404s and bails
   // before the player ever types a name.
   await page.goto('/E2E-no-such-room');
-  await page.waitForURL((u) => u.pathname === '/', { timeout: 20000 });
+  await page.waitForURL((u) => u.pathname === '/', { timeout: 20000, waitUntil: 'domcontentloaded' });
   await expect(page.locator('#device-choice')).toBeVisible();
   await expect(page.locator('#dc-toast')).toHaveText('Room not found — that game has ended.');
   await phone.close();
@@ -45,7 +45,7 @@ test('the fifth phone bails out of a full room', async ({ page, browser, baseURL
   phones.push(fifth);
   const p5 = await fifth.newPage();
   await p5.goto('/' + roomCode);
-  await p5.waitForURL((u) => u.pathname === '/', { timeout: 20000 });
+  await p5.waitForURL((u) => u.pathname === '/', { timeout: 20000, waitUntil: 'domcontentloaded' });
   await expect(p5.locator('#device-choice')).toBeVisible();
   await expect(p5.locator('#dc-toast')).toHaveText('That room is full.');
   for (const phone of phones) await phone.close();
