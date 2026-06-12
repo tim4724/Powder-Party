@@ -6,7 +6,10 @@
 // so the player's own skier livery can be previewed across all colors.
 //
 // Card shape:
-//   { key, title, perColor? }
+//   { key, title, perColor?, url? }
+// `url` points the card at a page other than the controller — the device
+// chooser lives on the display page (a phone-sized iframe trips its media
+// query, so it shows with no further staging).
 var CONTROLLER_CARDS = [
   { key: 'name',            title: 'Name input' },
   { key: 'name-connecting', title: 'Connecting…' },
@@ -23,7 +26,8 @@ var CONTROLLER_CARDS = [
   { key: 'results-join',    title: 'Results (late join)', perColor: true },
   { key: 'conn-reconnecting', title: 'Reconnecting…' },
   { key: 'conn-lost',         title: 'Connection lost' },
-  { key: 'conn-display-gone', title: 'Big screen gone' },
+  { key: 'device-choice',     title: 'Big screen gone (chooser)',
+    url: '/?test=1&scenario=device-choice&bail=game_ended' },
   { key: 'conn-replaced',     title: 'Replaced (other tab)' }
 ];
 
@@ -50,6 +54,7 @@ var allCards = [];
 var perColorCards = [];
 
 function cardURL(c) {
+  if (c.url) return c.url;
   var colorIdx = c.perColor ? state.viewAs : 0;
   return Gallery.controllerURL(c.key, colorIdx);
 }

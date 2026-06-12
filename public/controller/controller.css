@@ -277,11 +277,12 @@ input[type=text]:disabled { opacity: 0.6; }
   text-align: center; margin: 0; color: var(--ink);
 }
 .result-list {
-  list-style: none; counter-reset: li; margin: 0 -5px; padding: 0 5px;
+  list-style: none; counter-reset: li; margin: -9px -5px; padding: 9px 5px;
   display: flex; flex-direction: column; gap: 0.5rem;
-  /* overflow-y:auto forces overflow-x to compute to auto too, which clips the
-     is-me livery ring / pop shadow at the sides — the padding/-margin pair gives
-     them room inside the clip rect without changing the row width. */
+  /* overflow-y:auto clips at the padding box on every side — the padding/-margin
+     pairs give the is-me livery ring (3px, sides/top) and the pop shadow
+     (0 3px 6px ≈ 9px below the last row) room inside the clip rect without
+     moving the rows or changing their width. */
   min-height: 0; overflow-y: auto;        /* scroll a tall board rather than push the footer off-screen */
 }
 .result-list li {
