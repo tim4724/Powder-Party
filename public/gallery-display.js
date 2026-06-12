@@ -8,6 +8,8 @@
 // `animated` cards run an endless CPU-driven loop (tagged "live"); the rest are
 // one-shot snapshots. The display harness reads `players`; it doesn't take a
 // host marker, so there's no per-slot "view as" control here (unlike Phone).
+// The device chooser is a phone-only moment (the media query never trips on a
+// big screen), so its card lives in the Phone gallery, not here.
 var DISPLAY_CARDS = [
   { key: 'lobby',     title: 'Lobby' },
   { key: 'countdown', title: 'Countdown', animated: true },
@@ -34,7 +36,7 @@ function dims() { return Gallery.DISPLAY_AR_DIMS[state.displayAR] || Gallery.DIS
 
 var allCards = [];
 
-function cardURL(c) { return Gallery.displayURL(state, c.key); }
+function cardURL(c) { return Gallery.displayURL(state, c.key, c.extra); }
 function cardTag(c) { return c.animated ? 'live' : ''; }
 
 var lazyIo = null;

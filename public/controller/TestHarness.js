@@ -15,7 +15,7 @@ export function runControllerScenario(opts) {
   const scenario = opts.scenario;
   const color = Math.max(0, Math.min(opts.color || 0, COLORS.length - 1));
 
-  const screens = { name: el('name'), lobby: el('lobby'), game: el('game'), results: el('results') };
+  const screens = { name: el('name'), lobby: el('lobby'), waiting: el('waiting'), game: el('game'), results: el('results') };
   const show = (name) => { for (const k of Object.keys(screens)) screens[k].classList.toggle('hidden', k !== name); };
 
   // Apply the player's livery (the --car custom property tints the HUD, the play
@@ -49,6 +49,19 @@ export function runControllerScenario(opts) {
     el('drive-hud').classList.remove('hidden');
     el('pause-btn').classList.remove('hidden'); // present the whole time you drive (main.js COUNTDOWN/GAME_START)
     el('motion-tip').classList.add('hidden');
+  }
+
+  // The #conn overlay covers whatever in-room screen the drop interrupted —
+  // previewed over the drive HUD, with the latency chip reading "no signal".
+  function showConnOverlay(title, msg, retry) {
+    showDriveHud();
+    setCarve(0.2);
+    setHud(2, false);
+    setLatency(-1, false);
+    el('conn-title').textContent = title;
+    el('conn-msg').textContent = msg;
+    el('conn-retry').classList.toggle('hidden', !retry);
+    el('conn').classList.remove('hidden');
   }
 
   switch (scenario) {
@@ -85,6 +98,14 @@ export function runControllerScenario(opts) {
       renderWaitNote(waitEl, { name: FAKE_NAMES[hostColor], color: COLORS[hostColor] }, ' to start…');
       break;
     }
+
+    case 'late-join':
+      // Joined while a run was underway: parked on the "run in progress" screen
+      // until the final board (your unranked row) or GAME_END routes you onward.
+      show('waiting');
+      el('waiting-name').textContent = FAKE_NAMES[color];
+      setLatency(24, false);   // pre-fastlane: nothing to drive yet
+      break;
 
     case 'countdown':
       // No countdown on the controller — the full HUD is up from the first beat
@@ -156,6 +177,37 @@ export function runControllerScenario(opts) {
         { name: 'Bolt',                                      colorIndex: (color + 2) % COLORS.length, time: 33.9, ai: true, finished: true },
         { name: FAKE_NAMES[(color + 3) % FAKE_NAMES.length], colorIndex: (color + 3) % COLORS.length, time: 36.5, finished: true }
       ], true, false);
+      break;
+
+    case 'results-join':
+      // Final board as the LATE JOINER sees it: the FULL field's results (4
+      // skiers — humans topped up with CPU) plus your own unranked trailing row
+      // ("next run"), so a one-joiner board is 5 rows. The footer waits on the
+      // host — the rematch countdown is what pulls you in.
+      setLatency(22, false);
+      showBoard([
+        { name: FAKE_NAMES[(color + 1) % FAKE_NAMES.length], colorIndex: (color + 1) % COLORS.length, time: 28.4, finished: true },
+        { name: 'Bolt',                                      colorIndex: (color + 2) % COLORS.length, time: 33.9, ai: true, finished: true },
+        { name: FAKE_NAMES[(color + 3) % FAKE_NAMES.length], colorIndex: (color + 3) % COLORS.length, time: 36.1, finished: true },
+        { name: 'Wedge',                                     colorIndex: (color + 4) % COLORS.length, ai: true, finished: false, dnf: true },
+        { name: FAKE_NAMES[color],                           colorIndex: color,                       me: true, newPlayer: true }
+      ], true, false);
+      break;
+
+    // --- connection overlay states (#conn) ---
+    // The screen-agnostic relay-link overlay over the in-room screens; copy
+    // mirrors main.js onStatus exactly so the preview can't drift from live.
+    case 'conn-reconnecting':
+      showConnOverlay('Reconnecting…', 'Reconnecting… (2/8)', false);
+      break;
+    case 'conn-lost':
+      showConnOverlay('Connection lost', 'Scan the QR on the big screen to take your seat back — or try again here.', true);
+      break;
+    case 'conn-display-gone':
+      showConnOverlay('Waiting for the big screen…', 'The host’s screen dropped — hang tight, it’ll reconnect you.', false);
+      break;
+    case 'conn-replaced':
+      showConnOverlay('Opened on another tab', 'This seat is now controlled from another tab or device.', false);
       break;
 
     default:

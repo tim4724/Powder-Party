@@ -78,11 +78,17 @@ player-facing surface; use the gallery or the URLs below to preview its screens.
   finish holds the results board — Enter (or "Play again") skis it again. `&players=N` sizes the
   field (default you + 3 CPU), `&seed=N` picks the mountain.
 - `/?test=1&scenario=countdown` · `…&scenario=paused`
+- `/?test=1&scenario=device-choice&bail=game_ended` — the chooser a phone gets when it lands on
+  this big-screen page (shared link, or a controller bailing out of a dead end with `?bail=…`;
+  toast reasons: `game_ended`, `room_not_found`, `game_full`)
 
 The phone controller previews a single screen the same way, off the relay:
 `/controller/index.html?scenario=playing&color=2` (scenarios: `name`, `name-connecting`,
-`lobby-host`, `lobby-waiting`, `countdown`, `playing`, `brake`, `paused`, `finished`,
-`results` (host), `results-waiting` (non-host); `color` 0–7 picks the livery).
+`lobby-host`, `lobby-waiting`, `late-join` (run in progress without you), `countdown`,
+`playing`, `brake`, `paused`, `finished`, `results` (host), `results-waiting` (non-host),
+`results-join` (late joiner's board), `conn-reconnecting` / `conn-lost` /
+`conn-display-gone` / `conn-replaced` (the relay-link overlay states); `color` 0–7
+picks the livery).
 
 ### Gallery
 
@@ -131,13 +137,22 @@ scripts/capture-artwork.js # headless 4-player split-screen hero shot → artwor
 ## Testing
 
 ```bash
-npm test     # node:test — SkiEngine physics + partyplug transport
+npm test          # node:test — SkiEngine physics + partyplug transport
+npm run test:e2e  # Playwright — real display + phone pages over the real relay
 ```
 
 The engine is THREE-free so the unit tests feed it a lightweight centerline stub and assert on
 the physics: gravity descent + finish, the tuck speed gain, carve-scrub, tree wipeouts,
 jumps + ramp auto-launch, air flips (land clean for a boost, land mid-flip and wash out, the
 min-air gate), ranking, and skier removal.
+
+The E2E suite (`tests/e2e`) drives the REAL pages end to end — the display page creates a live
+room on the relay, controller pages join it by room code at phone viewport, and runs are
+skipped with the display's own fast-forward lever (real physics, real broadcasts). It covers
+the full lifecycle (start → results → play again → new game), the late-join flow (waiting
+screen → "next run" board rows → rematch fold-in), same-device rejoin mid-run and during
+results, and the device-choice screen with its bail toasts (stale room via the boot probe,
+full room, back-gesture restore). One-time setup: `npx playwright install chromium`.
 
 ## Tuning
 

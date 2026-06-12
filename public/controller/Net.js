@@ -40,11 +40,13 @@ function deriveClaim() {
 function loadClientId(roomCode) {
   const key = 'clientId_' + roomCode;
   try {
-    let id = localStorage.getItem(key);
-    if (!id) { id = 'tc-' + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem(key, id); }
-    return id;
+    const stored = localStorage.getItem(key);
+    if (stored) return { id: stored, stored: true };
+    const id = 'tc-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    localStorage.setItem(key, id);
+    return { id, stored: false };
   } catch (_) {
-    return 'tc-' + Math.random().toString(36).slice(2);
+    return { id: 'tc-' + Math.random().toString(36).slice(2), stored: false };
   }
 }
 
@@ -57,12 +59,35 @@ export class ControllerNet extends GameNet {
     this.onRtt = opts.onRtt || (() => {});       // (halfMs, viaFastlane); halfMs < 0 = no signal
     this.roomCode = deriveRoomCode();
     this.instance = deriveInstance();
-    this.clientId = loadClientId(this.roomCode);
+    const cid = loadClientId(this.roomCode);
+    this.clientId = cid.id;
     this.rejoinToken = deriveClaim();
+    // A device the relay may already know — a clientId minted on an earlier
+    // visit (same-device reconnects swap into their existing relay slot) or a
+    // ?claim= rejoin token. Softens the pre-join probeRoom verdict: "full"
+    // isn't fatal for a returning device, only for a fresh one.
+    this.isReturning = cid.stored || this.rejoinToken != null;
     this.peerIndex = null;
     this.playerName = '';
     this._pingTimer = null;
     this._lastPong = 0;
+  }
+
+  // Probe the relay over HTTP for this room's existence/occupancy, so a stale
+  // QR (dead room) or a full room surfaces on the name screen immediately
+  // instead of only after the player types a name and hits join. Resolves to
+  // 'not_found' | 'full' | 'ok' | null — null covers an unreachable relay or
+  // one without the endpoint; connect() will surface any real failure then.
+  // (CSP connect-src already allows the relay's https origin.)
+  async probeRoom() {
+    try {
+      const httpUrl = RELAY_URL.replace(/^wss:\/\//, 'https://').replace(/^ws:\/\//, 'http://');
+      const res = await fetch(httpUrl + '/room/' + enc(this.roomCode) + (this.instance ? '?instance=' + enc(this.instance) : ''));
+      if (res.status === 404) return 'not_found';
+      if (!res.ok) return null;
+      const info = await res.json();
+      return info && info.clients >= info.maxClients ? 'full' : 'ok';
+    } catch (_) { return null; }
   }
 
   connect(playerName) {
@@ -85,6 +110,13 @@ export class ControllerNet extends GameNet {
         this.rejoinToken = null; // one-shot: a later retry/reconnect joins as itself, not a re-claim
         this._startPing();
         this.onJoined(this.peerIndex);
+        // The joined snapshot says who's in the room. Without the display
+        // (slot 0) this join would otherwise hang silently — the HELLO above
+        // went to nobody and no WELCOME will ever land — so surface it as
+        // display_gone, same as a live peer_left(0). Covers both a fresh join
+        // into an abandoned room and our own socket recovering while the
+        // display is still away (peer_left only fires on a live connection).
+        if (Array.isArray(msg.peers) && msg.peers.indexOf(0) < 0) this.onStatus('display_gone');
       } else if (type === 'error') {
         this.onStatus('error', msg.message);
       } else if (type === 'peer_left' && msg.index === 0) {

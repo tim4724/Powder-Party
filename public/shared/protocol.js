@@ -45,7 +45,13 @@ var MSG = {
   PING: 'ping',
 
   // Display -> specific controller
-  WELCOME: 'welcome',                 // {peerIndex, colorIndex, hostPeerIndex, roomState, players}
+  WELCOME: 'welcome',                 // {peerIndex, colorIndex, hostPeerIndex, roomState, players, inRun, standings?, paused?}
+                                      // inRun=false mid-run = no live skier (late joiner / expired seat) — the phone
+                                      // parks on its "run in progress" screen; a MISSING flag reads as true (an older
+                                      // display that never stamps it must not strand its rejoiners off the pad).
+                                      // During RESULTS, standings carries the
+                                      // final STANDINGS payload so the phone lands on the board, not the lobby; a
+                                      // paused run stamps paused=true so a rejoiner shows the pause overlay.
   ROOM_FULL: 'room_full',             // join refused — no free seat (room full, or every seat held for a reconnect)
   LOBBY_UPDATE: 'lobby_update',       // roster/host snapshot
   PLAYER_STATE: 'player_state',       // {position, of, progress[0..1], airborne, finished} — light HUD feed (~6.5 Hz, see main.js HUD_HZ_MS)
@@ -55,16 +61,41 @@ var MSG = {
   COUNTDOWN: 'countdown',             // {n} 3..2..1..GO
   GAME_START: 'game_start',
   STANDINGS: 'standings',             // {over, hostPeerIndex, total, order:[{playerId,name,colorIndex,ai,finished,time}]}
-                                      // pushed as each skier finishes (over=false) + at run end (over=true)
+                                      // pushed as each skier finishes (over=false) + at run end (over=true).
+                                      // Late joiners (seated, not in this run) trail the order as unranked
+                                      // {newPlayer:true} rows — queued for the next run, not results
   GAME_END: 'game_end',               // return-to-lobby signal (no payload); controllers go back to the lobby
   GAME_PAUSED: 'game_paused',         // run frozen — controllers show the pause overlay
-  GAME_RESUMED: 'game_resumed'        // run resumed — controllers hide the pause overlay
+  GAME_RESUMED: 'game_resumed',       // run resumed — controllers hide the pause overlay
+  DISPLAY_CLOSED: 'display_closed'    // big screen closing for good (pagehide goodbye) — controllers
+                                      // bail straight to the device chooser, no display-gone grace wait
 };
 
 // Message types that ride the low-latency WebRTC fastlane (unreliable,
 // unordered, latest-wins). Only idempotent, latest-state-wins inputs belong
 // here. All other traffic and WS fallback flow through the relay.
 var FASTLANE_TYPES = { control: true };
+
+// RUN-STATE broadcasts — messages that repaint a phone for the CURRENT run.
+// A controller parked on its "run in progress" screen (late joiner) drops
+// exactly these; room-management traffic (WELCOME, LOBBY_UPDATE, STANDINGS,
+// GAME_END, DISPLAY_CLOSED) stays live because it's what releases that state.
+// Add new run-only broadcasts HERE and the controller's gate picks them up.
+var RUN_STATE_MSGS = {
+  [MSG.COUNTDOWN]: true,
+  [MSG.GAME_START]: true,
+  [MSG.PLAYER_STATE]: true,
+  [MSG.GAME_PAUSED]: true,
+  [MSG.GAME_RESUMED]: true
+};
+
+// Relay-level join refusals, matched VERBATIM by the controller — these exact
+// strings are the relay's wire contract (the sibling games match the same
+// literals). An unrecognized error message still surfaces inline as raw text.
+var RELAY_ERRORS = {
+  ROOM_NOT_FOUND: 'Room not found',
+  ROOM_FULL: 'Room is full'
+};
 
 // Room states (must match partyplug RoomFlow.STATES — keep in sync by hand;
 // the controller page never loads RoomFlow, so the values live here too).
@@ -98,7 +129,7 @@ var SKIER_COLORS = [
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    MSG, FASTLANE_TYPES, ROOM_STATE,
+    MSG, FASTLANE_TYPES, RUN_STATE_MSGS, RELAY_ERRORS, ROOM_STATE,
     RELAY_URL, STUN_URL,
     MAX_PLAYERS, COUNTDOWN_SECONDS,
     SKIER_COLORS

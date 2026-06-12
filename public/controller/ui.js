@@ -22,7 +22,8 @@ export function applyLatencyChip(chipEl, halfMs, viaFastlane) {
 // The results board: standings rows into #result-list + the footer (host's
 // "Play again"/"New game" vs a waiting note). ONE render path for the live
 // phone (main.js) and the gallery preview (TestHarness.js).
-// `rows` come in rank order: { name, colorIndex, ai, me, finished, dnf, time }.
+// `rows` come in rank order: { name, colorIndex, ai, me, finished, dnf, time };
+// late joiners trail the field as unranked { newPlayer } rows ("next run").
 // `host` is { name, color } (or falsy → "the host"), shown to non-hosts once
 // the run is over.
 export function renderResultsBoard(rows, { over, isHost, host }, colors) {
@@ -31,7 +32,8 @@ export function renderResultsBoard(rows, { over, isHost, host }, colors) {
   for (const o of rows) {
     const li = document.createElement('li');
     if (o.me) li.classList.add('is-me');
-    if (!o.finished && !o.dnf) li.classList.add('is-racing');
+    if (o.newPlayer) li.classList.add('is-joining');
+    else if (!o.finished && !o.dnf) li.classList.add('is-racing');
     const dot = document.createElement('span');
     dot.className = 'res-dot';
     dot.style.background = colors[o.colorIndex] || '#888';
@@ -40,7 +42,7 @@ export function renderResultsBoard(rows, { over, isHost, host }, colors) {
     name.textContent = o.name + (o.ai ? ' (CPU)' : o.me ? ' (You)' : '');
     const time = document.createElement('span');
     time.className = 'res-time';
-    time.textContent = o.finished ? `${o.time.toFixed(1)}s` : (o.dnf || over ? 'DNF' : 'Skiing…');
+    time.textContent = o.newPlayer ? 'next run' : o.finished ? `${o.time.toFixed(1)}s` : (o.dnf || over ? 'DNF' : 'Skiing…');
     li.append(dot, name, time);
     list.appendChild(li);
   }

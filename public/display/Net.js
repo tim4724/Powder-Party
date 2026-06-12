@@ -18,6 +18,17 @@ const enc = encodeURIComponent;
 // who's truly gone stops blocking the 4-seat room.
 const RECONNECT_GRACE_MS = 90000;
 
+// Zombie-link detection: controllers send a 1 Hz PING (plus ~25 Hz CONTROL in
+// a run), so a "connected" seat that's been silent this long has a dead link
+// the relay hasn't noticed yet (phone slept with the socket half-open). The
+// sweep routes it through the normal drop path — mid-run that's the reconnect
+// QR + grace window, NOT a forfeit. Lobby and results seats are left to the
+// relay's own timeout: a backgrounded phone throttles its timers, and QR-ing a
+// pocketed phone between runs would be worse than a briefly stale roster row.
+// A seat still silent when the next run starts is swept within one tick.
+const LIVENESS_TIMEOUT_MS = 10000;
+const LIVENESS_SWEEP_MS = 2500;
+
 export class DisplayNet extends GameNet {
   constructor(opts = {}) {
     super();
@@ -35,20 +46,45 @@ export class DisplayNet extends GameNet {
     // `inRun` so a reconnecting phone that ISN'T racing (seat expired mid-run, or a
     // rematch started without it) waits in its lobby instead of a dead game pad.
     this.isInRun = opts.isInRun || (() => false);
+    // Extra game-state fields merged into each WELCOME (or null). The game layer
+    // uses this to hand a phone joining during RESULTS the final standings, so it
+    // lands on the results board the big screen is showing instead of the lobby.
+    this.welcomeExtras = opts.welcomeExtras || (() => null);
 
     // Dropped seats currently offering a reconnect QR, plus their grace timers.
     // peerIndex -> {peerIndex, name, colorIndex, url}; peerIndex -> timeout id.
     this._reconnectSeats = new Map();
     this._reconnectTimers = new Map();
 
+    // peerIndex -> performance.now() of the last relay/fastlane traffic.
+    this._lastSeen = new Map();
+    setInterval(() => this._sweepLiveness(), LIVENESS_SWEEP_MS);
+
     this.flow = new RoomFlow();
     this.roomCode = null;
     this.instance = null;
     this.baseUrlOverride = null;
 
-    this._initFastlane(0, { onInput: (peerIdx, ev) => this.onControllerMessage(peerIdx, ev) });
+    this._initFastlane(0, { onInput: (peerIdx, ev) => { this._seen(peerIdx); this.onControllerMessage(peerIdx, ev); } });
 
-    const announce = () => { this._broadcastLobby(); this.onRosterChange(this.roster(), this.flow.host); };
+    // One announce per mutation: a single roster change can emit BOTH
+    // hostchange and rosterchange (RoomFlow fires them back to back — and a
+    // resync can remove several peers in one sweep), which used to push an
+    // identical LOBBY_UPDATE round per event. Coalesce onto a microtask so
+    // each mutation broadcasts once, with the settled roster.
+    let announcePending = false;
+    const announce = () => {
+      if (announcePending) return;
+      announcePending = true;
+      queueMicrotask(() => {
+        try {
+          this._broadcastLobby();
+          this.onRosterChange(this.roster(), this.flow.host);
+        } finally {
+          announcePending = false; // a throw must not silence every later update
+        }
+      });
+    };
     this.flow.on('rosterchange', announce);
     this.flow.on('hostchange', announce);
   }
@@ -116,6 +152,7 @@ export class DisplayNet extends GameNet {
 
   _onMessage(from, data) {
     if (!data || from === 0) return;
+    this._seen(from);
     if (this._isSignal(from, data)) return;
     switch (data.type) {
       case MSG.HELLO: {
@@ -132,10 +169,22 @@ export class DisplayNet extends GameNet {
           this.party.sendTo(from, { type: MSG.ROOM_FULL });
           break;
         }
-        if (data.name) p.name = String(data.name).slice(0, 16);
+        // The seat change behind this HELLO (join / reconnect / rekey) already
+        // announced itself through the flow events; a roster re-broadcast here
+        // is only owed when the HELLO changes what everyone was just told —
+        // i.e. it carries a name the seat didn't have (a fresh seat still
+        // wears its "Player N" placeholder). The WELCOME always goes out, and
+        // after the rename so it carries the right roster.
+        const name = data.name ? String(data.name).slice(0, 16) : '';
+        const renamed = !!name && name !== p.name;
+        if (renamed) p.name = name;
         this.party.sendTo(from, this._welcomeFor(from));
-        this._broadcastLobby();
-        this.onRosterChange(this.roster(), this.flow.host);
+        // No-rename reconnect: flow.markReconnected already emitted
+        // rosterchange → the coalesced announce broadcasts the seat's return.
+        if (renamed) {
+          this._broadcastLobby();
+          this.onRosterChange(this.roster(), this.flow.host);
+        }
         break;
       }
       case MSG.LEAVE:
@@ -152,6 +201,7 @@ export class DisplayNet extends GameNet {
   }
 
   _addPeer(peerIndex) {
+    this._lastSeen.set(peerIndex, performance.now()); // a join IS traffic — fresh sweep budget
     const existing = this.flow.get(peerIndex);
     if (existing) {
       // Same-device reconnect: the relay keys slots by clientId, so a returning
@@ -190,6 +240,7 @@ export class DisplayNet extends GameNet {
   // for an intentional LEAVE and when the reconnect grace window elapses.
   _expireSeat(peerIndex) {
     this._clearReconnect(peerIndex);
+    this._lastSeen.delete(peerIndex);
     if (!this.flow.has(peerIndex)) return;
     this.fastlane.close(peerIndex);
     this.flow.removePlayer(peerIndex);
@@ -206,7 +257,39 @@ export class DisplayNet extends GameNet {
       if (!present.has(p.peerIndex)) this._removePeer(p.peerIndex);
     }
     // Re-welcome everyone so their controllers clear any reconnect overlay.
-    for (const p of this.flow.list()) this.party.sendTo(p.peerIndex, this._welcomeFor(p.peerIndex));
+    // Fresh liveness stamps too — OUR blip starved everyone's, and the sweep
+    // must not QR a healthy phone before its next ping lands.
+    for (const p of this.flow.list()) {
+      this._lastSeen.set(p.peerIndex, performance.now());
+      this.party.sendTo(p.peerIndex, this._welcomeFor(p.peerIndex));
+    }
+  }
+
+  // ---- liveness (zombie links) ----
+  // Stamp every inbound message; a stamp also HEALS a liveness-dropped seat,
+  // because its socket never actually closed — the peer_joined that flips a
+  // returning seat back on (_addPeer) will never fire, so traffic is the only
+  // signal it's alive again. This also covers a phone whose relay link dropped
+  // while its P2P fastlane kept delivering CONTROL: the player is still
+  // driving, so the seat stays live and no QR interrupts their run.
+  _seen(peerIndex) {
+    this._lastSeen.set(peerIndex, performance.now());
+    if (this.flow.has(peerIndex) && this.flow.isDisconnected(peerIndex)) {
+      this.flow.markReconnected(peerIndex);
+      this._clearReconnect(peerIndex);
+    }
+  }
+
+  _sweepLiveness() {
+    if (this.roomState === ROOM_STATE.LOBBY || this.roomState === ROOM_STATE.RESULTS) {
+      return; // between runs: see LIVENESS_TIMEOUT_MS
+    }
+    const now = performance.now();
+    for (const p of this.flow.list()) {
+      if (!p.connected) continue; // already dropped — its QR/grace window is running
+      const seen = this._lastSeen.get(p.peerIndex);
+      if (seen != null && now - seen > LIVENESS_TIMEOUT_MS) this._removePeer(p.peerIndex);
+    }
   }
 
   // ---- reconnect (dropped-seat) handling ----
@@ -268,6 +351,10 @@ export class DisplayNet extends GameNet {
   // ---- outbound protocol ----
   _welcomeFor(peerIndex) {
     const p = this.flow.get(peerIndex) || {};
+    // The extras hook is best-effort sugar — if it throws, the joining phone
+    // must still get its WELCOME (a dropped one hangs the join silently).
+    let extras = null;
+    try { extras = this.welcomeExtras(peerIndex); } catch (e) { console.warn('[DisplayNet] welcomeExtras threw', e); }
     return {
       type: MSG.WELCOME,
       peerIndex,
@@ -275,7 +362,8 @@ export class DisplayNet extends GameNet {
       hostPeerIndex: this.flow.host,
       roomState: this.roomState,
       inRun: this.isInRun(peerIndex),
-      players: this.roster()
+      players: this.roster(),
+      ...(extras || {})
     };
   }
   _broadcastLobby() {

@@ -7,12 +7,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 npm test                          # Unit tests (node:test) — SkiEngine + partyplug
 node --test tests/engine.test.js  # A single unit test
+npm run test:e2e                  # Playwright E2E (tests/e2e) — REAL pages over the REAL relay
+npx playwright test late          # A single E2E spec (substring match)
 npm start                         # Run the server (node server/index.js), port 4000
 npm run dev                       # Run with --watch (auto-restart)
 ```
 
-No browser/E2E suite. Preview the display without phones via `/?test=1&scenario=…`
-(see README) — the per-page `TestHarness` drives a single screen with no relay.
+E2E needs a browser once: `npx playwright install chromium` (or point
+`PLAYWRIGHT_BROWSERS_PATH` at an existing cache). The config boots the game
+server itself; specs open a live display page (it creates a relay room on
+load) and join phone-viewport controller pages by room code, fast-forwarding
+runs via `window.__session().fastForwardToEnd(window.__driveBots)`. Quick
+single-screen previews stay relay-free via `/?test=1&scenario=…` (see README)
+— the per-page `TestHarness` drives a single screen with no relay.
 
 ## Key Rules
 

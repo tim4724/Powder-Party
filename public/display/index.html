@@ -81,6 +81,24 @@
     </div>
   </section>
 
+  <!-- Device choice — this is the BIG-SCREEN page, so a phone landing here (a
+       shared link, or a controller that bailed out of a dead room with
+       /?bail=game_ended) gets a chooser instead of the heavy display: the
+       pitch, a "get it on a large screen" share/copy CTA, and a quiet
+       "continue on this device" fallback. Visibility is pure CSS: a cramped
+       viewport shows it unless html carries .device-choice-dismissed (the
+       continue button) or .in-session (a run is on — resizing mid-race must
+       not cover the world). The ?bail reason lands as a toast. -->
+  <div id="device-choice" role="dialog" aria-modal="true" aria-labelledby="dc-title">
+    <div class="dc-card card">
+      <h1 id="dc-title">Powder <span>Party</span></h1>
+      <p class="dc-sub">A downhill ski race for the living room — the big screen runs the mountain, phones are the controllers.</p>
+      <p id="dc-toast" class="dc-toast hidden" role="status" aria-live="polite"></p>
+      <button id="dc-share" type="button" class="btn btn--brand">Open on a large screen</button>
+      <button id="dc-continue" type="button" class="btn btn--ghost">Continue on this device</button>
+    </div>
+  </div>
+
   <!-- Build stamp — populated by the server only on a preview deployment; :empty (hidden) otherwise. -->
   <div class="build-badge" role="status" aria-label="build version">__VERSION_BADGE__</div>
 
