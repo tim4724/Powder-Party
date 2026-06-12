@@ -22,9 +22,10 @@ const RECONNECT_GRACE_MS = 90000;
 // a run), so a "connected" seat that's been silent this long has a dead link
 // the relay hasn't noticed yet (phone slept with the socket half-open). The
 // sweep routes it through the normal drop path — mid-run that's the reconnect
-// QR + grace window, NOT a forfeit. Lobby seats are left to the relay's own
-// timeout: a backgrounded phone throttles its timers, and freeing its seat
-// over a missed ping would be worse than a briefly stale roster row.
+// QR + grace window, NOT a forfeit. Lobby and results seats are left to the
+// relay's own timeout: a backgrounded phone throttles its timers, and QR-ing a
+// pocketed phone between runs would be worse than a briefly stale roster row.
+// A seat still silent when the next run starts is swept within one tick.
 const LIVENESS_TIMEOUT_MS = 10000;
 const LIVENESS_SWEEP_MS = 2500;
 
@@ -76,9 +77,12 @@ export class DisplayNet extends GameNet {
       if (announcePending) return;
       announcePending = true;
       queueMicrotask(() => {
-        announcePending = false;
-        this._broadcastLobby();
-        this.onRosterChange(this.roster(), this.flow.host);
+        try {
+          this._broadcastLobby();
+          this.onRosterChange(this.roster(), this.flow.host);
+        } finally {
+          announcePending = false; // a throw must not silence every later update
+        }
       });
     };
     this.flow.on('rosterchange', announce);
@@ -277,7 +281,9 @@ export class DisplayNet extends GameNet {
   }
 
   _sweepLiveness() {
-    if (this.roomState === ROOM_STATE.LOBBY) return; // lobby: see LIVENESS_TIMEOUT_MS
+    if (this.roomState === ROOM_STATE.LOBBY || this.roomState === ROOM_STATE.RESULTS) {
+      return; // between runs: see LIVENESS_TIMEOUT_MS
+    }
     const now = performance.now();
     for (const p of this.flow.list()) {
       if (!p.connected) continue; // already dropped — its QR/grace window is running
