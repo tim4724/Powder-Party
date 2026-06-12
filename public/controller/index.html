@@ -41,6 +41,18 @@
     <div id="wait-host" class="hidden">Waiting for the host to start…</div>
   </section>
 
+  <!-- Late join — you joined while a run was already underway, so this run plays
+       out without you. Your seat is held: the display rebuilds the field from
+       the live roster on the next start, which folds you in automatically. -->
+  <section id="waiting" class="hidden">
+    <div class="lobby-me">
+      <span class="dot waiting-dot"></span>
+      <span id="waiting-name" class="lobby-me__name"></span>
+    </div>
+    <div class="waiting-pill"><span class="waiting-pulse"></span>Run in progress</div>
+    <p class="waiting-note">You’re in for the next one — watch the big screen while this run finishes.</p>
+  </section>
+
   <!-- Game: tucked-and-fast is the default. The whole #play surface is one
        eyes-free TOUCH-PAD — push down to BRAKE · in the air flick ANY direction to
        FLIP (the angle picks the trick). Ramps launch you automatically. The player

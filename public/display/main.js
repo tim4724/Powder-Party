@@ -102,6 +102,10 @@ const net = new DisplayNet({
   // current run? A reconnecting phone that doesn't — its seat expired, or a
   // rematch started without it — waits in its lobby instead of a dead game pad.
   isInRun: (id) => { const s = session && session.engine.skiers.get(id); return !!s && !s.dnf; },
+  // Once the run is decided, stamp the final standings onto every WELCOME so a
+  // phone arriving during RESULTS (fresh joiner or a reconnect) lands on the
+  // results board the big screen is showing, not a misleading lobby.
+  welcomeExtras: () => (raceEnded && session ? { standings: standingsPayload(true) } : null),
 });
 
 function onRoomReady({ joinUrl }) {
@@ -146,7 +150,28 @@ function forfeitSkier(peerIndex) {
   // in which case endRun already broadcast the final (over) standings.
   if (!raceEnded) broadcastStandings(false);
 }
-net.flow.on('playerleave', ({ peerIndex }) => forfeitSkier(peerIndex));
+net.flow.on('playerleave', ({ peerIndex }) => { forfeitSkier(peerIndex); releaseOrphanedResults(); });
+
+// A results board needs a host to restart it, and during RESULTS host duty is
+// restricted to the run's participants (RoomFlow) — a late joiner can't inherit
+// it. So if every human who raced is GONE from the roster (left, or their
+// reconnect grace expired — a held seat still counts as present) while late
+// joiners sit waiting, the board is orphaned: nobody on it can press anything.
+// Fold the room back to the lobby, where host duty unrestricts and the oldest
+// joiner gets the Start button. Checked on every leave and at run end (the
+// field may already have walked out mid-run).
+function releaseOrphanedResults() {
+  const orphaned = () => {
+    if (!raceEnded || net.roomState !== ROOM_STATE.RESULTS) return false;
+    const fieldIds = new Set(currentField.filter((p) => !p.ai).map((p) => p.peerIndex));
+    return !net.roster().some((p) => fieldIds.has(p.peerIndex)) && lateJoiners().length > 0;
+  };
+  if (!orphaned()) return;
+  // Deferred a tick: endRun fires from inside session.update (mid-frame), and
+  // returnToLobby tears the session down — yanked out from under onFrame it
+  // would null-deref. Re-checked on fire in case a racer re-seated meanwhile.
+  setTimeout(() => { if (orphaned()) returnToLobby(); }, 0);
+}
 
 // A dropped player reconnected on a different device (new peerIndex): move their
 // still-descending skier — engine, render entry and results identity — onto the
@@ -391,6 +416,15 @@ function onRaceEvent(e) {
   audio.raceEvent(e);
 }
 
+// Connected humans with a seat but NO skier in the current run — phones that
+// joined after the field was built. They wait out the run (their controller
+// shows the "run in progress" screen) and are folded into the next one, since
+// startRun rebuilds the field from the live roster.
+function lateJoiners() {
+  const inField = new Set(currentField.map((p) => p.peerIndex));
+  return net.roster().filter((p) => p.connected !== false && !inField.has(p.peerIndex));
+}
+
 function standingsPayload(over) {
   const byId = new Map(currentField.map((p) => [p.peerIndex, p]));
   const results = session.getResults().results;
@@ -406,7 +440,13 @@ function standingsPayload(over) {
         colorIndex: p.colorIndex || 0, ai: !!p.ai,
         finished: r.finished, time: r.time, dnf: !!r.dnf,
       };
-    }),
+    // Late joiners ride along under the board (newPlayer) so their own phone —
+    // and everyone else's — shows who's queued up for the next run.
+    }).concat(lateJoiners().map((p) => ({
+      playerId: p.peerIndex, name: p.name || 'Skier',
+      colorIndex: p.colorIndex || 0, ai: false,
+      finished: false, dnf: false, newPlayer: true,
+    }))),
   };
 }
 function broadcastStandings(over) { if (session) net.broadcast(standingsPayload(over)); }
@@ -420,14 +460,16 @@ function endRun(results) {
   audio.stopWind();
   audio.finish();
   showResults(results);
+  releaseOrphanedResults(); // the whole field may have walked out mid-run
 }
 
 // `field` is the full roster (incl. AI) used to name + colour the rows; defaults
 // to the live `currentField` but is passed explicitly by the test harness so the
 // preview shares this exact render path instead of re-implementing it. `settled`
 // forces the fully-over reading once the coast-out has come to rest (nothing can
-// finish anymore), covering the timeout end where raceOver never trips.
-function showResults(results, field = currentField, settled = false) {
+// finish anymore), covering the timeout end where raceOver never trips. `joiners`
+// lets the harness preview late-join rows; live renders derive them themselves.
+function showResults(results, field = currentField, settled = false, joiners = null) {
   const list = el('results-list');
   if (list) {
     list.innerHTML = '';
@@ -446,6 +488,19 @@ function showResults(results, field = currentField, settled = false) {
         `<span class="dot" style="background:${color}"></span>` +
         `<span class="res__name">${escapeHtml(p.name || 'Skier')}${p.ai ? ' <span class="res__cpu">CPU</span>' : ''}</span>` +
         `<span class="res__time">${time}</span>`;
+      list.appendChild(li);
+    }
+    // Late joiners (seated but not in this run) close out the board as unranked
+    // "next run" rows, so the room sees the newcomer is in for the rematch.
+    for (const p of joiners || (field === currentField ? lateJoiners() : [])) {
+      const li = document.createElement('li');
+      li.className = 'res--joining';
+      const color = SKIER_COLORS[(p.colorIndex || 0) % SKIER_COLORS.length];
+      li.innerHTML =
+        `<span class="res__rank">–</span>` +
+        `<span class="dot" style="background:${color}"></span>` +
+        `<span class="res__name">${escapeHtml(p.name || 'Skier')}</span>` +
+        `<span class="res__time">next run</span>`;
       list.appendChild(li);
     }
   }
@@ -500,18 +555,62 @@ function resumeRun() {
 }
 
 // ---- screen toggles ------------------------------------------------------
+// html.in-session keeps the device-choice overlay (below) from resurfacing over
+// a live run when a desktop window is resized into the cramped-viewport media
+// query; the lobby is this page's "front door", where the chooser may show.
 function showLobby() {
   el('lobby').classList.remove('hidden');
   el('race').classList.add('hidden');
   el('results') && el('results').classList.add('hidden');
   el('pause-overlay') && el('pause-overlay').classList.add('hidden');
   const c = el('countdown'); if (c) c.textContent = '';
+  document.documentElement.classList.remove('in-session');
 }
 function showRace() {
   el('lobby').classList.add('hidden');
   el('race').classList.remove('hidden');
   el('results') && el('results').classList.add('hidden');
   scene.orbit = false;
+  document.documentElement.classList.add('in-session');
+}
+
+// ---- device choice --------------------------------------------------------
+// This is the big-screen page, but phones land on it too — a shared link, or a
+// controller bailing out of a dead room (/?bail=game_ended from the phone's
+// "game ended" path). A CSS media query (display.css) surfaces the #device-choice
+// overlay on cramped viewports; here we wire its buttons and the bail toast.
+// Visibility is driven purely by root classes so dismissal survives re-layouts.
+function dismissDeviceChoice() {
+  document.documentElement.classList.add('device-choice-dismissed');
+}
+el('dc-continue') && el('dc-continue').addEventListener('click', dismissDeviceChoice);
+// "Open on a large screen": hand the bare site URL to the native share sheet, or
+// copy it where share isn't available — either way the phone's job is just to
+// ferry the link to a TV/laptop browser.
+el('dc-share') && el('dc-share').addEventListener('click', async () => {
+  const url = window.location.origin;
+  const btn = el('dc-share');
+  try {
+    if (navigator.share) { await navigator.share({ title: 'Powder Party', url }); return; }
+    await navigator.clipboard.writeText(url);
+    btn.textContent = 'Link copied — open it on a big screen';
+  } catch (_) { /* share sheet dismissed / clipboard blocked — leave the button as is */ }
+});
+// A controller that hit a dead end navigates here with ?bail=<reason>; surface
+// it as a toast over the chooser. Reasons are allow-listed so a crafted URL
+// can't inject arbitrary text, and the param is stripped so a reload is clean.
+const BAIL_REASONS = { game_ended: 'The game has ended.' };
+{
+  const reason = BAIL_REASONS[params.get('bail')];
+  if (reason) {
+    const toast = el('dc-toast');
+    toast.textContent = reason;
+    toast.classList.remove('hidden');
+    const clean = new URLSearchParams(location.search);
+    clean.delete('bail');
+    const qs = clean.toString();
+    try { history.replaceState(null, '', location.pathname + (qs ? '?' + qs : '')); } catch (_) { /* sandboxed iframe */ }
+  }
 }
 
 function escapeHtml(s) {
@@ -534,6 +633,11 @@ window.addEventListener('keydown', (e) => {
 // party's front door, so the lock isn't scoped to active races.
 keepScreenOn();
 const scenario = params.get('scenario');
+// Test/gallery iframes are small enough to trip the device-choice media query —
+// pre-dismiss the chooser so it doesn't blanket every preview card. Its own
+// scenario is the one preview that wants it up (the iframe IS a cramped
+// viewport, so the media query shows it there with no further staging).
+if (testMode && scenario !== 'device-choice') dismissDeviceChoice();
 if (params.get('test') === '1' || scenario) {
   import('./TestHarness.js').then(({ runDisplayScenario }) => runDisplayScenario(
     // tricks defaults to a single full-screen skier (just you, drilling flips); add ?players=N for a CPU field
@@ -570,6 +674,7 @@ initDebugMenu([
     ['paused', 'paused overlay'],
     ['results', 'results board'],
     ['reconnect', 'reconnect — rejoin QR card'],
+    ['device-choice', 'device choice — phone-on-display chooser'],
   ] },
   { key: 'players', label: 'Players', type: 'number', min: 1, max: 4, hint: 'field size in scenarios (default 4, tricks 1)' },
   { key: 'slope', label: 'Slope', type: 'select', hint: 'catalog slope — else a generated mountain', options: [['', 'generated'], ...Object.keys(SLOPES)] },

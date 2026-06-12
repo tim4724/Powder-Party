@@ -78,11 +78,14 @@ player-facing surface; use the gallery or the URLs below to preview its screens.
   finish holds the results board — Enter (or "Play again") skis it again. `&players=N` sizes the
   field (default you + 3 CPU), `&seed=N` picks the mountain.
 - `/?test=1&scenario=countdown` · `…&scenario=paused`
+- `/?test=1&scenario=device-choice&bail=game_ended` — the chooser a phone gets when it lands on
+  this big-screen page (shared link, or a controller bailing out of a dead room with `?bail=…`)
 
 The phone controller previews a single screen the same way, off the relay:
 `/controller/index.html?scenario=playing&color=2` (scenarios: `name`, `name-connecting`,
-`lobby-host`, `lobby-waiting`, `countdown`, `playing`, `brake`, `paused`, `finished`,
-`results` (host), `results-waiting` (non-host); `color` 0–7 picks the livery).
+`lobby-host`, `lobby-waiting`, `late-join` (run in progress without you), `countdown`,
+`playing`, `brake`, `paused`, `finished`, `results` (host), `results-waiting` (non-host),
+`results-join` (late joiner's board); `color` 0–7 picks the livery).
 
 ### Gallery
 

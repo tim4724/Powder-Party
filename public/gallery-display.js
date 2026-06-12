@@ -4,9 +4,10 @@
 // through a real session. Cards-per-row is set by the header control.
 //
 // Card shape:
-//   { key, title, animated? }
+//   { key, title, animated?, extra? }
 // `animated` cards run an endless CPU-driven loop (tagged "live"); the rest are
-// one-shot snapshots. The display harness reads `players`; it doesn't take a
+// one-shot snapshots. `extra` adds URL params (the device-choice card stages its
+// bail toast). The display harness reads `players`; it doesn't take a
 // host marker, so there's no per-slot "view as" control here (unlike Phone).
 var DISPLAY_CARDS = [
   { key: 'lobby',     title: 'Lobby' },
@@ -14,7 +15,8 @@ var DISPLAY_CARDS = [
   { key: 'running',   title: 'Run',       animated: true },
   { key: 'reconnect', title: 'Reconnect', animated: true },
   { key: 'paused',    title: 'Paused' },
-  { key: 'results',   title: 'Results' }
+  { key: 'results',   title: 'Results' },
+  { key: 'device-choice', title: 'Device choice', extra: { bail: 'game_ended' } }
 ];
 
 var state = Gallery.loadState();
@@ -34,7 +36,7 @@ function dims() { return Gallery.DISPLAY_AR_DIMS[state.displayAR] || Gallery.DIS
 
 var allCards = [];
 
-function cardURL(c) { return Gallery.displayURL(state, c.key); }
+function cardURL(c) { return Gallery.displayURL(state, c.key, c.extra); }
 function cardTag(c) { return c.animated ? 'live' : ''; }
 
 var lazyIo = null;

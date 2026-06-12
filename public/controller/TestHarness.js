@@ -15,7 +15,7 @@ export function runControllerScenario(opts) {
   const scenario = opts.scenario;
   const color = Math.max(0, Math.min(opts.color || 0, COLORS.length - 1));
 
-  const screens = { name: el('name'), lobby: el('lobby'), game: el('game'), results: el('results') };
+  const screens = { name: el('name'), lobby: el('lobby'), waiting: el('waiting'), game: el('game'), results: el('results') };
   const show = (name) => { for (const k of Object.keys(screens)) screens[k].classList.toggle('hidden', k !== name); };
 
   // Apply the player's livery (the --car custom property tints the HUD, the play
@@ -86,6 +86,14 @@ export function runControllerScenario(opts) {
       break;
     }
 
+    case 'late-join':
+      // Joined while a run was underway: parked on the "run in progress" screen
+      // until the final board (your unranked row) or GAME_END routes you onward.
+      show('waiting');
+      el('waiting-name').textContent = FAKE_NAMES[color];
+      setLatency(24, false);   // pre-fastlane: nothing to drive yet
+      break;
+
     case 'countdown':
       // No countdown on the controller — the full HUD is up from the first beat
       // (the 3..2..1..GO lives on the display). Same as 'playing' but pre-fastlane.
@@ -155,6 +163,19 @@ export function runControllerScenario(opts) {
         { name: FAKE_NAMES[color],                           colorIndex: color,                       time: 31.2, me: true, finished: true },
         { name: 'Bolt',                                      colorIndex: (color + 2) % COLORS.length, time: 33.9, ai: true, finished: true },
         { name: FAKE_NAMES[(color + 3) % FAKE_NAMES.length], colorIndex: (color + 3) % COLORS.length, time: 36.5, finished: true }
+      ], true, false);
+      break;
+
+    case 'results-join':
+      // Final board as the LATE JOINER sees it: the run played out without you,
+      // your row trails the field unranked ("next run") and the footer waits on
+      // the host — the rematch countdown is what pulls you in.
+      setLatency(22, false);
+      showBoard([
+        { name: FAKE_NAMES[(color + 1) % FAKE_NAMES.length], colorIndex: (color + 1) % COLORS.length, time: 28.4, finished: true },
+        { name: 'Bolt',                                      colorIndex: (color + 2) % COLORS.length, time: 33.9, ai: true, finished: true },
+        { name: FAKE_NAMES[(color + 3) % FAKE_NAMES.length], colorIndex: (color + 3) % COLORS.length, finished: false, dnf: true },
+        { name: FAKE_NAMES[color],                           colorIndex: color,                       me: true, newPlayer: true }
       ], true, false);
       break;
 

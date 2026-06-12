@@ -77,6 +77,27 @@ input[type=text]:disabled { opacity: 0.6; }
    SKIER_COLORS), heavier weight so the colour reads as intentional. */
 .host-name { font-weight: 800; }
 
+/* ---- late join: run in progress ---- */
+/* Same sparse centred layout as the lobby — your identity, a live "run in
+   progress" pill, and the one thing to know: the next run includes you. */
+#waiting { justify-content: center; align-items: center; text-align: center; }
+.waiting-dot { width: 1rem; height: 1rem; flex: none; background: var(--car); }
+.waiting-pill {
+  display: inline-flex; align-items: center; gap: 0.55rem;
+  padding: 0.55rem 1.1rem; border-radius: var(--r-pill);
+  background: var(--surface); border: 2px solid var(--hairline); box-shadow: var(--shadow-pop);
+  font-family: var(--font-display); font-weight: 700; font-size: 1.1rem; color: var(--ink);
+}
+.waiting-pulse {
+  width: 0.7rem; height: 0.7rem; border-radius: 50%; background: var(--brand);
+  animation: waitingPulse 1.6s ease-in-out infinite;
+}
+@keyframes waitingPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(0.7); opacity: 0.55; }
+}
+.waiting-note { color: var(--ink-2); font-weight: 700; margin: 1.2rem 0 0; max-width: 18rem; }
+
 /* ---- game / run HUD ---- */
 /* No countdown here — the full HUD shows immediately so players can pre-carve
    while the display counts down 3..2..1..GO. */
@@ -281,6 +302,11 @@ input[type=text]:disabled { opacity: 0.6; }
 .result-list .res-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .result-list .res-time { margin-left: auto; color: var(--ink-3); font-weight: 700; font-variant-numeric: tabular-nums; }
 .result-list li.is-racing .res-time { font-style: italic; } /* still on the slope — "Skiing…" */
+/* late joiner — seated but not in this run: unranked (–), dashed + quieter, so
+   the row reads as "queued for the rematch", not a result. */
+.result-list li.is-joining { border-style: dashed; opacity: 0.8; counter-increment: none; }
+.result-list li.is-joining::before { content: '–'; }
+.result-list li.is-joining .res-time { font-style: italic; }
 #result-foot { display: flex; flex-direction: column; align-items: center; gap: 0.6rem; }
 #result-foot .btn { width: min(82%, 18rem); margin-top: 0; }
 .result-wait { color: var(--ink-2); font-weight: 700; text-align: center; }

@@ -132,6 +132,14 @@ export function runDisplayScenario(cfg, ctx) {
     return;
   }
 
+  // `device-choice` — the chooser a phone gets landing on this big-screen page.
+  // The gallery iframe is itself a cramped viewport, so the display.css media
+  // query surfaces the overlay on its own (main.js skips its test-mode
+  // pre-dismiss for this scenario), and an &bail=game_ended URL param stages
+  // the toast through the live path. Nothing to drive — the opaque overlay
+  // owns the frame.
+  if (scn === 'device-choice') { scene.orbit = true; return; }
+
   // `slope` is a clean turntable preview: orbit camera, no lobby/run overlays,
   // and skiers share the world with no split-screen cells. Every other scenario
   // below is a chase-cam split-screen run.
@@ -266,7 +274,9 @@ export function runDisplayScenario(cfg, ctx) {
     session.racing = true; // skip the countdown delay so fast-forward actually runs
     driveBots(session);
     session.fastForwardToEnd(() => driveBots(session));
-    showResults(session.getResults(), field);
+    // One fabricated late joiner so the preview exercises the unranked
+    // "next run" row (live play derives these from the roster).
+    showResults(session.getResults(), field, false, [{ name: 'Nova', colorIndex: 4 }]);
   } else { // running / slope / tricks / bump / solo — start the run, onFrame loops it
     showSoundHint();
     session.startCountdown(scn === 'solo' ? 3 : 1); // solo gets a real 3-2-1 race start

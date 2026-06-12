@@ -11,12 +11,12 @@ import { keepScreenOn, letScreenSleep } from '../shared/WakeLock.js';
 const { MSG, ROOM_STATE, SKIER_COLORS } = window;
 const el = (id) => document.getElementById(id);
 
-const screens = { name: el('name'), lobby: el('lobby'), game: el('game'), results: el('results') };
+const screens = { name: el('name'), lobby: el('lobby'), waiting: el('waiting'), game: el('game'), results: el('results') };
 // Screen "depth": name is the entry point (0); every in-room screen sits one
-// level above it (1). lobby↔game↔results are same-level shuffles. Used to push a
-// browser-history entry only on the forward step into the room, so the back
-// button / phone back gesture pops cleanly back to name entry. See `show`.
-const SCREEN_ORDER = { name: 0, lobby: 1, game: 1, results: 1 };
+// level above it (1). lobby↔waiting↔game↔results are same-level shuffles. Used
+// to push a browser-history entry only on the forward step into the room, so the
+// back button / phone back gesture pops cleanly back to name entry. See `show`.
+const SCREEN_ORDER = { name: 0, lobby: 1, waiting: 1, game: 1, results: 1 };
 let currentScreen = null;
 function show(name) {
   const prev = currentScreen;
@@ -43,6 +43,7 @@ let amHost = false;
 let roster = [];           // latest lobby roster (for the host name in the wait text)
 let hostPeerIndex = null;
 let inResults = false;     // showing the results overlay (my skier finished / run over)
+let waitingForRun = false; // late joiner: a run is on WITHOUT us — parked on #waiting until it ends
 
 const NAME_KEY = 'powder_name';
 const storedName = () => { try { return localStorage.getItem(NAME_KEY) || ''; } catch (_) { return ''; } };
@@ -71,7 +72,10 @@ const net = new ControllerNet({
       setStatus('Error: ' + info);
     } else if (state === 'display_gone') {
       setStatus('Waiting for the big screen…');
-      if (inRoom) showConn('Waiting for the big screen…', 'The host’s screen dropped — hang tight, it’ll reconnect you.', false);
+      if (inRoom) {
+        showConn('Waiting for the big screen…', 'The host’s screen dropped — hang tight, it’ll reconnect you.', false);
+        armBail(); // not back within the grace window → the game has ended
+      }
     } else if (state === 'replaced') {
       setStatus('Opened on another tab.');
       if (inRoom) showConn('Opened on another tab', 'This seat is now controlled from another tab or device.', false);
@@ -94,6 +98,26 @@ el('conn-retry').addEventListener('click', () => {
   showConn('Reconnecting…', '', false);
   net.connect(myName);
 });
+
+// ---- "game ended" bail ----
+// The display leaving the room usually means the big screen was closed — the
+// game is over. Its own relay blips heal well inside the grace window (a fresh
+// WELCOME disarms this), but once it's clearly not coming back, waiting forever
+// behind the "hang tight" overlay is a dead end: hand the phone to the display
+// page's device chooser instead, with the reason as a toast (?bail=game_ended).
+const DISPLAY_GONE_BAIL_MS = 30000;
+let bailTimer = null;
+function armBail() {
+  if (bailTimer) return;
+  bailTimer = setTimeout(() => {
+    net.disconnect();
+    location.replace('/?bail=game_ended');
+  }, DISPLAY_GONE_BAIL_MS);
+}
+function disarmBail() {
+  clearTimeout(bailTimer);
+  bailTimer = null;
+}
 
 // Latency chip (bottom-right). Stays hidden until the first reading lands so it
 // never flashes on the pre-join name screen. See applyLatencyChip in ui.js.
@@ -127,9 +151,17 @@ function setJoining(on) {
 }
 
 function handleMessage(data) {
+  // Parked on the "run in progress" screen, the live run's broadcasts aren't
+  // ours to act on — without this gate the COUNTDOWN/GAME_START handlers would
+  // flip us to a game pad driving nothing. The messages that manage the ROOM
+  // still land: WELCOME (re-sync), LOBBY_UPDATE (roster/host), STANDINGS (the
+  // final board carries our "next run" row and releases the gate) and GAME_END.
+  if (waitingForRun && (data.type === MSG.COUNTDOWN || data.type === MSG.GAME_START ||
+      data.type === MSG.PLAYER_STATE || data.type === MSG.GAME_PAUSED || data.type === MSG.GAME_RESUMED)) return;
   switch (data.type) {
     case MSG.WELCOME: {
       hideConn();   // a WELCOME means we're back in (covers the display returning after display_gone)
+      disarmBail(); // the display is alive — cancel any pending "game ended" exit
       myColorIndex = data.colorIndex;
       applyLivery();
       roster = data.players || [];
@@ -142,18 +174,28 @@ function handleMessage(data) {
       // lobby, but a player who rejoins mid-run (reconnected, or scanned the
       // reconnect QR) must drop straight back into the run instead of stalling on
       // the lobby — their skier is still on the slope waiting for input. The
-      // display stamps inRun=false when we have NO live skier in this run (our
-      // seat expired, or a rematch started while we were gone): wait in the lobby
-      // then — a game pad driving nothing is a dead end.
+      // display stamps inRun=false when we have NO live skier in this run (we
+      // joined after the field was built, our seat expired, or a rematch started
+      // while we were gone): park on the "run in progress" screen until the
+      // final board / GAME_END routes us onward — a game pad driving nothing is
+      // a dead end. During RESULTS the WELCOME carries the final standings, so
+      // we land on the same board the big screen is showing.
       const inRun = data.inRun !== false; // missing flag (older display) = assume racing
-      if ((data.roomState === ROOM_STATE.COUNTDOWN || data.roomState === ROOM_STATE.PLAYING) && inRun) {
+      const midRun = data.roomState === ROOM_STATE.COUNTDOWN || data.roomState === ROOM_STATE.PLAYING;
+      waitingForRun = midRun && !inRun;
+      if (midRun && inRun) {
         inResults = false;
         show('game');
         el('drive-hud').classList.remove('hidden');
         el('pause-btn').classList.remove('hidden');
         startDriving();   // resume streaming tilt to our still-descending skier
+      } else if (waitingForRun) {
+        renderWaiting();
+        show('waiting');
+      } else if (data.roomState === ROOM_STATE.RESULTS && data.standings) {
+        handleMessage(data.standings); // a full STANDINGS payload — render + flip to the board
       } else {
-        show('lobby');    // lobby, results or a run we're not in — the next countdown/board routes us onward
+        show('lobby');    // lobby (or an old display's results) — the next countdown/board routes us onward
       }
       break;
     }
@@ -206,12 +248,16 @@ function handleMessage(data) {
     case MSG.STANDINGS: {
       // Live finish board. Refresh who's host (may have shifted if someone left)
       // and render; flip to the overlay once the run is over (everyone, incl.
-      // DNF) or as soon as MY skier finishes — I'm on autopilot now.
+      // DNF) or as soon as MY skier finishes — I'm on autopilot now. The final
+      // (over) board also collects a parked late joiner: their unranked "next
+      // run" row is on it, and clearing the gate here is what lets the rematch
+      // countdown pull them into the next run with everyone else.
       hostPeerIndex = data.hostPeerIndex;
       amHost = net.isHost(data.hostPeerIndex);
       renderResults(data);
+      if (data.over) waitingForRun = false;
       const mine = (data.order || []).find((o) => o.playerId === net.peerIndex);
-      if (data.over || (mine && mine.finished)) showResultsScreen();
+      if (data.over || (mine && mine.finished && !mine.newPlayer)) showResultsScreen();
       break;
     }
     case MSG.GAME_PAUSED:
@@ -224,6 +270,7 @@ function handleMessage(data) {
       break;
     case MSG.GAME_END:
       inResults = false;
+      waitingForRun = false; // run aborted to the lobby — the wait is over too
       stopDriving();
       setPauseOverlay(false);
       el('pause-btn').classList.add('hidden');
@@ -275,6 +322,12 @@ function renderLobby() {
 function renderWaitHost(waitEl) {
   const host = roster.find((p) => p.peerIndex === hostPeerIndex);
   renderWaitNote(waitEl, { name: host && host.name, color: host && SKIER_COLORS[host.colorIndex] }, ' to start…');
+}
+
+// Late-join screen — identity only (like the lobby); the static copy in
+// index.html explains the wait and the livery dot is var(--car) via CSS.
+function renderWaiting() {
+  el('waiting-name').textContent = myName || 'Skier';
 }
 
 // --- driving ---
@@ -333,8 +386,10 @@ el('name-input').value = storedName();
 // pop lands on; here we just react to it.
 function leaveToName() {
   net.disconnect();
+  disarmBail();   // an intentional back-out isn't a "game ended" exit
   stopDriving();
   inResults = false;
+  waitingForRun = false;
   amHost = false;
   roster = [];
   setPauseOverlay(false);

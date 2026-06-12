@@ -45,7 +45,10 @@ var MSG = {
   PING: 'ping',
 
   // Display -> specific controller
-  WELCOME: 'welcome',                 // {peerIndex, colorIndex, hostPeerIndex, roomState, players}
+  WELCOME: 'welcome',                 // {peerIndex, colorIndex, hostPeerIndex, roomState, players, inRun, standings?}
+                                      // inRun=false mid-run = no live skier (late joiner / expired seat) — the phone
+                                      // parks on its "run in progress" screen. During RESULTS, standings carries the
+                                      // final STANDINGS payload so the phone lands on the board, not the lobby.
   ROOM_FULL: 'room_full',             // join refused — no free seat (room full, or every seat held for a reconnect)
   LOBBY_UPDATE: 'lobby_update',       // roster/host snapshot
   PLAYER_STATE: 'player_state',       // {position, of, progress[0..1], airborne, finished} — light HUD feed (~6.5 Hz, see main.js HUD_HZ_MS)
@@ -55,7 +58,9 @@ var MSG = {
   COUNTDOWN: 'countdown',             // {n} 3..2..1..GO
   GAME_START: 'game_start',
   STANDINGS: 'standings',             // {over, hostPeerIndex, total, order:[{playerId,name,colorIndex,ai,finished,time}]}
-                                      // pushed as each skier finishes (over=false) + at run end (over=true)
+                                      // pushed as each skier finishes (over=false) + at run end (over=true).
+                                      // Late joiners (seated, not in this run) trail the order as unranked
+                                      // {newPlayer:true} rows — queued for the next run, not results
   GAME_END: 'game_end',               // return-to-lobby signal (no payload); controllers go back to the lobby
   GAME_PAUSED: 'game_paused',         // run frozen — controllers show the pause overlay
   GAME_RESUMED: 'game_resumed'        // run resumed — controllers hide the pause overlay

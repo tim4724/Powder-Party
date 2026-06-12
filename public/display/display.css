@@ -77,6 +77,11 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #cfeaf8; }
 .res__name { flex: 1; }
 .res__cpu { font-size: 0.7rem; color: var(--ink-3); background: var(--hairline); border-radius: var(--r-pill); padding: 0.1rem 0.5rem; }
 .res__time { font-family: var(--font-display); color: var(--ink-2); }
+/* Late joiner on the board — unranked "next run" row: quieter and dashed so it
+   reads as queued for the rematch, not a result. */
+#results-list li.res--joining { opacity: 0.75; outline: 2px dashed var(--hairline); outline-offset: -2px; }
+.res--joining .res__rank { color: var(--ink-3); }
+.res--joining .res__time { font-style: italic; font-family: var(--font-body); font-weight: 700; color: var(--ink-3); }
 
 /* ---- Split-screen cell labels (positioned each frame by SceneRenderer) ---- */
 .race-labels { font-family: var(--font-display); }
@@ -151,4 +156,39 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #cfeaf8; }
 @media (max-width: 860px) {
   #lobby { flex-direction: column; justify-content: center; gap: 2vh; }
   .lobby__card { flex: none; max-width: 90vw; }
+}
+
+/* ---- Device choice ---- the chooser a phone gets when it lands on this
+   big-screen page (shared link, or a controller bailed here with ?bail=…).
+   Fully opaque and above every run overlay, so the heavy 3D world booting
+   underneath never shows through. Hidden by default; the media query below
+   surfaces it on cramped viewports only. */
+#device-choice {
+  position: fixed; inset: 0; z-index: 60;
+  display: none; align-items: center; justify-content: center;
+  padding:
+    calc(5vh + env(safe-area-inset-top)) calc(8vw + env(safe-area-inset-right))
+    calc(5vh + env(safe-area-inset-bottom)) calc(8vw + env(safe-area-inset-left));
+  background: linear-gradient(180deg, var(--sky-1) 0%, var(--sky-2) 50%, #ffffff 100%);
+}
+.dc-card {
+  display: flex; flex-direction: column; align-items: center; gap: 0.9rem;
+  max-width: 24rem; padding: 1.6rem 1.4rem; text-align: center;
+}
+.dc-card h1 { font-family: var(--font-display); font-weight: 700; font-size: 2.1rem; line-height: 1.02; margin: 0; color: var(--ink); }
+.dc-card h1 span { color: var(--brand); }
+.dc-sub { color: var(--ink-2); font-weight: 700; margin: 0; }
+.dc-toast { color: var(--danger); font-weight: 800; margin: 0; }
+.dc-toast.hidden { display: none; }
+.dc-card .btn { width: 100%; margin: 0; }
+#dc-continue { font-size: 0.95rem; }
+
+/* Cramped viewport = almost certainly a phone holding the display URL: show the
+   chooser unless the user already chose this device (html.device-choice-dismissed,
+   sticky for the session) or a run is on (html.in-session — resizing a desktop
+   window mid-race must not cover the world). Size-only triggers on purpose: the
+   "bigger screen or continue here" choice applies to a narrow desktop window too,
+   and the continue button is one tap away. */
+@media (max-width: 950px), (max-height: 500px) {
+  html:not(.device-choice-dismissed):not(.in-session) #device-choice { display: flex; }
 }

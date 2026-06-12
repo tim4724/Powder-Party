@@ -12,13 +12,15 @@ var CONTROLLER_CARDS = [
   { key: 'name-connecting', title: 'Connecting…' },
   { key: 'lobby-host',      title: 'Lobby (host)',    perColor: true },
   { key: 'lobby-waiting',   title: 'Lobby (waiting)', perColor: true },
+  { key: 'late-join',       title: 'Late join (run on)', perColor: true },
   { key: 'countdown',       title: 'Ready (countdown)', perColor: true },
   { key: 'playing',         title: 'Driving',         perColor: true },
   { key: 'brake',           title: 'Brake (slow)',    perColor: true },
   { key: 'paused',          title: 'Paused',          perColor: true },
   { key: 'finished',        title: 'Finished',        perColor: true },
   { key: 'results',         title: 'Results (host)',    perColor: true },
-  { key: 'results-waiting', title: 'Results (waiting)', perColor: true }
+  { key: 'results-waiting', title: 'Results (waiting)', perColor: true },
+  { key: 'results-join',    title: 'Results (late join)', perColor: true }
 ];
 
 var state = Gallery.loadState();

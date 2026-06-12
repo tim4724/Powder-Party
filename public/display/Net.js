@@ -35,6 +35,10 @@ export class DisplayNet extends GameNet {
     // `inRun` so a reconnecting phone that ISN'T racing (seat expired mid-run, or a
     // rematch started without it) waits in its lobby instead of a dead game pad.
     this.isInRun = opts.isInRun || (() => false);
+    // Extra game-state fields merged into each WELCOME (or null). The game layer
+    // uses this to hand a phone joining during RESULTS the final standings, so it
+    // lands on the results board the big screen is showing instead of the lobby.
+    this.welcomeExtras = opts.welcomeExtras || (() => null);
 
     // Dropped seats currently offering a reconnect QR, plus their grace timers.
     // peerIndex -> {peerIndex, name, colorIndex, url}; peerIndex -> timeout id.
@@ -275,7 +279,8 @@ export class DisplayNet extends GameNet {
       hostPeerIndex: this.flow.host,
       roomState: this.roomState,
       inRun: this.isInRun(peerIndex),
-      players: this.roster()
+      players: this.roster(),
+      ...(this.welcomeExtras(peerIndex) || {})
     };
   }
   _broadcastLobby() {
