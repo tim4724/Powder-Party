@@ -52,7 +52,21 @@ export class DisplayNet extends GameNet {
 
     this._initFastlane(0, { onInput: (peerIdx, ev) => this.onControllerMessage(peerIdx, ev) });
 
-    const announce = () => { this._broadcastLobby(); this.onRosterChange(this.roster(), this.flow.host); };
+    // One announce per mutation: a single roster change can emit BOTH
+    // hostchange and rosterchange (RoomFlow fires them back to back — and a
+    // resync can remove several peers in one sweep), which used to push an
+    // identical LOBBY_UPDATE round per event. Coalesce onto a microtask so
+    // each mutation broadcasts once, with the settled roster.
+    let announcePending = false;
+    const announce = () => {
+      if (announcePending) return;
+      announcePending = true;
+      queueMicrotask(() => {
+        announcePending = false;
+        this._broadcastLobby();
+        this.onRosterChange(this.roster(), this.flow.host);
+      });
+    };
     this.flow.on('rosterchange', announce);
     this.flow.on('hostchange', announce);
   }
@@ -136,10 +150,20 @@ export class DisplayNet extends GameNet {
           this.party.sendTo(from, { type: MSG.ROOM_FULL });
           break;
         }
-        if (data.name) p.name = String(data.name).slice(0, 16);
+        // The seat change behind this HELLO (join / reconnect / rekey) already
+        // announced itself through the flow events; a roster re-broadcast here
+        // is only owed when the HELLO changes what everyone was just told —
+        // i.e. it carries a name the seat didn't have (a fresh seat still
+        // wears its "Player N" placeholder). The WELCOME always goes out, and
+        // after the rename so it carries the right roster.
+        const name = data.name ? String(data.name).slice(0, 16) : '';
+        const renamed = !!name && name !== p.name;
+        if (renamed) p.name = name;
         this.party.sendTo(from, this._welcomeFor(from));
-        this._broadcastLobby();
-        this.onRosterChange(this.roster(), this.flow.host);
+        if (renamed) {
+          this._broadcastLobby();
+          this.onRosterChange(this.roster(), this.flow.host);
+        }
         break;
       }
       case MSG.LEAVE:
