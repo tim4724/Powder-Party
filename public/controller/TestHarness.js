@@ -51,6 +51,19 @@ export function runControllerScenario(opts) {
     el('motion-tip').classList.add('hidden');
   }
 
+  // The #conn overlay covers whatever in-room screen the drop interrupted —
+  // previewed over the drive HUD, with the latency chip reading "no signal".
+  function showConnOverlay(title, msg, retry) {
+    showDriveHud();
+    setCarve(0.2);
+    setHud(2, false);
+    setLatency(-1, false);
+    el('conn-title').textContent = title;
+    el('conn-msg').textContent = msg;
+    el('conn-retry').classList.toggle('hidden', !retry);
+    el('conn').classList.remove('hidden');
+  }
+
   switch (scenario) {
     case 'name':
       show('name');
@@ -167,16 +180,34 @@ export function runControllerScenario(opts) {
       break;
 
     case 'results-join':
-      // Final board as the LATE JOINER sees it: the run played out without you,
-      // your row trails the field unranked ("next run") and the footer waits on
-      // the host — the rematch countdown is what pulls you in.
+      // Final board as the LATE JOINER sees it: the FULL field's results (4
+      // skiers — humans topped up with CPU) plus your own unranked trailing row
+      // ("next run"), so a one-joiner board is 5 rows. The footer waits on the
+      // host — the rematch countdown is what pulls you in.
       setLatency(22, false);
       showBoard([
         { name: FAKE_NAMES[(color + 1) % FAKE_NAMES.length], colorIndex: (color + 1) % COLORS.length, time: 28.4, finished: true },
         { name: 'Bolt',                                      colorIndex: (color + 2) % COLORS.length, time: 33.9, ai: true, finished: true },
-        { name: FAKE_NAMES[(color + 3) % FAKE_NAMES.length], colorIndex: (color + 3) % COLORS.length, finished: false, dnf: true },
+        { name: FAKE_NAMES[(color + 3) % FAKE_NAMES.length], colorIndex: (color + 3) % COLORS.length, time: 36.1, finished: true },
+        { name: 'Wedge',                                     colorIndex: (color + 4) % COLORS.length, ai: true, finished: false, dnf: true },
         { name: FAKE_NAMES[color],                           colorIndex: color,                       me: true, newPlayer: true }
       ], true, false);
+      break;
+
+    // --- connection overlay states (#conn) ---
+    // The screen-agnostic relay-link overlay over the in-room screens; copy
+    // mirrors main.js onStatus exactly so the preview can't drift from live.
+    case 'conn-reconnecting':
+      showConnOverlay('Reconnecting…', 'Reconnecting… (2/8)', false);
+      break;
+    case 'conn-lost':
+      showConnOverlay('Connection lost', 'Scan the QR on the big screen to take your seat back — or try again here.', true);
+      break;
+    case 'conn-display-gone':
+      showConnOverlay('Waiting for the big screen…', 'The host’s screen dropped — hang tight, it’ll reconnect you.', false);
+      break;
+    case 'conn-replaced':
+      showConnOverlay('Opened on another tab', 'This seat is now controlled from another tab or device.', false);
       break;
 
     default:

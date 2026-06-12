@@ -167,9 +167,12 @@ function setJoining(on) {
 function handleMessage(data) {
   // Parked on the "run in progress" screen, the live run's broadcasts aren't
   // ours to act on — without this gate the COUNTDOWN/GAME_START handlers would
-  // flip us to a game pad driving nothing. The messages that manage the ROOM
-  // still land: WELCOME (re-sync), LOBBY_UPDATE (roster/host), STANDINGS (the
-  // final board carries our "next run" row and releases the gate) and GAME_END.
+  // flip us to a game pad driving nothing. The gate blocks exactly the
+  // RUN-STATE broadcasts (anything that would repaint the screen for a run
+  // we're not in — extend the list if new ones are added); room-management
+  // messages are deliberately NOT gated, because they're what RELEASES this
+  // state: WELCOME (re-sync), LOBBY_UPDATE (roster/host), STANDINGS (the final
+  // board carries our "next run" row and clears the gate) and GAME_END.
   if (waitingForRun && (data.type === MSG.COUNTDOWN || data.type === MSG.GAME_START ||
       data.type === MSG.PLAYER_STATE || data.type === MSG.GAME_PAUSED || data.type === MSG.GAME_RESUMED)) return;
   switch (data.type) {
@@ -208,7 +211,12 @@ function handleMessage(data) {
         renderWaiting();
         show('waiting');
       } else if (data.roomState === ROOM_STATE.RESULTS && data.standings) {
-        handleMessage(data.standings); // a full STANDINGS payload — render + flip to the board
+        // Joined/reconnected during RESULTS: land on the board the big screen
+        // shows. Handled inline (not by re-dispatching to the STANDINGS case)
+        // so that handler can evolve without silently changing this path; the
+        // host fields were already adopted from the WELCOME above.
+        renderResults(data.standings);
+        showResultsScreen();
       } else {
         show('lobby');    // lobby (or an old display's results) — the next countdown/board routes us onward
       }

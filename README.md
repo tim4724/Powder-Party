@@ -86,7 +86,9 @@ The phone controller previews a single screen the same way, off the relay:
 `/controller/index.html?scenario=playing&color=2` (scenarios: `name`, `name-connecting`,
 `lobby-host`, `lobby-waiting`, `late-join` (run in progress without you), `countdown`,
 `playing`, `brake`, `paused`, `finished`, `results` (host), `results-waiting` (non-host),
-`results-join` (late joiner's board); `color` 0–7 picks the livery).
+`results-join` (late joiner's board), `conn-reconnecting` / `conn-lost` /
+`conn-display-gone` / `conn-replaced` (the relay-link overlay states); `color` 0–7
+picks the livery).
 
 ### Gallery
 

@@ -160,6 +160,8 @@ export class DisplayNet extends GameNet {
         const renamed = !!name && name !== p.name;
         if (renamed) p.name = name;
         this.party.sendTo(from, this._welcomeFor(from));
+        // No-rename reconnect: flow.markReconnected already emitted
+        // rosterchange → the coalesced announce broadcasts the seat's return.
         if (renamed) {
           this._broadcastLobby();
           this.onRosterChange(this.roster(), this.flow.host);

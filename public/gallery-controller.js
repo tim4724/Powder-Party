@@ -20,7 +20,11 @@ var CONTROLLER_CARDS = [
   { key: 'finished',        title: 'Finished',        perColor: true },
   { key: 'results',         title: 'Results (host)',    perColor: true },
   { key: 'results-waiting', title: 'Results (waiting)', perColor: true },
-  { key: 'results-join',    title: 'Results (late join)', perColor: true }
+  { key: 'results-join',    title: 'Results (late join)', perColor: true },
+  { key: 'conn-reconnecting', title: 'Reconnecting…' },
+  { key: 'conn-lost',         title: 'Connection lost' },
+  { key: 'conn-display-gone', title: 'Big screen gone' },
+  { key: 'conn-replaced',     title: 'Replaced (other tab)' }
 ];
 
 var state = Gallery.loadState();

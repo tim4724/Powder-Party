@@ -611,13 +611,13 @@ window.addEventListener('popstate', (e) => {
 // "Open on a large screen": hand the bare site URL to the native share sheet, or
 // copy it where share isn't available — either way the phone's job is just to
 // ferry the link to a TV/laptop browser.
-el('dc-share') && el('dc-share').addEventListener('click', async () => {
+const dcShare = el('dc-share');
+dcShare && dcShare.addEventListener('click', async () => {
   const url = window.location.origin;
-  const btn = el('dc-share');
   try {
     if (navigator.share) { await navigator.share({ title: 'Powder Party', url }); return; }
     await navigator.clipboard.writeText(url);
-    btn.textContent = 'Link copied — open it on a big screen';
+    dcShare.textContent = 'Link copied — open it on a big screen';
   } catch (_) { /* share sheet dismissed / clipboard blocked — leave the button as is */ }
 });
 // A controller that hit a dead end navigates here with ?bail=<reason>; surface
@@ -648,8 +648,7 @@ function showBailToast(text) {
     // users — skipped while the media query keeps the overlay hidden (desktop
     // viewports land on the lobby silently, which is the intended behaviour).
     document.documentElement.classList.remove('device-choice-dismissed');
-    const share = el('dc-share');
-    if (share.getBoundingClientRect().width > 0) { try { share.focus(); } catch (_) { /* old browsers */ } }
+    if (dcShare.getBoundingClientRect().width > 0) { try { dcShare.focus(); } catch (_) { /* old browsers */ } }
     const clean = new URLSearchParams(location.search);
     clean.delete('bail');
     const qs = clean.toString();
