@@ -83,8 +83,8 @@ const net = new ControllerNet({
       // RELAY_ERRORS (protocol.js) holds the relay's exact wire-contract
       // strings; if the relay ever rewords them, the fallthrough below still
       // surfaces the raw error inline.
-      if (info === RELAY_ERRORS.ROOM_NOT_FOUND) { net.disconnect(); location.replace('/?bail=room_not_found'); return; }
-      if (info === RELAY_ERRORS.ROOM_FULL) { net.disconnect(); location.replace('/?bail=game_full'); return; }
+      if (info === RELAY_ERRORS.ROOM_NOT_FOUND) { bailTo('room_not_found'); return; }
+      if (info === RELAY_ERRORS.ROOM_FULL) { bailTo('game_full'); return; }
       setStatus('Error: ' + info);
     } else if (state === 'display_gone') {
       setStatus('Waiting for the big screen…');
@@ -113,6 +113,14 @@ el('conn-retry').addEventListener('click', () => {
   net.connect(myName);
 });
 
+// The one exit ramp off this page: every dead end (stale room, full room,
+// game over) funnels through here, landing on the display page's device
+// chooser with the reason riding along as an allow-listed ?bail= toast.
+function bailTo(reason) {
+  net.disconnect();
+  location.replace('/?bail=' + reason);
+}
+
 // ---- "game ended" bail ----
 // A deliberately closed big screen announces itself (the DISPLAY_CLOSED goodbye
 // → instant bail in handleMessage); this timer covers the goodbyes that never
@@ -125,10 +133,7 @@ const DISPLAY_GONE_BAIL_MS = 30000;
 let bailTimer = null;
 function armBail() {
   if (bailTimer) return;
-  bailTimer = setTimeout(() => {
-    net.disconnect();
-    location.replace('/?bail=game_ended');
-  }, DISPLAY_GONE_BAIL_MS);
+  bailTimer = setTimeout(() => bailTo('game_ended'), DISPLAY_GONE_BAIL_MS);
 }
 function disarmBail() {
   clearTimeout(bailTimer);
@@ -310,10 +315,22 @@ function handleMessage(data) {
       // over for certain, so skip the display-gone grace wait and take the
       // "game ended" exit at once. The peer_left(0) that follows would only
       // arm the 30s fallback timer; same destination, just now.
-      net.disconnect();
-      location.replace('/?bail=game_ended');
+      bailTo('game_ended');
       break;
   }
+}
+
+// Anti-misclick: buttons that pop under a thumb mid-gesture — the results
+// footer while the player is still braking across the line, the pause overlay
+// over the live touch-pad — swallow taps for a beat, so the gesture that was
+// already in flight can't land on a button that wasn't there when it started
+// ("New run" aborting everyone's race being the worst case).
+const TAP_GUARD_MS = 800;
+const _tapGuards = new Map();
+function tapGuard(elm) {
+  elm.style.pointerEvents = 'none';
+  clearTimeout(_tapGuards.get(elm));
+  _tapGuards.set(elm, setTimeout(() => { elm.style.pointerEvents = ''; }, TAP_GUARD_MS));
 }
 
 // --- results overlay ---
@@ -321,7 +338,7 @@ function handleMessage(data) {
 // now) and clears the pause UI so a still-racing player's pause can't surface
 // over the board.
 function showResultsScreen() {
-  if (!inResults) { inResults = true; stopDriving(); }
+  if (!inResults) { inResults = true; stopDriving(); tapGuard(el('result-foot')); }
   setPauseOverlay(false);
   el('pause-btn').classList.add('hidden');
   show('results');
@@ -462,6 +479,7 @@ el('start-btn').addEventListener('click', () => { if (amHost) net.send(MSG.START
 // requests a change and reacts to the GAME_PAUSED / GAME_RESUMED broadcast.
 // While paused the overlay covers the screen, so the pause button is disabled.
 function setPauseOverlay(on) {
+  if (on) tapGuard(el('pause-overlay'));
   el('pause-overlay').classList.toggle('hidden', !on);
   el('pause-btn').disabled = on;
 }
@@ -475,6 +493,10 @@ el('again-btn').addEventListener('click', () => { if (amHost) { buzz(15); net.se
 el('newgame-btn').addEventListener('click', () => { if (amHost) { buzz(15); net.send(MSG.RETURN_TO_LOBBY); } });
 
 show('name');
+
+// E2E hook — lets the suite reach the live net (e.g. silencing pings + sends
+// to simulate a zombie link for the display's liveness sweep).
+window.__net = net;
 
 // Gallery / test mode: ?scenario=… lays out a single screen from fake data
 // without connecting to the relay (the controller never auto-connects, so
@@ -501,7 +523,7 @@ if (!_scenario && net.roomCode) {
     // Already past the name screen, or a join is in flight (disabled form):
     // the display/relay's own answer wins over a possibly-stale probe.
     if (currentScreen !== 'name' || el('join-btn').disabled) return;
-    if (state === 'not_found') { net.disconnect(); location.replace('/?bail=room_not_found'); }
-    else if (state === 'full' && !net.isReturning) { net.disconnect(); location.replace('/?bail=game_full'); }
+    if (state === 'not_found') bailTo('room_not_found');
+    else if (state === 'full' && !net.isReturning) bailTo('game_full');
   });
 }

@@ -18,6 +18,16 @@ const enc = encodeURIComponent;
 // who's truly gone stops blocking the 4-seat room.
 const RECONNECT_GRACE_MS = 90000;
 
+// Zombie-link detection: controllers send a 1 Hz PING (plus ~25 Hz CONTROL in
+// a run), so a "connected" seat that's been silent this long has a dead link
+// the relay hasn't noticed yet (phone slept with the socket half-open). The
+// sweep routes it through the normal drop path — mid-run that's the reconnect
+// QR + grace window, NOT a forfeit. Lobby seats are left to the relay's own
+// timeout: a backgrounded phone throttles its timers, and freeing its seat
+// over a missed ping would be worse than a briefly stale roster row.
+const LIVENESS_TIMEOUT_MS = 10000;
+const LIVENESS_SWEEP_MS = 2500;
+
 export class DisplayNet extends GameNet {
   constructor(opts = {}) {
     super();
@@ -45,12 +55,16 @@ export class DisplayNet extends GameNet {
     this._reconnectSeats = new Map();
     this._reconnectTimers = new Map();
 
+    // peerIndex -> performance.now() of the last relay/fastlane traffic.
+    this._lastSeen = new Map();
+    setInterval(() => this._sweepLiveness(), LIVENESS_SWEEP_MS);
+
     this.flow = new RoomFlow();
     this.roomCode = null;
     this.instance = null;
     this.baseUrlOverride = null;
 
-    this._initFastlane(0, { onInput: (peerIdx, ev) => this.onControllerMessage(peerIdx, ev) });
+    this._initFastlane(0, { onInput: (peerIdx, ev) => { this._seen(peerIdx); this.onControllerMessage(peerIdx, ev); } });
 
     // One announce per mutation: a single roster change can emit BOTH
     // hostchange and rosterchange (RoomFlow fires them back to back — and a
@@ -134,6 +148,7 @@ export class DisplayNet extends GameNet {
 
   _onMessage(from, data) {
     if (!data || from === 0) return;
+    this._seen(from);
     if (this._isSignal(from, data)) return;
     switch (data.type) {
       case MSG.HELLO: {
@@ -182,6 +197,7 @@ export class DisplayNet extends GameNet {
   }
 
   _addPeer(peerIndex) {
+    this._lastSeen.set(peerIndex, performance.now()); // a join IS traffic — fresh sweep budget
     const existing = this.flow.get(peerIndex);
     if (existing) {
       // Same-device reconnect: the relay keys slots by clientId, so a returning
@@ -220,6 +236,7 @@ export class DisplayNet extends GameNet {
   // for an intentional LEAVE and when the reconnect grace window elapses.
   _expireSeat(peerIndex) {
     this._clearReconnect(peerIndex);
+    this._lastSeen.delete(peerIndex);
     if (!this.flow.has(peerIndex)) return;
     this.fastlane.close(peerIndex);
     this.flow.removePlayer(peerIndex);
@@ -236,7 +253,37 @@ export class DisplayNet extends GameNet {
       if (!present.has(p.peerIndex)) this._removePeer(p.peerIndex);
     }
     // Re-welcome everyone so their controllers clear any reconnect overlay.
-    for (const p of this.flow.list()) this.party.sendTo(p.peerIndex, this._welcomeFor(p.peerIndex));
+    // Fresh liveness stamps too — OUR blip starved everyone's, and the sweep
+    // must not QR a healthy phone before its next ping lands.
+    for (const p of this.flow.list()) {
+      this._lastSeen.set(p.peerIndex, performance.now());
+      this.party.sendTo(p.peerIndex, this._welcomeFor(p.peerIndex));
+    }
+  }
+
+  // ---- liveness (zombie links) ----
+  // Stamp every inbound message; a stamp also HEALS a liveness-dropped seat,
+  // because its socket never actually closed — the peer_joined that flips a
+  // returning seat back on (_addPeer) will never fire, so traffic is the only
+  // signal it's alive again. This also covers a phone whose relay link dropped
+  // while its P2P fastlane kept delivering CONTROL: the player is still
+  // driving, so the seat stays live and no QR interrupts their run.
+  _seen(peerIndex) {
+    this._lastSeen.set(peerIndex, performance.now());
+    if (this.flow.has(peerIndex) && this.flow.isDisconnected(peerIndex)) {
+      this.flow.markReconnected(peerIndex);
+      this._clearReconnect(peerIndex);
+    }
+  }
+
+  _sweepLiveness() {
+    if (this.roomState === ROOM_STATE.LOBBY) return; // lobby: see LIVENESS_TIMEOUT_MS
+    const now = performance.now();
+    for (const p of this.flow.list()) {
+      if (!p.connected) continue; // already dropped — its QR/grace window is running
+      const seen = this._lastSeen.get(p.peerIndex);
+      if (seen != null && now - seen > LIVENESS_TIMEOUT_MS) this._removePeer(p.peerIndex);
+    }
   }
 
   // ---- reconnect (dropped-seat) handling ----

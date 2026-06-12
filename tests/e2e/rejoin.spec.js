@@ -33,3 +33,37 @@ test('reload mid-run resumes the pad; reload during results lands on the board',
 
   await phone.close();
 });
+
+test('a silent (zombie) phone gets the reconnect QR mid-run; its next ping heals it', async ({ page, browser, baseURL }) => {
+  const roomCode = await createRoom(page);
+
+  const phone = await newPhone(browser, baseURL);
+  const host = await joinController(phone, roomCode, 'Mia');
+  await host.waitForSelector(visible('lobby'));
+  await startRun(host, page);
+  await host.waitForSelector(visible('game'));
+
+  // Zombie link: the socket stays open but the phone goes silent — no PING,
+  // no CONTROL (a slept phone freezes both the same way). The display's
+  // liveness sweep must route the seat through the normal drop path:
+  // reconnect QR up, skier kept descending — NOT a forfeit.
+  await host.evaluate(() => {
+    const net = /** @type {*} */ (window).__net;
+    net._stopPing();
+    /** @type {*} */ (window).__origSend = net.send.bind(net);
+    net.send = () => {};
+  });
+  await page.waitForSelector('.cell-reconnect', { timeout: 25000 });
+
+  // Traffic resumes on the SAME socket — no peer_joined will ever fire, so
+  // the next ping alone must heal the seat and drop the QR card.
+  await host.evaluate(() => {
+    const net = /** @type {*} */ (window).__net;
+    net.send = /** @type {*} */ (window).__origSend;
+    net._startPing();
+  });
+  await page.waitForSelector('.cell-reconnect', { state: 'detached', timeout: 10000 });
+  await expect(host.locator('#game')).toBeVisible(); // the phone never left the run
+
+  await phone.close();
+});
