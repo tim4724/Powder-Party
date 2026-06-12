@@ -80,6 +80,9 @@ const net = new ControllerNet({
       // reason as a toast (like the display_gone bail) instead of stranding the
       // player on an inline error: a dead room (stale QR / old link) can never
       // be re-joined, and a relay-full room has no seat to wait on here.
+      // The EXACT strings are the relay's wire contract (the sibling HexStacker
+      // controller matches the same literals); if the relay ever rewords them,
+      // the fallthrough below still surfaces the raw error inline.
       if (info === 'Room not found') { net.disconnect(); location.replace('/?bail=room_not_found'); return; }
       if (info === 'Room is full') { net.disconnect(); location.replace('/?bail=game_full'); return; }
       setStatus('Error: ' + info);
@@ -268,6 +271,7 @@ function handleMessage(data) {
       renderResults(data);
       if (data.over) waitingForRun = false;
       const mine = (data.order || []).find((o) => o.playerId === net.peerIndex);
+      // (!newPlayer is defensive — a queued joiner's row is never `finished`)
       if (data.over || (mine && mine.finished && !mine.newPlayer)) showResultsScreen();
       break;
     }

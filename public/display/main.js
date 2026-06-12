@@ -501,7 +501,9 @@ function showResults(results, field = currentField, settled = false, joiners = n
     }
     // Late joiners (seated but not in this run) close out the board as unranked
     // "next run" rows, so the room sees the newcomer is in for the rematch.
-    for (const p of joiners || (field === currentField ? lateJoiners() : [])) {
+    // joiners=null = derive from the live roster (empty in harness mode, where
+    // the flow has no players); the harness passes its preview rows explicitly.
+    for (const p of joiners ?? lateJoiners()) {
       const li = document.createElement('li');
       li.className = 'res--joining';
       const color = SKIER_COLORS[(p.colorIndex || 0) % SKIER_COLORS.length];
