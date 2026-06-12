@@ -79,7 +79,8 @@ player-facing surface; use the gallery or the URLs below to preview its screens.
   field (default you + 3 CPU), `&seed=N` picks the mountain.
 - `/?test=1&scenario=countdown` · `…&scenario=paused`
 - `/?test=1&scenario=device-choice&bail=game_ended` — the chooser a phone gets when it lands on
-  this big-screen page (shared link, or a controller bailing out of a dead room with `?bail=…`)
+  this big-screen page (shared link, or a controller bailing out of a dead end with `?bail=…`;
+  toast reasons: `game_ended`, `room_not_found`, `game_full`)
 
 The phone controller previews a single screen the same way, off the relay:
 `/controller/index.html?scenario=playing&color=2` (scenarios: `name`, `name-connecting`,

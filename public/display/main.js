@@ -605,13 +605,30 @@ el('dc-share') && el('dc-share').addEventListener('click', async () => {
 const BAIL_REASONS = {
   game_ended: 'The game has ended.',
   room_not_found: 'Room not found — that game has ended.',
+  game_full: 'That room is full.',
 };
+// Auto-hide so the chooser doesn't keep advertising a stale reason after the
+// user has had a chance to read it; held open in test mode so the gallery's
+// device-choice snapshot keeps showing it.
+let bailToastTimer = null;
+function showBailToast(text) {
+  const toast = el('dc-toast');
+  toast.textContent = text;
+  toast.classList.remove('hidden');
+  clearTimeout(bailToastTimer);
+  if (!testMode) bailToastTimer = setTimeout(() => toast.classList.add('hidden'), 5000);
+}
 {
   const reason = BAIL_REASONS[params.get('bail')];
   if (reason) {
-    const toast = el('dc-toast');
-    toast.textContent = reason;
-    toast.classList.remove('hidden');
+    showBailToast(reason);
+    // The bail must be SEEN: a chooser dismissed earlier in this tab comes
+    // back, and focus lands on the primary action for keyboard/screen-reader
+    // users — skipped while the media query keeps the overlay hidden (desktop
+    // viewports land on the lobby silently, which is the intended behaviour).
+    document.documentElement.classList.remove('device-choice-dismissed');
+    const share = el('dc-share');
+    if (share.getBoundingClientRect().width > 0) { try { share.focus(); } catch (_) { /* old browsers */ } }
     const clean = new URLSearchParams(location.search);
     clean.delete('bail');
     const qs = clean.toString();

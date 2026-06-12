@@ -69,11 +69,12 @@ const net = new ControllerNet({
       setStatus('Connection lost.');
       if (inRoom) showConn('Connection lost', 'Scan the QR on the big screen to take your seat back — or try again here.', true);
     } else if (state === 'error') {
-      // A dead room can't be re-joined — the display that owned it is gone
-      // (stale QR / old link). Hand the phone to the display page's device
-      // chooser with the reason, like the display_gone bail — retyping a name
-      // under an inline error can never succeed.
+      // Terminal join errors land on the display page's device chooser with the
+      // reason as a toast (like the display_gone bail) instead of stranding the
+      // player on an inline error: a dead room (stale QR / old link) can never
+      // be re-joined, and a relay-full room has no seat to wait on here.
       if (info === 'Room not found') { net.disconnect(); location.replace('/?bail=room_not_found'); return; }
+      if (info === 'Room is full') { net.disconnect(); location.replace('/?bail=game_full'); return; }
       setStatus('Error: ' + info);
     } else if (state === 'display_gone') {
       setStatus('Waiting for the big screen…');
@@ -205,13 +206,12 @@ function handleMessage(data) {
       break;
     }
     case MSG.ROOM_FULL:
-      // The display had no seat for us (room full / seats held for reconnects).
-      // Drop the relay connection (frees our placeholder slot) and put the name
-      // screen back so the player can retry once a seat opens.
+      // The display had no seat for us (room full, or every seat held for a
+      // reconnect). Drop the relay connection (frees our placeholder slot) and
+      // land on the device chooser with the reason — the same dead end as the
+      // relay-level "Room is full" above.
       net.disconnect();
-      setJoining(false);
-      setStatus('Room is full — wait for a seat to open, then try again.');
-      show('name');
+      location.replace('/?bail=game_full');
       break;
     case MSG.LOBBY_UPDATE: {
       roster = data.players || [];
