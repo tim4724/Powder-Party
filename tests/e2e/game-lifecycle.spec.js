@@ -64,3 +64,34 @@ test('the results board folds to the lobby when every racer has left', async ({ 
 
   await phone.close();
 });
+
+test('a seated late joiner does not block the fold — they land in the lobby as host', async ({ page, browser, baseURL }) => {
+  const roomCode = await createRoom(page);
+
+  const hostPhone = await newPhone(browser, baseURL);
+  const host = await joinController(hostPhone, roomCode, 'Mia');
+  await host.waitForSelector(visible('lobby'));
+  await startRun(host, page);
+
+  const latePhone = await newPhone(browser, baseURL);
+  const late = await joinController(latePhone, roomCode, 'Zoe');
+  await late.waitForSelector(visible('waiting'));
+
+  await fastForwardRun(page);
+  await host.waitForSelector(visible('results'));
+  await late.waitForSelector(visible('results'));
+
+  // The only RACER backs out; Zoe is still seated but never raced, so she
+  // can't restart the board — it's orphaned despite a non-empty roster
+  // (the fold checks the field, not the room). She must be routed to the
+  // lobby with the inherited host seat, not stranded behind a dead board.
+  await host.goBack();
+  await host.waitForSelector(visible('name'));
+  await expect(page.locator('#lobby')).toBeVisible();
+  await expect(page.locator('#results')).toBeHidden();
+  await late.waitForSelector(visible('lobby'));
+  await expect(late.locator('#start-btn')).toBeVisible();
+
+  await hostPhone.close();
+  await latePhone.close();
+});

@@ -446,6 +446,7 @@ function leaveToName() {
   waitingForRun = false;
   amHost = false;
   roster = [];
+  myColorIndex = null; // next WELCOME assigns fresh — don't flash the old room's livery
   setPauseOverlay(false);
   el('pause-btn').classList.add('hidden');
   setJoining(false);

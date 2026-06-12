@@ -47,7 +47,9 @@ var MSG = {
   // Display -> specific controller
   WELCOME: 'welcome',                 // {peerIndex, colorIndex, hostPeerIndex, roomState, players, inRun, standings?, paused?}
                                       // inRun=false mid-run = no live skier (late joiner / expired seat) — the phone
-                                      // parks on its "run in progress" screen. During RESULTS, standings carries the
+                                      // parks on its "run in progress" screen; a MISSING flag reads as true (an older
+                                      // display that never stamps it must not strand its rejoiners off the pad).
+                                      // During RESULTS, standings carries the
                                       // final STANDINGS payload so the phone lands on the board, not the lobby; a
                                       // paused run stamps paused=true so a rejoiner shows the pause overlay.
   ROOM_FULL: 'room_full',             // join refused — no free seat (room full, or every seat held for a reconnect)
