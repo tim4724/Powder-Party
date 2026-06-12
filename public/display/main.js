@@ -648,7 +648,13 @@ function showBailToast(text) {
     // users — skipped while the media query keeps the overlay hidden (desktop
     // viewports land on the lobby silently, which is the intended behaviour).
     document.documentElement.classList.remove('device-choice-dismissed');
-    if (dcShare && dcShare.getBoundingClientRect().width > 0) { try { dcShare.focus(); } catch (_) { /* old browsers */ } }
+    // Focus after the first layout pass (rAF): measured synchronously at load
+    // the overlay may not be laid out yet, and the width guard — which skips
+    // the focus when the media query keeps the chooser hidden — would also
+    // skip it on a real phone.
+    if (dcShare) requestAnimationFrame(() => {
+      if (dcShare.getBoundingClientRect().width > 0) { try { dcShare.focus(); } catch (_) { /* old browsers */ } }
+    });
     const clean = new URLSearchParams(location.search);
     clean.delete('bail');
     const qs = clean.toString();

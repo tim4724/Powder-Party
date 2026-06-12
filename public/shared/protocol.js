@@ -74,6 +74,27 @@ var MSG = {
 // here. All other traffic and WS fallback flow through the relay.
 var FASTLANE_TYPES = { control: true };
 
+// RUN-STATE broadcasts — messages that repaint a phone for the CURRENT run.
+// A controller parked on its "run in progress" screen (late joiner) drops
+// exactly these; room-management traffic (WELCOME, LOBBY_UPDATE, STANDINGS,
+// GAME_END, DISPLAY_CLOSED) stays live because it's what releases that state.
+// Add new run-only broadcasts HERE and the controller's gate picks them up.
+var RUN_STATE_MSGS = {
+  [MSG.COUNTDOWN]: true,
+  [MSG.GAME_START]: true,
+  [MSG.PLAYER_STATE]: true,
+  [MSG.GAME_PAUSED]: true,
+  [MSG.GAME_RESUMED]: true
+};
+
+// Relay-level join refusals, matched VERBATIM by the controller — these exact
+// strings are the relay's wire contract (the sibling games match the same
+// literals). An unrecognized error message still surfaces inline as raw text.
+var RELAY_ERRORS = {
+  ROOM_NOT_FOUND: 'Room not found',
+  ROOM_FULL: 'Room is full'
+};
+
 // Room states (must match partyplug RoomFlow.STATES — keep in sync by hand;
 // the controller page never loads RoomFlow, so the values live here too).
 var ROOM_STATE = {
@@ -106,7 +127,7 @@ var SKIER_COLORS = [
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    MSG, FASTLANE_TYPES, ROOM_STATE,
+    MSG, FASTLANE_TYPES, RUN_STATE_MSGS, RELAY_ERRORS, ROOM_STATE,
     RELAY_URL, STUN_URL,
     MAX_PLAYERS, COUNTDOWN_SECONDS,
     SKIER_COLORS

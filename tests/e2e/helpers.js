@@ -9,6 +9,7 @@ const DISPLAY_VIEWPORT = { width: 1280, height: 720 }; // must NOT trip it
 
 // Boot a display page and wait for its live room. Returns the room code.
 async function createRoom(page) {
+  await page.setViewportSize(DISPLAY_VIEWPORT); // enforce, don't assume, the config default
   await page.goto('/');
   await page.waitForFunction(() => window.__net && !!window.__net.roomCode, null, { timeout: 30000 });
   return await page.evaluate(() => window.__net.roomCode);

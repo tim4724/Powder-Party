@@ -8,7 +8,7 @@ import { SwipeInput } from './SwipeInput.js';
 import { applyLatencyChip, renderWaitNote, renderResultsBoard } from './ui.js';
 import { keepScreenOn, letScreenSleep } from '../shared/WakeLock.js';
 
-const { MSG, ROOM_STATE, SKIER_COLORS } = window;
+const { MSG, RUN_STATE_MSGS, RELAY_ERRORS, ROOM_STATE, SKIER_COLORS } = window;
 const el = (id) => document.getElementById(id);
 
 const screens = { name: el('name'), lobby: el('lobby'), waiting: el('waiting'), game: el('game'), results: el('results') };
@@ -80,11 +80,11 @@ const net = new ControllerNet({
       // reason as a toast (like the display_gone bail) instead of stranding the
       // player on an inline error: a dead room (stale QR / old link) can never
       // be re-joined, and a relay-full room has no seat to wait on here.
-      // The EXACT strings are the relay's wire contract (the sibling HexStacker
-      // controller matches the same literals); if the relay ever rewords them,
-      // the fallthrough below still surfaces the raw error inline.
-      if (info === 'Room not found') { net.disconnect(); location.replace('/?bail=room_not_found'); return; }
-      if (info === 'Room is full') { net.disconnect(); location.replace('/?bail=game_full'); return; }
+      // RELAY_ERRORS (protocol.js) holds the relay's exact wire-contract
+      // strings; if the relay ever rewords them, the fallthrough below still
+      // surfaces the raw error inline.
+      if (info === RELAY_ERRORS.ROOM_NOT_FOUND) { net.disconnect(); location.replace('/?bail=room_not_found'); return; }
+      if (info === RELAY_ERRORS.ROOM_FULL) { net.disconnect(); location.replace('/?bail=game_full'); return; }
       setStatus('Error: ' + info);
     } else if (state === 'display_gone') {
       setStatus('Waiting for the big screen…');
@@ -170,13 +170,12 @@ function handleMessage(data) {
   // Parked on the "run in progress" screen, the live run's broadcasts aren't
   // ours to act on — without this gate the COUNTDOWN/GAME_START handlers would
   // flip us to a game pad driving nothing. The gate blocks exactly the
-  // RUN-STATE broadcasts (anything that would repaint the screen for a run
-  // we're not in — extend the list if new ones are added); room-management
-  // messages are deliberately NOT gated, because they're what RELEASES this
-  // state: WELCOME (re-sync), LOBBY_UPDATE (roster/host), STANDINGS (the final
-  // board carries our "next run" row and clears the gate) and GAME_END.
-  if (waitingForRun && (data.type === MSG.COUNTDOWN || data.type === MSG.GAME_START ||
-      data.type === MSG.PLAYER_STATE || data.type === MSG.GAME_PAUSED || data.type === MSG.GAME_RESUMED)) return;
+  // RUN-STATE broadcasts (RUN_STATE_MSGS, defined next to the vocabulary in
+  // protocol.js); room-management messages are deliberately NOT gated, because
+  // they're what RELEASES this state: WELCOME (re-sync), LOBBY_UPDATE
+  // (roster/host), STANDINGS (the final board carries our "next run" row and
+  // clears the gate) and GAME_END.
+  if (waitingForRun && RUN_STATE_MSGS[data.type]) return;
   switch (data.type) {
     case MSG.WELCOME: {
       hideConn();   // a WELCOME means we're back in (covers the display returning after display_gone)
