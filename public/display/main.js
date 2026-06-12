@@ -154,17 +154,20 @@ net.flow.on('playerleave', ({ peerIndex }) => { forfeitSkier(peerIndex); release
 
 // A results board needs a host to restart it, and during RESULTS host duty is
 // restricted to the run's participants (RoomFlow) — a late joiner can't inherit
-// it. So if every human who raced is GONE from the roster (left, or their
-// reconnect grace expired — a held seat still counts as present) while late
-// joiners sit waiting, the board is orphaned: nobody on it can press anything.
-// Fold the room back to the lobby, where host duty unrestricts and the oldest
-// joiner gets the Start button. Checked on every leave and at run end (the
-// field may already have walked out mid-run).
+// it. So once every human who raced is GONE from the roster (left, or their
+// reconnect grace expired — a held seat still counts as present), the board is
+// orphaned: nobody on it can press anything, and a phone joining later would be
+// stuck "waiting for the host". Fold the room back to the lobby — late joiners
+// land there with host duty unrestricted (oldest gets the Start button), and an
+// emptied room shows the join QR front door instead of an abandoned board.
+// Checked on every leave and at run end (the field may already have walked out
+// mid-run). The fieldIds.size guard keeps the all-CPU dev run ('g' key, no
+// humans) holding its board as before.
 function releaseOrphanedResults() {
   const orphaned = () => {
     if (!raceEnded || net.roomState !== ROOM_STATE.RESULTS) return false;
     const fieldIds = new Set(currentField.filter((p) => !p.ai).map((p) => p.peerIndex));
-    return !net.roster().some((p) => fieldIds.has(p.peerIndex)) && lateJoiners().length > 0;
+    return fieldIds.size > 0 && !net.roster().some((p) => fieldIds.has(p.peerIndex));
   };
   if (!orphaned()) return;
   // Deferred a tick: endRun fires from inside session.update (mid-frame), and
@@ -599,7 +602,10 @@ el('dc-share') && el('dc-share').addEventListener('click', async () => {
 // A controller that hit a dead end navigates here with ?bail=<reason>; surface
 // it as a toast over the chooser. Reasons are allow-listed so a crafted URL
 // can't inject arbitrary text, and the param is stripped so a reload is clean.
-const BAIL_REASONS = { game_ended: 'The game has ended.' };
+const BAIL_REASONS = {
+  game_ended: 'The game has ended.',
+  room_not_found: 'Room not found — that game has ended.',
+};
 {
   const reason = BAIL_REASONS[params.get('bail')];
   if (reason) {

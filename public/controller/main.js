@@ -69,6 +69,11 @@ const net = new ControllerNet({
       setStatus('Connection lost.');
       if (inRoom) showConn('Connection lost', 'Scan the QR on the big screen to take your seat back — or try again here.', true);
     } else if (state === 'error') {
+      // A dead room can't be re-joined — the display that owned it is gone
+      // (stale QR / old link). Hand the phone to the display page's device
+      // chooser with the reason, like the display_gone bail — retyping a name
+      // under an inline error can never succeed.
+      if (info === 'Room not found') { net.disconnect(); location.replace('/?bail=room_not_found'); return; }
       setStatus('Error: ' + info);
     } else if (state === 'display_gone') {
       setStatus('Waiting for the big screen…');
