@@ -21,3 +21,20 @@ jobs:
           cache: 'npm'
       - run: npm ci
       - run: npm test
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container:
+      # Keep this tag in sync with @playwright/test in package-lock.json —
+      # the image ships the matching browsers preinstalled.
+      image: mcr.microsoft.com/playwright:v1.56.1-noble
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: 'npm'
+      - run: npm ci
+      - name: Run E2E tests (real pages over the real relay)
+        run: npx playwright test
