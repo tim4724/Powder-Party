@@ -62,8 +62,9 @@ npm start            # http://localhost:4000  (PORT env overrides)
 ### No-phone preview
 
 The display page drives itself from fake data with `?test=1&scenario=…` (no relay needed).
-No need to hand-build these URLs: the ⚙ button bottom-left (on the display AND the controller)
-opens a debug menu that sets every param below interactively.
+No need to hand-build these URLs: the ⚙ button bottom-left on the display opens a debug menu
+that sets every param below interactively. (The controller has no debug menu — it's a
+player-facing surface; use the gallery or the URLs below to preview its screens.)
 
 - `/?test=1&scenario=running&players=4` — full split-screen run, CPU-driven (endless loop)
 - `/?test=1&scenario=results` — the results board

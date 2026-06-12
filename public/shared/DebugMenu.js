@@ -1,7 +1,9 @@
 // DebugMenu — a discreet ⚙ button (bottom-left, above the build badge) that
-// opens an interactive panel of the page's debug query params. Each page passes
-// its own field schema (the display and controller support different params);
-// the panel prefills from the current URL, previews the URL it will load, and
+// opens an interactive panel of the page's debug query params. Display-only:
+// the controller is a player-facing touch surface, so it gets no gear (its
+// screens are previewed via the gallery or ?scenario= URLs instead).
+// The page passes its field schema; the panel prefills from the current URL,
+// previews the URL it will load, and
 // "Go" navigates there (a reload — every debug param is read at boot). Fully
 // self-contained: injects its own DOM + <style> (CSP allows inline styles),
 // so neither page's HTML or CSS needs to know about it.

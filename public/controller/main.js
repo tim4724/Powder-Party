@@ -7,7 +7,6 @@ import { TiltInput } from './TiltInput.js';
 import { SwipeInput } from './SwipeInput.js';
 import { applyLatencyChip, renderWaitNote, renderResultsBoard } from './ui.js';
 import { keepScreenOn, letScreenSleep } from '../shared/WakeLock.js';
-import { initDebugMenu } from '../shared/DebugMenu.js';
 
 const { MSG, ROOM_STATE, SKIER_COLORS } = window;
 const el = (id) => document.getElementById(id);
@@ -397,15 +396,3 @@ if (_scenario) {
     color: _int(_params.get('color'), 0)
   }));
 }
-
-// ⚙ debug menu — every query param this page reads (scenarios are the
-// no-relay screen previews in TestHarness.js).
-initDebugMenu([
-  { key: 'scenario', label: 'Scenario', type: 'select', hint: 'no-relay screen preview — overrides live play', options: [
-    ['', 'live (off)'],
-    'name', 'name-connecting', 'lobby-host', 'lobby-waiting',
-    'countdown', 'playing', 'brake', 'finished', 'paused',
-    'results', 'results-waiting',
-  ] },
-  { key: 'color', label: 'Colour', type: 'number', min: 0, max: SKIER_COLORS.length - 1, hint: 'livery colour index for the previewed player' },
-]);
