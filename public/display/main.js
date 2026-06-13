@@ -11,10 +11,12 @@ import { AiController, AI_PERSONALITIES } from './AiDriver.js';
 import { SlopeAudio } from './Audio.js';
 import { keepScreenOn } from '../shared/WakeLock.js';
 import { initDebugMenu } from '../shared/DebugMenu.js';
+import { buildLevelSeg, paintLevelSeg } from '../shared/levelSeg.js';
 
 const {
-  MSG, ROOM_STATE, COUNTDOWN_SECONDS, MAX_PLAYERS, SKIER_COLORS,
+  MSG, ROOM_STATE, COUNTDOWN_SECONDS, MAX_PLAYERS, SKIER_COLORS, LEVELS, DEFAULT_LEVEL,
 } = window;
+const isLevel = (id) => LEVELS.some((l) => l.id === id);
 
 const FIELD_SIZE = MAX_PLAYERS;     // skiers in a run (humans topped up with CPU)
 const AI_PREFIX = 'ai-';
@@ -27,24 +29,32 @@ const params = new URLSearchParams(location.search);
 // wants a fresh random one per run. (`scenario`/`test` are also read at boot below.)
 const testMode = params.get('test') === '1' || !!params.get('scenario');
 
+// Run difficulty (Blue/Red/Black) — the host picks it from the lobby (SET_LEVEL);
+// the display is authoritative and feeds it into every generated mountain. `?level`
+// pins it for previews/snapshots; otherwise it starts at DEFAULT_LEVEL and follows
+// the host's choice. Only the procedural HILL changes per tier — never the physics.
+let currentLevel = isLevel(params.get('level')) ? params.get('level') : DEFAULT_LEVEL;
+
 // Build the slope for the NEXT run. Precedence: an explicit catalog id (the
 // gallery's Slopes page / the `powder-bowl` reference) → the `tricks` scenario's
 // straight `trick-lab` practice run → an explicit `?seed` (deterministic repro +
 // tests) → a fixed seed in test mode (stable gallery + snapshots) → a fresh
-// random seed (live play, a new mountain every run).
+// random seed (live play, a new mountain every run). Generated slopes carry the
+// current difficulty tier; the catalog/lab slopes are fixed by their own data.
 function makeSlope() {
   const id = params.get('slope');
   if (id && SLOPES[id]) return buildSlopeById(id);
   if (params.get('scenario') === 'tricks') return buildSlopeById('trick-lab');
   if (params.get('scenario') === 'bump') return buildSlopeById('bump-lab');
+  const opts = { level: currentLevel };
   const seedParam = params.get('seed');
   if (seedParam != null && seedParam !== '') {
     const n = parseInt(seedParam, 10);
     if (Number.isNaN(n)) console.warn(`[powder] non-numeric ?seed=${seedParam} — using seed 0`);
-    return buildGeneratedSlope(n >>> 0);
+    return buildGeneratedSlope(n >>> 0, opts);
   }
-  if (testMode) return buildGeneratedSlope(1);
-  return buildGeneratedSlope((Math.random() * 0xffffffff) >>> 0);
+  if (testMode) return buildGeneratedSlope(1, opts);
+  return buildGeneratedSlope((Math.random() * 0xffffffff) >>> 0, opts);
 }
 let slope = makeSlope();
 
@@ -77,7 +87,15 @@ function showSoundHint() {
   const t = setInterval(() => { if (audio.ready) { d.remove(); clearInterval(t); } }, 500);
 }
 const trackOpts = { hitbox: params.get('hitbox') === '1' }; // ?hitbox=1 — wireframe collision footprints
-scene.setTrack(slope, trackOpts);
+// The grade colour for the run's tier (Blue/Red/Black), used to cap the edge
+// poles so the difficulty reads at a glance mid-run. Keyed off the slope's own
+// def.level when it has one (a catalog/by-id preview), else the live tier.
+const levelColor = (id) => (LEVELS.find((l) => l.id === id) || {}).color;
+const applyTrack = () => scene.setTrack(slope, {
+  ...trackOpts,
+  poleColor: levelColor((slope.def && slope.def.level) || currentLevel),
+});
+applyTrack();
 scene.start();
 
 // ---- run state -----------------------------------------------------------
@@ -108,9 +126,14 @@ const net = new DisplayNet({
   // stamp the frozen state instead, so a rejoiner's phone comes back showing
   // the pause overlay rather than a live HUD over a frozen world.
   welcomeExtras: () => {
-    if (!session) return null;
-    if (raceEnded) return { standings: standingsPayload(true) };
-    return paused ? { paused: true } : null;
+    // Every WELCOME carries the room's current difficulty so a joiner's lobby
+    // selector lands on the right tier; mid-run/results extras ride alongside.
+    const extra = { level: currentLevel };
+    if (session) {
+      if (raceEnded) extra.standings = standingsPayload(true);
+      else if (paused) extra.paused = true;
+    }
+    return extra;
   },
 });
 
@@ -126,6 +149,9 @@ function onControllerMessage(from, data) {
   // Host's start/rematch. From the lobby this starts the first run; from the results
   // board (run already over) it plays again on a fresh slope.
   else if (data.type === MSG.START_GAME) { if (from === net.flow.host && net.flow.connectedCount > 0) (raceEnded ? playAgain() : startRun()); }
+  // Host picks the run difficulty from the lobby. Honoured only in the lobby (the
+  // selector is lobby-only) — it re-rolls the orbiting preview to the chosen tier.
+  else if (data.type === MSG.SET_LEVEL) { if (from === net.flow.host && net.roomState === ROOM_STATE.LOBBY) setLevel(data.level); }
   else if (data.type === MSG.PAUSE_GAME) pauseRun();   // any player may pause (friendly)
   else if (data.type === MSG.RESUME_GAME) resumeRun();
   // host-gated: aborting the run back to the lobby affects everyone.
@@ -239,6 +265,33 @@ function renderRoster(roster, host) {
       ? (host != null ? 'First player is host — start the run from your phone' : 'Waiting…')
       : 'Scan the QR code to join';
   }
+}
+
+// ---- run difficulty (Blue/Red/Black) -------------------------------------
+// The lobby shows the SAME Blue/Red/Black switch as the host's phone (shared
+// widget) and the orbiting slope preview re-rolls to the chosen tier, so the
+// difficulty reads before anyone starts. The big screen is authoritative, so its
+// switch is LIVE: a tap routes straight into `setLevel` (on a pointer-less TV
+// it's an inert mirror of the host's pick). `setLevel` is the one authoritative
+// entry point — host phone (SET_LEVEL) and big screen alike land here: it stores
+// the tier, repaints, tells every phone (LEVEL_UPDATE) and — while idle in the
+// lobby — rebuilds the previewed mountain. Only the HILL changes per tier; the
+// physics every skier rides are identical.
+function renderLevel() {
+  const seg = el('level-seg');
+  if (!seg) return;
+  buildLevelSeg(seg, LEVELS, setLevel); // idempotent build; tap → setLevel (authoritative)
+  paintLevelSeg(seg, currentLevel, false); // always live on the big screen — no host gate
+}
+
+function setLevel(level) {
+  if (!isLevel(level) || level === currentLevel) return;
+  currentLevel = level;
+  renderLevel();
+  net.broadcast({ type: MSG.LEVEL_UPDATE, level: currentLevel });
+  // Re-roll the lobby preview to the new tier (idle only — at results the live
+  // world owns the scene; the pick still lands on the next slope at teardown).
+  if (!session) { slope = makeSlope(); window.__slope = slope; applyTrack(); }
 }
 
 // ---- field build (humans + AI fill) -------------------------------------
@@ -531,7 +584,7 @@ function teardownRun() {
   audio.stopWind();
   slope = makeSlope();
   window.__slope = slope;
-  scene.setTrack(slope, trackOpts);
+  applyTrack();
 }
 
 function returnToLobby() {
@@ -576,6 +629,7 @@ function showLobby() {
   el('pause-overlay') && el('pause-overlay').classList.add('hidden');
   const c = el('countdown'); if (c) c.textContent = '';
   document.documentElement.classList.remove('in-session');
+  renderLevel(); // keep the difficulty badge current whenever the lobby surfaces
 }
 function showRace() {
   el('lobby').classList.add('hidden');
@@ -693,7 +747,7 @@ if (params.get('test') === '1' || scenario) {
     { scenario: scenario || 'running', players: parseInt(params.get('players'), 10) || (scenario === 'tricks' ? 1 : 4), host: parseInt(params.get('host'), 10) || 0 },
     // Inject the REAL render fns so the harness previews the live DOM path rather
     // than a hand-copy (which drifts — see renderRoster/showResults).
-    { scene, slope, AiController, AI_PERSONALITIES, RunSession, renderRoster, showResults, buildReconnectCard, audio, showSoundHint }
+    { scene, slope, AiController, AI_PERSONALITIES, RunSession, renderRoster, renderLevel, showResults, buildReconnectCard, audio, showSoundHint }
   ));
 } else {
   showLobby();
@@ -735,6 +789,7 @@ initDebugMenu([
   ] },
   { key: 'players', label: 'Players', type: 'number', min: 1, max: 4, hint: 'field size in scenarios (default 4, tricks 1)' },
   { key: 'slope', label: 'Slope', type: 'select', hint: 'catalog slope — else a generated mountain', options: [['', 'generated'], ...Object.keys(SLOPES)] },
+  { key: 'level', label: 'Difficulty', type: 'select', hint: 'procedural tier — host picks live; this pins it', options: [['', `default (${DEFAULT_LEVEL})`], ...LEVELS.map((l) => [l.id, l.label])] },
   { key: 'seed', label: 'Seed', type: 'number', hint: 'pins the generated mountain (deterministic repro)' },
   { key: 'hitbox', label: 'Hitbox overlay', type: 'check', hint: 'wireframe collision footprints in the (s, lat) plane' },
 ]);

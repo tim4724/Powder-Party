@@ -30,12 +30,18 @@
   </section>
 
   <!-- Lobby — who you are (the shared display owns the roster + auto-assigns your
-       livery colour). The slope is fixed and every skier handles the same, so
-       there's nothing to pick — the host just starts. -->
+       livery colour) plus the run difficulty. Only the HOST sees the Blue/Red/Black
+       switch (the piste-grading colours) and starts; other phones don't show it (the
+       big screen shows the tier to the room). Difficulty changes only the MOUNTAIN —
+       every skier still handles the same. -->
   <section id="lobby" class="hidden">
     <div class="lobby-me">
       <span id="me-dot" class="dot"></span>
       <span id="me-name" class="lobby-me__name"></span>
+    </div>
+    <div id="level-select" class="level-select hidden" role="group" aria-label="Run difficulty">
+      <span class="level-select__cap">Difficulty</span>
+      <div id="level-seg" class="level-seg"></div>
     </div>
     <button id="start-btn" class="btn btn--brand hidden">Start run</button>
     <div id="wait-host" class="hidden">Waiting for the host to start…</div>

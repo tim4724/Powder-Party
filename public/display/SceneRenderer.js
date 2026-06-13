@@ -201,7 +201,7 @@ export class SceneRenderer {
     // breakable edge poles, then the props — all collidable footprints match
     // what the engine resolves from the same track data.
     addTerrain(this.slopeGroup, extendMeshSamples(samples), pisteHalf, edgeLat, groundY);
-    this.poles = new PoleField(this.slopeGroup, samples, pisteHalf, track.centerline, track.length, this._hitboxDebug);
+    this.poles = new PoleField(this.slopeGroup, samples, pisteHalf, track.centerline, track.length, this._hitboxDebug, opts.poleColor);
     this.poles.onHit = (kick) => { if (this.onPoleHit) this.onPoleHit(kick); };
 
     const cl = track.centerline;

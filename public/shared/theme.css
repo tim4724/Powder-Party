@@ -241,6 +241,31 @@ body {
   flex: none;
 }
 
+/* Difficulty switch — the Blue/Red/Black piste-grade segments, shared by the
+   host's phone (controller) and the big screen (display) so the control looks
+   identical on both. The active segment fills with its tier colour via the inline
+   --level-color (set from LEVELS). Pages own the wrapper's outer spacing/scale;
+   build + paint live in /shared/levelSeg.js. */
+.level-select { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
+.level-select__cap { color: var(--ink-3); font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; font-size: 0.8rem; }
+.level-seg {
+  display: inline-flex; gap: 0.4rem; padding: 0.35rem;
+  background: var(--surface-2); border: 2px solid var(--hairline); border-radius: var(--r-pill);
+}
+.level-seg__btn {
+  --level-color: var(--ink-2);
+  appearance: none; border: none; cursor: pointer;
+  font-family: var(--font-display); font-weight: 700; font-size: 1.05rem; color: var(--ink-2);
+  background: transparent; border-radius: var(--r-pill);
+  padding: 0.5rem 1.2rem; line-height: 1; transition: transform 0.04s ease;
+}
+.level-seg__btn.is-active {
+  color: #fff; background: var(--level-color);
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--level-color) 62%, #000);
+}
+.level-seg__btn:not(:disabled):active { transform: translateY(2px); }
+.level-seg__btn:disabled { cursor: default; }
+
 /* Car thumbnail (see /shared/carThumbs.js) — a square box showing a pre-baked
    render. The container sizes it (width:100%); aspect-ratio reserves the box
    before images load so nothing below jumps. In spin mode an overlay sprites

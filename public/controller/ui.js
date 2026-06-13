@@ -1,5 +1,6 @@
 // Small controller-UI helpers shared by the live phone (main.js) and the gallery
 // preview (TestHarness.js) so the two can't drift. No globals, no relay — pure DOM.
+import { buildLevelSeg as buildSeg, paintLevelSeg } from '../shared/levelSeg.js';
 
 // Latency chip (bottom-right). halfMs is one-way (RTT/2); halfMs < 0 means the
 // PONG is overdue (no signal). viaFastlane lights the bolt when the reading came
@@ -62,6 +63,20 @@ export function renderResultsBoard(rows, { over, isHost, host }, colors) {
     wait.classList.remove('hidden');
     renderWaitNote(wait, host || {}, ' to start the next run…');
   }
+}
+
+// Difficulty selector (Blue/Red/Black piste grades) — the shared widget (build +
+// paint) lives in ../shared/levelSeg.js so the controller and the display can't
+// drift. The pick is HOST-ONLY on the phone: only the host sees the switch (live);
+// every other phone hides it entirely (the big screen shows the tier to the room).
+// `onPick(id)` is the host's tap handler (omitted in static previews).
+export function buildLevelSeg(levels, onPick) {
+  buildSeg(document.getElementById('level-seg'), levels, onPick);
+}
+export function renderLevelSeg(level, isHost) {
+  paintLevelSeg(document.getElementById('level-seg'), level, false); // host-only → always live
+  const wrap = document.getElementById('level-select');
+  if (wrap) wrap.classList.toggle('hidden', !isHost); // non-hosts don't see difficulty at all
 }
 
 // "Waiting for NAME<suffix>" — NAME is the host, tinted in their livery colour

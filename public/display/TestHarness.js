@@ -73,7 +73,7 @@ function keyboardDriver() {
 }
 
 export function runDisplayScenario(cfg, ctx) {
-  const { scene, slope, AiController, AI_PERSONALITIES, RunSession, renderRoster, showResults, buildReconnectCard, audio, showSoundHint } = ctx;
+  const { scene, slope, AiController, AI_PERSONALITIES, RunSession, renderRoster, renderLevel, showResults, buildReconnectCard, audio, showSoundHint } = ctx;
 
   const N = Math.max(1, Math.min(4, cfg.players || 4));
   const scn = cfg.scenario || 'running';
@@ -129,6 +129,7 @@ export function runDisplayScenario(cfg, ctx) {
     // Share the REAL roster render — pads open seats, applies the live count copy,
     // escapes names. First skier is host (matches the live "first to join" rule).
     renderRoster(field, field[0] && field[0].peerIndex);
+    renderLevel && renderLevel(); // mirror the difficulty badge (?level= pins the tier)
     return;
   }
 

@@ -5,11 +5,12 @@
 import { ControllerNet } from './Net.js';
 import { TiltInput } from './TiltInput.js';
 import { SwipeInput } from './SwipeInput.js';
-import { applyLatencyChip, renderWaitNote, renderResultsBoard } from './ui.js';
+import { applyLatencyChip, renderWaitNote, renderResultsBoard, buildLevelSeg, renderLevelSeg } from './ui.js';
 import { keepScreenOn, letScreenSleep } from '../shared/WakeLock.js';
 
-const { MSG, RUN_STATE_MSGS, RELAY_ERRORS, ROOM_STATE, SKIER_COLORS } = window;
+const { MSG, RUN_STATE_MSGS, RELAY_ERRORS, ROOM_STATE, SKIER_COLORS, LEVELS, DEFAULT_LEVEL } = window;
 const el = (id) => document.getElementById(id);
+const isLevel = (id) => LEVELS.some((l) => l.id === id);
 
 const screens = { name: el('name'), lobby: el('lobby'), waiting: el('waiting'), game: el('game'), results: el('results') };
 // Screen "depth": name is the entry point (0); every in-room screen sits one
@@ -44,6 +45,7 @@ let roster = [];           // latest lobby roster (for the host name in the wait
 let hostPeerIndex = null;
 let inResults = false;     // showing the results overlay (my skier finished / run over)
 let waitingForRun = false; // late joiner: a run is on WITHOUT us — parked on #waiting until it ends
+let currentLevel = DEFAULT_LEVEL; // room's run difficulty (Blue/Red/Black); host picks, display is authoritative
 
 const NAME_KEY = 'powder_name';
 const storedName = () => { try { return localStorage.getItem(NAME_KEY) || ''; } catch (_) { return ''; } };
@@ -190,6 +192,7 @@ function handleMessage(data) {
       roster = data.players || [];
       hostPeerIndex = data.hostPeerIndex;
       amHost = net.isHost(data.hostPeerIndex);
+      currentLevel = isLevel(data.level) ? data.level : DEFAULT_LEVEL; // land the selector on the room's tier (older display omits it → default)
       const me = roster.find((p) => p.peerIndex === net.peerIndex);
       if (me && me.name) myName = me.name;
       renderLobby();
@@ -255,6 +258,14 @@ function handleMessage(data) {
       renderLobby();
       break;
     }
+    case MSG.LEVEL_UPDATE:
+      // Room difficulty changed (host's phone or the big screen). Cache it and
+      // repaint: only the host's phone shows the switch, so this is a no-op paint
+      // for everyone else — but they keep currentLevel so a later host promotion
+      // lands on the right tier. Not gated by waitingForRun: it's room config, like
+      // LOBBY_UPDATE, so a late joiner's lobby stays in sync.
+      if (isLevel(data.level)) { currentLevel = data.level; renderLevelSeg(currentLevel, amHost); }
+      break;
     case MSG.COUNTDOWN:
       inResults = false;               // a fresh run clears any leftover results overlay
       show('game');
@@ -362,16 +373,31 @@ function applyLivery() {
   document.documentElement.style.setProperty('--car', c);
 }
 
-// Lobby — just your identity (the shared display owns the roster + auto-assigns
-// your livery colour) plus the host's Start button (the slope is fixed — every
-// skier handles the same, so there's nothing to pick).
+// Lobby — your identity (the shared display owns the roster + auto-assigns your
+// livery colour), the run-difficulty selector, and the host's Start button.
 function renderLobby() {
   el('me-name').textContent = myName || 'Skier'; // who you are, up top (livery dot is var(--car))
+  renderLevelSeg(currentLevel, amHost);
   el('start-btn').classList.toggle('hidden', !amHost);
   const waitEl = el('wait-host');
   waitEl.classList.toggle('hidden', amHost);
   if (!amHost) renderWaitHost(waitEl);
 }
+
+// Difficulty selector — Blue/Red/Black segments (build + paint live in ui.js so
+// the gallery preview can't drift). The HOST taps to pick (optimistic highlight;
+// the display echoes LEVEL_UPDATE to confirm + sync the room); only the host's
+// phone shows the switch — other phones hide it (the big screen shows the tier to
+// the room). A tier changes only the mountain — see SET_LEVEL on the display +
+// generateSlope.
+function pickLevel(level) {
+  if (!amHost || level === currentLevel || !isLevel(level)) return;
+  buzz(15);
+  currentLevel = level;   // optimistic — the display's LEVEL_UPDATE confirms it
+  renderLevelSeg(currentLevel, amHost);
+  net.send(MSG.SET_LEVEL, { level });
+}
+buildLevelSeg(LEVELS, pickLevel);
 
 function renderWaitHost(waitEl) {
   const host = roster.find((p) => p.peerIndex === hostPeerIndex);

@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { hitSL, SKI_HALF } from './engine/SkiEngine.js';
 import { debugCircle } from './SlopeScenery.js';
 
-const POLE_R = 0.06;        // the pole's footprint = its cylinder radius
+const POLE_R = 0.08;        // the pole's footprint = its cylinder radius
 const CAP_OFFS = [-SKI_HALF, 0, SKI_HALF]; // the engine's capsule sampling, mirrored for the pole test
 const POLE_FWD = 0.75;      // fraction of skier speed the pole carries down-slope
 const POLE_OUT = 3.0;       // outward knock (u/s) at POLE_REF_V — clears the piste into the powder
@@ -20,6 +20,8 @@ const POLE_REF_V = 14;      // impact speed (u/s) giving the nominal knock — ~
 const POLE_KICK_MIN = 0.35; // a slow brush still snaps the pole off, it just flops nearby
 const POLE_KICK_MAX = 1.4;  // full-tuck schuss sends it flying — capped so it stays in view
 const POLE_SINK = 0.3;      // nose-down pitch of the landed pole (tip ends under the snow)
+const POLE_H = 1.1;         // pole height (the flight code's 0.55 re-centre is POLE_H/2)
+const POLE_DEFAULT = 0xeff3f7; // no grade colour supplied → a neutral pale pole
 
 const _up = new THREE.Vector3(0, 1, 0);
 
@@ -30,7 +32,7 @@ export class PoleField {
   // piste are the strongest in-frame steepness cue the chase cam gets. The 0.05
   // base embed covers the downhill-edge gap a vertical pole leaves on the
   // steepest pitch.
-  constructor(group, samples, pisteHalf, centerline, length, hitboxDebug) {
+  constructor(group, samples, pisteHalf, centerline, length, hitboxDebug, poleColor) {
     this.onHit = null;             // (kick 0.35..1.4) — impact-speed scale for SFX
     this._pisteHalf = pisteHalf;
     this._cl = centerline;
@@ -40,10 +42,14 @@ export class PoleField {
     this._kick = new THREE.Vector3(); // scratch
     this._off = new THREE.Vector3();
 
-    const poleGeo = new THREE.CylinderGeometry(0.06, 0.06, 1.1, 6);
-    poleGeo.translate(0, 0.55, 0); // origin at the base (flight code re-centres tumbles)
-    const blue = new THREE.MeshStandardMaterial({ color: 0x2d9cdb });
-    const red = new THREE.MeshStandardMaterial({ color: 0xe6492d });
+    // One shared geometry + one shared material for the whole field — every pole is
+    // SOLID-coloured to the run's grade, so the difficulty reads at a glance from
+    // anywhere on the slope (a cap band was too small to catch at speed). The
+    // alternating SIDES below are just placement (both piste edges marked), not a
+    // colour. No grade colour supplied → a neutral pale pole.
+    const poleGeo = new THREE.CylinderGeometry(POLE_R, POLE_R, POLE_H, 6, 8);
+    poleGeo.translate(0, POLE_H / 2, 0); // origin at the base (flight code re-centres tumbles)
+    const poleMat = new THREE.MeshStandardMaterial({ color: poleColor || POLE_DEFAULT });
     const n = samples.length;
     for (let i = 2; i < n - 2; i += 5) {
       const s = samples[i];
@@ -51,7 +57,7 @@ export class PoleField {
       const ex = s.pos.x + s.lateral.x * pisteHalf * side;
       const ey = s.pos.y + s.lateral.y * pisteHalf * side;
       const ez = s.pos.z + s.lateral.z * pisteHalf * side;
-      const pole = new THREE.Mesh(poleGeo, side > 0 ? red : blue);
+      const pole = new THREE.Mesh(poleGeo, poleMat);
       pole.position.set(ex, ey - 0.05, ez); // base-origin geo: -0.05 = the embed
       group.add(pole);
       const p = {

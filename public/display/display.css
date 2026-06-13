@@ -45,6 +45,13 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #cfeaf8; }
 .seat__host { font-size: 0.7rem; font-weight: 800; letter-spacing: 0.08em; color: #fff; background: var(--brand); border-radius: var(--r-pill); padding: 0.15rem 0.6rem; }
 .seat__skier { font-size: 0.85rem; color: var(--ink-3); font-weight: 700; }
 
+/* Difficulty switch — the SAME shared Blue/Red/Black widget as the host's phone
+   (theme.css), laid out left-aligned in the lobby card below the roster and bumped
+   up a touch for the big screen. Live here too — the display is authoritative. */
+.lobby__level { align-items: flex-start; gap: 0.55rem; margin-top: 1.3rem; }
+.lobby__level .level-select__cap { font-size: 0.95rem; letter-spacing: 0.05em; }
+.lobby__level .level-seg__btn { font-size: 1.2rem; padding: 0.55rem 1.5rem; }
+
 .lobby__qr { flex: none; }
 .qr-card { background: #fff; padding: 1.2rem; border-radius: var(--r-lg); box-shadow: var(--shadow-float); }
 .qr-card canvas { display: block; width: clamp(220px, 26vw, 420px); height: auto; image-rendering: pixelated; }

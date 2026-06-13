@@ -133,21 +133,64 @@ const RUNOUT = 32;   // flattening straight reserved for the finish
 const YAW_CAP = 75;  // cap cumulative heading (deg) so the run never spirals back
                      // on itself — keeps the valley/walls/forest reading as one face
 
-// generateSlope(seed) → a slope `def` (same shape as the entries in SLOPES).
-// Bounded & fair: a believable blue/red descent — monotonic pitch in a sane
-// band, smooth alternating switchback turns (never uphill, never a spiral), a
-// clean launch + a flattening runout, kickers on the steep straights, and a
-// spaced obstacle field that leaves the start/finish clear.
+// ---- Difficulty tiers -----------------------------------------------------
+// Blue / Red / Black — the piste-grading colours. A tier tunes ONLY the
+// procedural mountain (geometry + obstacle/jump density), never the physics or
+// the AI — every skier still handles identically, the difficulty is the hill.
+// `blue` is the DEFAULT — the gentlest cruise (wider / sparser / fewer kickers).
+// `red` keeps the ORIGINAL pre-difficulty numbers (unchanged), so it doubles as
+// the historical baseline; `black` = steeper / narrower / a denser minefield with
+// more kickers. Knobs (all bands are [min, max] fed to rng):
+//   launchPitch  start straight pitch · launchLen its length
+//   pitch        normal descent band [floor, cap] · steepCap occasional schuss ceiling
+//   step         ± pitch random-walk per piece
+//   turn         carve magnitude · sweepChance same-direction-repeat odds
+//   carveLen / straightLen   piece-length bands
+//   steepChance / steepBoost   odds + extra pitch of a steep tuck schuss
+//   width        piste width · obstacles count · obsLat max |lateral| placement
+//   ramps        base kicker count (a coin-flip adds one more)
+export const DEFAULT_LEVEL = 'blue';
+export const LEVELS = ['blue', 'red', 'black'];
+const LEVEL_TUNING = {
+  blue: {
+    launchPitch: [14, 18], launchLen: [28, 34], pitch: [14, 22], steepCap: 25, step: 3,
+    turn: [26, 44], sweepChance: 0.25, carveLen: [30, 40], straightLen: [30, 44],
+    steepChance: 0.2, steepBoost: [1, 3], width: [12, 14],
+    obstacles: [3, 5], obsLat: 2.6, ramps: 1,
+  },
+  red: {
+    launchPitch: [17, 21], launchLen: [28, 34], pitch: [17, 30], steepCap: 32, step: 4,
+    turn: [36, 58], sweepChance: 0.25, carveLen: [30, 40], straightLen: [28, 42],
+    steepChance: 0.3, steepBoost: [2, 4], width: [10, 12],
+    obstacles: [6, 10], obsLat: 3.2, ramps: 2,
+  },
+  black: {
+    launchPitch: [20, 24], launchLen: [28, 34], pitch: [24, 32], steepCap: 32, step: 5,
+    turn: [44, 60], sweepChance: 0.3, carveLen: [30, 40], straightLen: [28, 42],
+    steepChance: 0.4, steepBoost: [2, 5], width: [8.5, 10],
+    obstacles: [10, 13], obsLat: 3.7, ramps: 3,
+  },
+};
+
+// generateSlope(seed, { level, targetLength }) → a slope `def` (same shape as the
+// entries in SLOPES). Bounded & fair: a believable descent — monotonic pitch in a
+// sane band, smooth alternating switchback turns (never uphill, never a spiral), a
+// clean launch + a flattening runout, kickers on the steep straights, and a spaced
+// obstacle field that leaves the start/finish clear. `level` (blue/red/black, see
+// LEVEL_TUNING) tilts every band toward easier/harder; an unknown or omitted level
+// falls back to DEFAULT_LEVEL (blue, the gentlest tier).
 export function generateSlope(seed, opts = {}) {
   const rnd = mulberry32(seed >>> 0);
   const rng = (lo, hi) => lo + (hi - lo) * rnd();
+  const level = LEVEL_TUNING[opts.level] ? opts.level : DEFAULT_LEVEL;
+  const T = LEVEL_TUNING[level];
   const target = opts.targetLength || TARGET_LENGTH;
-  const width = r1(rng(10, 12));
+  const width = r1(rng(T.width[0], T.width[1]));
 
   const pieces = [];
   // 1) gentle launch straight — clean build-up (kept obstacle-free below).
-  let prevPitch = rng(17, 21);
-  pieces.push({ kind: 'straight', len: Math.round(rng(28, 34)), pitch: Math.round(prevPitch) });
+  let prevPitch = rng(T.launchPitch[0], T.launchPitch[1]);
+  pieces.push({ kind: 'straight', len: Math.round(rng(T.launchLen[0], T.launchLen[1])), pitch: Math.round(prevPitch) });
   let total = pieces[0].len;
 
   // 2) alternate carve / straight until we near the target, leaving room for the
@@ -157,23 +200,23 @@ export function generateSlope(seed, opts = {}) {
   let lastSign = rnd() < 0.5 ? 1 : -1;
   while (total < target - RUNOUT) {
     const addCarve = pieces[pieces.length - 1].kind === 'straight'; // alternate straight ↔ carve
-    let pitch = _clamp(prevPitch + rng(-4, 4), 17, 30);
+    let pitch = _clamp(prevPitch + rng(-T.step, T.step), T.pitch[0], T.pitch[1]);
     if (addCarve) {
       let sign = -lastSign;
       // occasional sweeping repeat (same direction) for variety, only if it stays
-      // clear of the yaw cap even at the MAX turn magnitude (58°)…
-      if (rnd() < 0.25 && Math.abs(psi + lastSign * 58) < YAW_CAP) sign = lastSign;
+      // clear of the yaw cap even at this tier's MAX turn magnitude…
+      if (rnd() < T.sweepChance && Math.abs(psi + lastSign * T.turn[1]) < YAW_CAP) sign = lastSign;
       // …and a hard turn-back once we drift too far off the fall line.
       if (Math.abs(psi) > YAW_CAP) sign = -Math.sign(psi) || 1;
       lastSign = sign;
-      const turn = Math.round(sign * rng(36, 58));
+      const turn = Math.round(sign * rng(T.turn[0], T.turn[1]));
       psi += turn;
-      const len = Math.round(rng(30, 40));
+      const len = Math.round(rng(T.carveLen[0], T.carveLen[1]));
       pieces.push({ kind: 'carve', len, pitch: Math.round(pitch), turn });
       total += len;
     } else {
-      if (rnd() < 0.3) pitch = _clamp(pitch + rng(2, 4), 17, 32); // occasional steep tuck schuss
-      const len = Math.round(rng(28, 42));
+      if (rnd() < T.steepChance) pitch = _clamp(pitch + rng(T.steepBoost[0], T.steepBoost[1]), T.pitch[0], T.steepCap); // occasional steep tuck schuss
+      const len = Math.round(rng(T.straightLen[0], T.straightLen[1]));
       pieces.push({ kind: 'straight', len, pitch: Math.round(pitch) });
       total += len;
     }
@@ -200,7 +243,7 @@ export function generateSlope(seed, opts = {}) {
   for (let i = cand.length - 1; i > 0; i--) { // Fisher–Yates with the seeded rng
     const j = Math.floor(rnd() * (i + 1)); const t = cand[i]; cand[i] = cand[j]; cand[j] = t;
   }
-  const rampCount = Math.min(cand.length, 2 + (rnd() < 0.5 ? 1 : 0));
+  const rampCount = Math.min(cand.length, T.ramps + (rnd() < 0.5 ? 1 : 0));
   const ramps = [];
   for (const at of cand) {
     if (ramps.length >= rampCount) break;
@@ -208,18 +251,20 @@ export function generateSlope(seed, opts = {}) {
   }
   ramps.sort((a, b) => a.at - b.at);
 
-  // obstacles: 6–10 trees/rocks spread down the run, min-spaced, clear of the
-  // launch (<0.12) / finish (>0.92) and of every ramp.
+  // obstacles: a per-tier count of trees/rocks (T.obstacles — sparser on blue,
+  // a minefield on black) spread down the run, min-spaced, clear of the launch
+  // (<0.12) / finish (>0.92) and of every ramp.
   const obstacles = [];
-  const obsTarget = 6 + Math.floor(rnd() * 5);
+  const obsTarget = T.obstacles[0] + Math.floor(rnd() * (T.obstacles[1] - T.obstacles[0] + 1));
   for (let guard = 0; obstacles.length < obsTarget && guard < 300; guard++) {
     const at = rng(0.12, 0.92);
     if (ramps.some((r) => Math.abs(r.at - at) < 0.06)) continue; // keep margin over the 0.05 test bar
 
     if (obstacles.some((o) => Math.abs(o.at - at) < 0.035)) continue;
-    obstacles.push({ at: r3(at), lat: r1(rng(-3.2, 3.2)), kind: rnd() < 0.78 ? 'tree' : 'rock' });
+    obstacles.push({ at: r3(at), lat: r1(rng(-T.obsLat, T.obsLat)), kind: rnd() < 0.78 ? 'tree' : 'rock' });
   }
   obstacles.sort((a, b) => a.at - b.at);
 
-  return { id: 'gen-' + (seed >>> 0), name: 'Random Run', chips: ['Random'], width, pieces, ramps, obstacles };
+  const label = level.charAt(0).toUpperCase() + level.slice(1); // Blue / Red / Black
+  return { id: 'gen-' + (seed >>> 0), name: label + ' Run', chips: [label], level, width, pieces, ramps, obstacles };
 }

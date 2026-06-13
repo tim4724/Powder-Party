@@ -77,6 +77,12 @@ input[type=text]:disabled { opacity: 0.6; }
    SKIER_COLORS), heavier weight so the colour reads as intentional. */
 .host-name { font-weight: 800; }
 
+/* ---- run difficulty selector (Blue/Red/Black) — controller bits ---- */
+/* The switch widget itself lives in theme.css (shared with the display). The pick
+   is host-only here: only the host's phone shows the switch (other phones hide it
+   via .hidden), so it's always live — no read-only state. */
+.level-select { margin: 0 0 1.4rem; }
+
 /* ---- late join: run in progress ---- */
 /* Same sparse centred layout as the lobby — your identity, a live "run in
    progress" pill, and the one thing to know: the next run includes you. */

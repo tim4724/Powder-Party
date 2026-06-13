@@ -4,7 +4,7 @@
 // livery and lay out the requested screen from fake data.
 //
 // Pure DOM: the controller has no 3D scene, so nothing async to await.
-import { applyLatencyChip, renderWaitNote, renderResultsBoard } from './ui.js';
+import { applyLatencyChip, renderWaitNote, renderResultsBoard, buildLevelSeg, renderLevelSeg } from './ui.js';
 
 const FAKE_NAMES = ['Mia', 'Theo', 'Ava', 'Leo', 'Zoe', 'Max', 'Ivy', 'Sam'];
 
@@ -12,6 +12,7 @@ const el = (id) => document.getElementById(id);
 
 export function runControllerScenario(opts) {
   const COLORS = window.SKIER_COLORS || ['#2bb673'];
+  const LEVELS = window.LEVELS || [];
   const scenario = opts.scenario;
   const color = Math.max(0, Math.min(opts.color || 0, COLORS.length - 1));
 
@@ -84,6 +85,9 @@ export function runControllerScenario(opts) {
       el('me-name').textContent = FAKE_NAMES[color];
       el('start-btn').classList.remove('hidden');     // the host can start any time (fixed slope)
       el('wait-host').classList.add('hidden');
+      // Host owns the difficulty pick — live segments, default tier highlighted.
+      buildLevelSeg(LEVELS, null);
+      renderLevelSeg(window.DEFAULT_LEVEL, true);
       break;
 
     case 'lobby-waiting': {
@@ -96,6 +100,9 @@ export function runControllerScenario(opts) {
       // the tinted name treatment, mirroring main.js renderWaitHost.
       const hostColor = (color + 1) % COLORS.length;
       renderWaitNote(waitEl, { name: FAKE_NAMES[hostColor], color: COLORS[hostColor] }, ' to start…');
+      // A non-host doesn't see the difficulty — only the host picks (the big
+      // screen shows the tier to the room).
+      el('level-select').classList.add('hidden');
       break;
     }
 

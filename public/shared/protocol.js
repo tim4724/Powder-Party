@@ -38,6 +38,7 @@ var MSG = {
   //                       action per CHANGE, so a dropped fastlane frame re-delivers.
   CONTROL: 'control',
   START_GAME: 'start_game',           // host only
+  SET_LEVEL: 'set_level',             // {level} host picks the run difficulty (Blue/Red/Black) in the lobby — display validates + echoes LEVEL_UPDATE
   RETURN_TO_LOBBY: 'return_to_lobby', // "New run" — abort back to the lobby (host)
   PAUSE_GAME: 'pause_game',           // request a pause (any player, mid-countdown/run)
   RESUME_GAME: 'resume_game',         // request resume from the pause overlay
@@ -45,7 +46,8 @@ var MSG = {
   PING: 'ping',
 
   // Display -> specific controller
-  WELCOME: 'welcome',                 // {peerIndex, colorIndex, hostPeerIndex, roomState, players, inRun, standings?, paused?}
+  WELCOME: 'welcome',                 // {peerIndex, colorIndex, hostPeerIndex, roomState, players, inRun, level, standings?, paused?}
+                                      // level = the room's current run difficulty (Blue/Red/Black) so a joiner's lobby selector lands on the right tier (a MISSING level reads as DEFAULT_LEVEL).
                                       // inRun=false mid-run = no live skier (late joiner / expired seat) — the phone
                                       // parks on its "run in progress" screen; a MISSING flag reads as true (an older
                                       // display that never stamps it must not strand its rejoiners off the pad).
@@ -58,6 +60,7 @@ var MSG = {
   PONG: 'pong',
 
   // Display -> all controllers (broadcast)
+  LEVEL_UPDATE: 'level_update',       // {level} authoritative run difficulty changed (host picked) — phones repaint the selector. NOT a RUN_STATE msg: a parked late joiner still gets it (it's room config, like LOBBY_UPDATE). Joiners also read the current level off WELCOME.
   COUNTDOWN: 'countdown',             // {n} 3..2..1..GO
   GAME_START: 'game_start',
   STANDINGS: 'standings',             // {over, hostPeerIndex, total, order:[{playerId,name,colorIndex,ai,finished,time}]}
@@ -112,6 +115,20 @@ var ROOM_STATE = {
 var MAX_PLAYERS = 4;
 var COUNTDOWN_SECONDS = 3;
 
+// Run difficulty tiers (the piste-grading colours), host-selectable in the lobby.
+// A tier only changes the procedural MOUNTAIN — slope shape + obstacle/jump
+// density (see LEVEL_TUNING in shared/slopes.js) — never the physics or the AI.
+// id+label drive the controller's selector; color tints the active segment (it
+// mirrors the matching SKIER_COLORS / theme livery). The ORDER is easy→hard. The
+// tier ids must stay in sync with LEVEL_TUNING in slopes.js (that file is THREE-
+// and protocol-free for the Node tests, so the list lives in both by hand).
+var LEVELS = [
+  { id: 'blue',  label: 'Blue',  color: '#2d9cdb' },  // gentle, wide, sparse — a cruiser (the DEFAULT)
+  { id: 'red',   label: 'Red',   color: '#e6492d' },  // steeper, narrower (the original mountain)
+  { id: 'black', label: 'Black', color: '#26313f' },  // steep, narrow, a denser minefield
+];
+var DEFAULT_LEVEL = 'blue';
+
 // Skier-suit livery palette, indexed by the dense color slot
 // RoomFlow.lowestFreeSlot hands out. Both sides resolve colorIndex → hex. This
 // is the only thing that distinguishes players (every skier handles the same).
@@ -132,6 +149,6 @@ if (typeof module !== 'undefined' && module.exports) {
     MSG, FASTLANE_TYPES, RUN_STATE_MSGS, RELAY_ERRORS, ROOM_STATE,
     RELAY_URL, STUN_URL,
     MAX_PLAYERS, COUNTDOWN_SECONDS,
-    SKIER_COLORS
+    SKIER_COLORS, LEVELS, DEFAULT_LEVEL
   };
 }
