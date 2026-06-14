@@ -73,7 +73,9 @@ function keyboardDriver() {
 }
 
 export function runDisplayScenario(cfg, ctx) {
-  const { scene, slope, AiController, AI_PERSONALITIES, RunSession, renderRoster, renderLevel, showResults, buildReconnectCard, audio, showSoundHint } = ctx;
+  const { scene, AiController, AI_PERSONALITIES, RunSession, renderRoster, renderLevel, showResults, buildReconnectCard, audio, showSoundHint, rerollSlope } = ctx;
+  // `let` so solo's "Play again" can re-point it at a freshly rolled mountain.
+  let slope = ctx.slope;
 
   const N = Math.max(1, Math.min(4, cfg.players || 4));
   const scn = cfg.scenario || 'running';
@@ -200,12 +202,14 @@ export function runDisplayScenario(cfg, ctx) {
     return s;
   }
   // `solo` replay: rather than auto-looping like the other run previews, the results
-  // board holds (shown above) until the player skis the SAME mountain again — ENTER or
-  // the board's "Play again". (No lobby in solo, so "New game" is hidden.) Pass
-  // &seed=N for a different mountain.
+  // board holds (shown above) until the player skis again — ENTER or the board's
+  // "Play again". Each rematch rolls a FRESH mountain at the same difficulty (live
+  // play does the same), unless &seed=N pins one for repro. (No lobby in solo, so
+  // "New game" is hidden.)
   function restartSolo() {
     el('results') && el('results').classList.add('hidden');
     session.dispose();
+    if (rerollSlope) slope = rerollSlope(); // new hill, same grade (setTrack keeps the skier meshes)
     scene.clearTrails();
     session = newSession();
     seedField(session);

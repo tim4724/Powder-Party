@@ -41,7 +41,10 @@ let currentLevel = isLevel(params.get('level')) ? params.get('level') : DEFAULT_
 // tests) → a fixed seed in test mode (stable gallery + snapshots) → a fresh
 // random seed (live play, a new mountain every run). Generated slopes carry the
 // current difficulty tier; the catalog/lab slopes are fixed by their own data.
-function makeSlope() {
+// `reroll` is a "Play again" build: it skips test mode's seed-1 pin (so a solo
+// rematch is a NEW mountain, not the same one) while still honouring an explicit
+// `?seed=` — a deliberately pinned mountain replays identically for repro.
+function makeSlope({ reroll = false } = {}) {
   const id = params.get('slope');
   if (id && SLOPES[id]) return buildSlopeById(id);
   if (params.get('scenario') === 'tricks') return buildSlopeById('trick-lab');
@@ -53,7 +56,7 @@ function makeSlope() {
     if (Number.isNaN(n)) console.warn(`[powder] non-numeric ?seed=${seedParam} — using seed 0`);
     return buildGeneratedSlope(n >>> 0, opts);
   }
-  if (testMode) return buildGeneratedSlope(1, opts);
+  if (testMode && !reroll) return buildGeneratedSlope(1, opts);
   return buildGeneratedSlope((Math.random() * 0xffffffff) >>> 0, opts);
 }
 let slope = makeSlope();
@@ -96,6 +99,18 @@ const applyTrack = () => scene.setTrack(slope, {
   poleColor: levelColor((slope.def && slope.def.level) || currentLevel),
 });
 applyTrack();
+
+// Roll a FRESH slope at the current grade and rebuild the track for it — what
+// "Play again" pulls. Returns the new built slope so a caller holding its own
+// reference (the solo harness) can re-point it. Live play already re-rolls via
+// makeSlope(); the `reroll` flag also breaks test mode's seed-1 pin so a solo
+// rematch is a new mountain at the same difficulty, never the same hill twice.
+function rerollSlope() {
+  slope = makeSlope({ reroll: true });
+  window.__slope = slope;
+  applyTrack();
+  return slope;
+}
 scene.start();
 
 // ---- run state -----------------------------------------------------------
@@ -747,7 +762,7 @@ if (params.get('test') === '1' || scenario) {
     { scenario: scenario || 'running', players: parseInt(params.get('players'), 10) || (scenario === 'tricks' ? 1 : 4), host: parseInt(params.get('host'), 10) || 0, cam: params.get('cam') },
     // Inject the REAL render fns so the harness previews the live DOM path rather
     // than a hand-copy (which drifts — see renderRoster/showResults).
-    { scene, slope, AiController, AI_PERSONALITIES, RunSession, renderRoster, renderLevel, showResults, buildReconnectCard, audio, showSoundHint }
+    { scene, slope, AiController, AI_PERSONALITIES, RunSession, renderRoster, renderLevel, showResults, buildReconnectCard, audio, showSoundHint, rerollSlope }
   ));
 } else {
   showLobby();

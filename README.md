@@ -75,8 +75,9 @@ player-facing surface; use the gallery or the URLs below to preview its screens.
 - `/?scenario=solo` — **play single player on the big screen, no phone**: a real race down a
   generated mountain against a CPU field, you in a full-screen chase cell. Keyboard: A/D carve ·
   hold S brake · Q spin-left · W front flip · E spin-right · Space back flip (Z/C corks). The
-  finish holds the results board — Enter (or "Play again") skis it again. `&players=N` sizes the
-  field (default you + 3 CPU), `&seed=N` picks the mountain.
+  finish holds the results board — Enter (or "Play again") skis a FRESH mountain at the same
+  difficulty. `&players=N` sizes the field (default you + 3 CPU), `&seed=N` pins one mountain
+  (every rematch replays it, for repro) and `&level=blue|red|black` sets the grade.
 - `/?test=1&scenario=countdown` · `…&scenario=paused`
 - `/?test=1&scenario=device-choice&bail=game_ended` — the chooser a phone gets when it lands on
   this big-screen page (shared link, or a controller bailing out of a dead end with `?bail=…`;
