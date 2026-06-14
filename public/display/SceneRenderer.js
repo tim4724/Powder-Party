@@ -15,7 +15,7 @@ import { SKI_HALF } from './engine/SkiEngine.js';
 import { PoleField } from './PoleField.js';
 import {
   extendMeshSamples, addTerrain, addPeaks, addForests,
-  addRamp, addObstacle, addBanner, debugSkierCapsule,
+  addRamp, addObstacle, addStartLine, addFinishGate, debugSkierCapsule,
 } from './SlopeScenery.js';
 
 // ---- camera + feel constants (starting values) --------------------------
@@ -225,8 +225,8 @@ export class SceneRenderer {
     const cl = track.centerline;
     for (const r of (track.ramps || [])) addRamp(this.propGroup, cl, r, this._hitboxDebug);
     for (const o of (track.obstacles || [])) addObstacle(this.propGroup, cl, o, this._hitboxDebug);
-    addBanner(this.propGroup, cl, 0.2, 0x2bb673);                 // start
-    addBanner(this.propGroup, cl, track.length - 0.2, 0xf2b134);  // finish
+    addStartLine(this.propGroup, cl, 1, pisteHalf);                   // start: snow line at the held skiers' ski tips (spawn s≈0, tips ~0.9u)
+    addFinishGate(this.propGroup, cl, track.length - 0.2, pisteHalf); // finish: checkered gate at the piste edge
 
     // Overview framing for the lobby turntable + size the shadow camera.
     const box = new THREE.Box3();

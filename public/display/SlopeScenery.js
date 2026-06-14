@@ -354,24 +354,93 @@ export function addObstacle(group, cl, o, hitboxDebug) {
   }
 }
 
-export function addBanner(group, cl, s, color) {
+// A grey-tinted band of snow ACROSS the piste (start marker). An overhead gate
+// was unreadable in split-screen — a flat surface marking is clear from the low
+// chase cam without any 3D clutter. Built the SAME way as the snow ribbon: a
+// strip stitched from centerline cross-sections (each edge placed off its own
+// frame), so it hugs the slope exactly — following the pitch instead of floating
+// as one rigid quad. computeVertexNormals makes it light identically to the
+// piste, so it reads as tinted snow, not a panel. transparent + depthWrite:false
+// makes it a decal the (opaque) skiers always render on top of.
+export function addStartLine(group, cl, s, halfW) {
+  const DEPTH = 0.7;   // down-slope width of the band
+  const N = 4;         // cross-sections spanning the depth → conforms to the local pitch
+  const LIFT = 0.02;   // along the local normal, to clear z-fighting with the piste
+  const pos = new Float32Array((N + 1) * 2 * 3);
+  for (let i = 0; i <= N; i++) {
+    const si = Math.max(0, Math.min(cl.length, s - DEPTH / 2 + (DEPTH * i) / N));
+    const f = cl.sampleAt(si);
+    const lx = f.lateral.x, ly = f.lateral.y, lz = f.lateral.z;
+    const ox = f.up.x * LIFT, oy = f.up.y * LIFT, oz = f.up.z * LIFT;
+    const a = i * 6;
+    pos[a]     = f.pos.x - lx * halfW + ox; pos[a + 1] = f.pos.y - ly * halfW + oy; pos[a + 2] = f.pos.z - lz * halfW + oz;
+    pos[a + 3] = f.pos.x + lx * halfW + ox; pos[a + 4] = f.pos.y + ly * halfW + oy; pos[a + 5] = f.pos.z + lz * halfW + oz;
+  }
+  const idx = [];
+  for (let i = 0; i < N; i++) { const p = i * 2; idx.push(p, p + 1, p + 2, p + 1, p + 3, p + 2); }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  const line = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
+    color: 0x6b7079, roughness: 0.9, metalness: 0, side: THREE.DoubleSide,
+    transparent: true, opacity: 0.5, depthWrite: false,
+  }));
+  line.receiveShadow = true;
+  group.add(line);
+}
+
+// A black/white checkerboard, baked square (`cols`×`rows` cells) so it stays
+// crisp up close and mip-averages cleanly at distance. Cached per cols×rows and
+// reused across every setTrack — _disposeGroup frees geometries/materials but
+// not textures, so a fresh one each rebuild would leak; one shared tiny texture
+// (like the blob sprite) is the intended pattern.
+const _checkerCache = new Map();
+function checkerTexture(cols, rows) {
+  const key = cols + 'x' + rows;
+  const cached = _checkerCache.get(key);
+  if (cached) return cached;
+  const cell = 8;
+  const c = document.createElement('canvas');
+  c.width = cols * cell; c.height = rows * cell;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#f4f7fb'; ctx.fillRect(0, 0, c.width, c.height);
+  ctx.fillStyle = '#15181e';
+  for (let y = 0; y < rows; y++)
+    for (let x = 0; x < cols; x++)
+      if ((x + y) & 1) ctx.fillRect(x * cell, y * cell, cell, cell);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  _checkerCache.set(key, tex);
+  return tex;
+}
+
+// The finish gate: charcoal posts at the OUTER piste edge (±halfW, where the
+// slalom poles stand) under a checkered-flag banner — the universal finish cue.
+export function addFinishGate(group, cl, s, halfW) {
   const f = cl.sampleAt(Math.max(0, Math.min(cl.length, s)));
   const lateral = f.lateral.clone().normalize();
   const up = f.up.clone().normalize();
-  const halfW = 5.2;
-  const poleGeo = new THREE.CylinderGeometry(0.12, 0.12, 3.2, 8);
-  const mat = new THREE.MeshStandardMaterial({ color });
+  const tangent = f.tangent.clone().normalize();
+  const H = 3.4; // post height
+  const frameMat = new THREE.MeshStandardMaterial({ color: 0x161922, roughness: 0.6 });
+  const poleGeo = new THREE.CylinderGeometry(0.13, 0.13, H, 8);
   for (const side of [-1, 1]) {
-    const pole = new THREE.Mesh(poleGeo, mat);
-    pole.position.copy(f.pos).addScaledVector(lateral, side * halfW).addScaledVector(up, 1.6);
+    const pole = new THREE.Mesh(poleGeo, frameMat);
+    pole.position.copy(f.pos).addScaledVector(lateral, side * halfW).addScaledVector(up, H / 2);
     pole.quaternion.setFromUnitVectors(_up, up);
     pole.castShadow = true;
     group.add(pole);
   }
-  const bar = new THREE.Mesh(new THREE.BoxGeometry(halfW * 2, 0.7, 0.18), mat);
-  bar.position.copy(f.pos).addScaledVector(up, 3.0);
-  const tangent = f.tangent.clone().normalize();
+  const barH = 0.9;
+  const cols = Math.max(8, Math.round((halfW * 2) / (barH / 2))); // ~square cells
+  const bar = new THREE.Mesh(
+    new THREE.PlaneGeometry(halfW * 2, barH), // a flat checkered band, not a 3D bar
+    new THREE.MeshStandardMaterial({ map: checkerTexture(cols, 2), roughness: 0.7, side: THREE.DoubleSide }));
+  bar.position.copy(f.pos).addScaledVector(up, H - barH / 2);
   const bx = new THREE.Vector3().crossVectors(up, tangent).normalize(); // right-handed
+  // plane faces +Z → map X→cross-slope, Y→up, Z(normal)→tangent so the band stands vertical across the gate
   bar.quaternion.setFromRotationMatrix(_basis.makeBasis(bx, up, tangent));
   group.add(bar);
 }
