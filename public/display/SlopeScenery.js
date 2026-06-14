@@ -6,6 +6,7 @@
 // from setTrack.
 import * as THREE from 'three';
 import { mulberry32 } from '../shared/slopes.js';
+import { hitSL, SKI_HALF } from './engine/SkiEngine.js';
 
 const _up = new THREE.Vector3(0, 1, 0);
 const _basis = new THREE.Matrix4(); // scratch for prop orientation
@@ -354,15 +355,16 @@ export function addObstacle(group, cl, o, hitboxDebug) {
   }
 }
 
-// A grey-tinted band of snow ACROSS the piste (start marker). An overhead gate
-// was unreadable in split-screen — a flat surface marking is clear from the low
-// chase cam without any 3D clutter. Built the SAME way as the snow ribbon: a
-// strip stitched from centerline cross-sections (each edge placed off its own
-// frame), so it hugs the slope exactly — following the pitch instead of floating
-// as one rigid quad. computeVertexNormals makes it light identically to the
-// piste, so it reads as tinted snow, not a panel. transparent + depthWrite:false
-// makes it a decal the (opaque) skiers always render on top of.
-export function addStartLine(group, cl, s, halfW) {
+// A tinted band of snow ACROSS the piste — the start (grey) and finish (black)
+// markers. An overhead gate was unreadable in split-screen — a flat surface
+// marking is clear from the low chase cam without any 3D clutter. Built the SAME
+// way as the snow ribbon: a strip stitched from centerline cross-sections (each
+// edge placed off its own frame), so it hugs the slope exactly — following the
+// pitch instead of floating as one rigid quad. computeVertexNormals makes it
+// light identically to the piste, so it reads as tinted snow, not a panel.
+// transparent + depthWrite:false makes it a decal the (opaque) skiers render on
+// top of.
+export function addSnowLine(group, cl, s, halfW, color, opacity) {
   const DEPTH = 0.7;   // down-slope width of the band
   const N = 4;         // cross-sections spanning the depth → conforms to the local pitch
   const LIFT = 0.02;   // along the local normal, to clear z-fighting with the piste
@@ -383,8 +385,8 @@ export function addStartLine(group, cl, s, halfW) {
   g.setIndex(idx);
   g.computeVertexNormals();
   const line = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
-    color: 0x6b7079, roughness: 0.9, metalness: 0, side: THREE.DoubleSide,
-    transparent: true, opacity: 0.5, depthWrite: false,
+    color, roughness: 0.9, metalness: 0, side: THREE.DoubleSide,
+    transparent: true, opacity, depthWrite: false,
   }));
   line.receiveShadow = true;
   group.add(line);
@@ -416,31 +418,124 @@ function checkerTexture(cols, rows) {
   return tex;
 }
 
+const GATE_H = 3.4;        // post height
+const POST_R = 0.13;       // post footprint = cylinder radius
+const GATE_BAR_H = 0.9;    // checkered banner height
+const GATE_HIT_R = 0.25;   // post hit radius (matches the engine 'post' obstacle, so the bend tracks the crash)
+const GATE_BEND = 0.24;    // rad (~14°) — how far a clipped post bends down-slope and stays
+const GATE_BEND_RATE = 14; // 1/s ease of the bend onto its target (a quick give, then it holds)
+const _xAxis = new THREE.Vector3(1, 0, 0);
+
 // The finish gate: charcoal posts at the OUTER piste edge (±halfW, where the
 // slalom poles stand) under a checkered-flag banner — the universal finish cue.
-export function addFinishGate(group, cl, s, halfW) {
-  const f = cl.sampleAt(Math.max(0, Math.min(cl.length, s)));
-  const lateral = f.lateral.clone().normalize();
-  const up = f.up.clone().normalize();
-  const tangent = f.tangent.clone().normalize();
-  const H = 3.4; // post height
-  const frameMat = new THREE.MeshStandardMaterial({ color: 0x161922, roughness: 0.6 });
-  const poleGeo = new THREE.CylinderGeometry(0.13, 0.13, H, 8);
-  for (const side of [-1, 1]) {
-    const pole = new THREE.Mesh(poleGeo, frameMat);
-    pole.position.copy(f.pos).addScaledVector(lateral, side * halfW).addScaledVector(up, H / 2);
-    pole.quaternion.setFromUnitVectors(_up, up);
-    pole.castShadow = true;
-    group.add(pole);
+// The posts are also engine OBSTACLES (added in SlopeBuilder), so clipping one
+// wipes the skier out exactly like a tree/rock. The gate's own reaction is purely
+// cosmetic: the post that was hit BENDS down-slope and stays bent for the run
+// (its 'metal' took a knock), and the banner corner it carries sags to follow —
+// no orphaned band, no gravity-defying topple.
+//
+// Built in the slope-local frame (X cross-slope, Y up, Z down-slope): a post is a
+// base-pinned cylinder rotated about local-X to bend down-slope; the banner is a
+// plane whose two hit-side corners track that post's top. poke() reuses
+// PoleField's swept hit-test to spot WHICH post (for the bend); the crash itself
+// is the engine's job.
+export class FinishGate {
+  constructor(group, cl, s, halfW) {
+    this._s = Math.max(0, Math.min(cl.length, s));
+    this._halfW = halfW;
+    this._easing = false;  // any post still easing toward its bend target?
+
+    const f = cl.sampleAt(this._s);
+    const up = f.up.clone().normalize();
+    const tangent = f.tangent.clone().normalize();
+    const bx = new THREE.Vector3().crossVectors(up, tangent).normalize(); // local X = cross-slope (right-handed with up, tangent)
+    const g = new THREE.Group();
+    g.position.copy(f.pos);
+    g.quaternion.setFromRotationMatrix(_basis.makeBasis(bx, up, tangent));
+    group.add(g);
+
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0x161922, roughness: 0.6 });
+    const poleGeo = new THREE.CylinderGeometry(POST_R, POST_R, GATE_H, 8);
+    poleGeo.translate(0, GATE_H / 2, 0); // origin at the BASE so a bend pivots there (PoleField does the same)
+    // posts[0] = left (lat -halfW), posts[1] = right (+halfW); bend rotates about local-X
+    this._posts = [-1, 1].map((side) => {
+      const mesh = new THREE.Mesh(poleGeo, frameMat);
+      mesh.position.set(side * halfW, 0, 0);
+      mesh.castShadow = true;
+      g.add(mesh);
+      return { mesh, side, bend: 0, target: 0 };
+    });
+
+    const cols = Math.max(8, Math.round((halfW * 2) / (GATE_BAR_H / 2))); // ~square cells
+    const bar = new THREE.Mesh(
+      new THREE.PlaneGeometry(halfW * 2, GATE_BAR_H), // faces local +Z = down-slope; corners sit at the post tops
+      new THREE.MeshStandardMaterial({ map: checkerTexture(cols, 2), roughness: 0.7, side: THREE.DoubleSide }));
+    bar.position.set(0, GATE_H - GATE_BAR_H / 2, 0);
+    g.add(bar);
+    this._bar = bar; // PlaneGeometry verts: 0=top-left 1=top-right 2=bottom-left 3=bottom-right
   }
-  const barH = 0.9;
-  const cols = Math.max(8, Math.round((halfW * 2) / (barH / 2))); // ~square cells
-  const bar = new THREE.Mesh(
-    new THREE.PlaneGeometry(halfW * 2, barH), // a flat checkered band, not a 3D bar
-    new THREE.MeshStandardMaterial({ map: checkerTexture(cols, 2), roughness: 0.7, side: THREE.DoubleSide }));
-  bar.position.copy(f.pos).addScaledVector(up, H - barH / 2);
-  const bx = new THREE.Vector3().crossVectors(up, tangent).normalize(); // right-handed
-  // plane faces +Z → map X→cross-slope, Y→up, Z(normal)→tangent so the band stands vertical across the gate
-  bar.quaternion.setFromRotationMatrix(_basis.makeBasis(bx, up, tangent));
-  group.add(bar);
+
+  // Spot which post a grounded skier clipped, using PoleField's swept tail/centre/
+  // nose capsule test, and bend it. The wipeout is the engine's (the posts are
+  // 'post' obstacles); this is just the visual give. `holder` stashes the
+  // previous-frame s so a fast schuss can't step over the post between frames.
+  poke(s, holder) {
+    if (s.totalS == null) return;
+    const prev = holder._gatePokeS != null ? holder._gatePokeS : s.totalS;
+    holder._gatePokeS = s.totalS;
+    if (s.air > 0.9) return;                    // sailing over the line
+    const reach = (s.radius || 0.3) + GATE_HIT_R;
+    if (Math.abs(Math.abs(s.lat) - this._halfW) > reach + SKI_HALF) return; // not near either post
+    let halfS = Math.abs(s.totalS - prev) / 2;
+    if (halfS > 2) halfS = 0;                   // a big jump is a reset teleport, not travel
+    const mid = halfS > 0 ? (s.totalS + prev) / 2 : s.totalS;
+    const hs = Math.cos(s.heading || 0), hl = -Math.sin(s.heading || 0);
+    for (const p of this._posts) {
+      if (p.target !== 0) continue;             // already bent — leave it
+      const postLat = p.side * this._halfW;
+      for (const e of [-SKI_HALF, 0, SKI_HALF]) {
+        if (hitSL(this._s - (mid + e * hs), postLat - (s.lat + e * hl), reach, halfS)) {
+          p.target = GATE_BEND; this._easing = true; break; // bend down-slope, stays for the run
+        }
+      }
+    }
+  }
+
+  // Ease each clipped post onto its bend and drag the banner's matching corners
+  // along, so the post + banner stay attached. Costs nothing once settled.
+  update(dt) {
+    if (!this._easing) return;
+    const k = 1 - Math.exp(-GATE_BEND_RATE * dt);
+    let easing = false;
+    const pos = this._bar.geometry.attributes.position;
+    for (const p of this._posts) {
+      if (p.bend === p.target) continue;
+      p.bend += (p.target - p.bend) * k;
+      if (Math.abs(p.target - p.bend) < 1e-4) p.bend = p.target; else easing = true;
+      p.mesh.quaternion.setFromAxisAngle(_xAxis, p.bend); // base-pinned → top swings down-slope
+      // drag this post's two banner corners (top + bottom) to follow its top
+      const c = Math.cos(p.bend), sIn = Math.sin(p.bend);
+      const dy = GATE_H * (c - 1), z = GATE_H * sIn;        // top displacement from upright
+      const top = p.side > 0 ? 1 : 0, bot = p.side > 0 ? 3 : 2; // PlaneGeometry corner indices for this side
+      pos.setY(top, GATE_BAR_H / 2 + dy); pos.setZ(top, z);
+      pos.setY(bot, -GATE_BAR_H / 2 + dy); pos.setZ(bot, z);
+    }
+    pos.needsUpdate = true;
+    this._bar.geometry.computeVertexNormals();
+    this._easing = easing;
+  }
+
+  // Straighten the gate back up (called at the start of each run, with the poles).
+  reset() {
+    const pos = this._bar.geometry.attributes.position;
+    for (const p of this._posts) {
+      p.bend = 0; p.target = 0; p.mesh.quaternion.identity();
+      const top = p.side > 0 ? 1 : 0, bot = p.side > 0 ? 3 : 2;
+      pos.setY(top, GATE_BAR_H / 2); pos.setZ(top, 0);
+      pos.setY(bot, -GATE_BAR_H / 2); pos.setZ(bot, 0);
+    }
+    pos.needsUpdate = true;
+    this._bar.geometry.computeVertexNormals();
+    this._easing = false;
+  }
 }

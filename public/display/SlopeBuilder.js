@@ -112,6 +112,15 @@ export function buildSlope(def) {
   const obstacles = (def.obstacles || []).map((o) => ({
     s: o.at * length, lat: o.lat || 0, radius: o.radius || (o.kind === 'rock' ? 0.85 : 0.7), kind: o.kind || 'tree',
   }));
+  // The finish-gate posts (drawn by the renderer's FinishGate) are solid obstacles
+  // too: clipping one at the line wipes you out like a tree/rock. At the OUTER piste
+  // edge (±width/2), so only an edge-hugging line hits them. kind:'post' → the
+  // renderer skips drawing a tree here.
+  const pisteHalf = (def.width || 11) / 2;
+  obstacles.push(
+    { s: length - 0.2, lat: -pisteHalf, radius: 0.25, kind: 'post' },
+    { s: length - 0.2, lat: pisteHalf, radius: 0.25, kind: 'post' },
+  );
 
   return {
     centerline, length,

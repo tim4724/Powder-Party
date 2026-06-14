@@ -15,7 +15,7 @@ import { SKI_HALF } from './engine/SkiEngine.js';
 import { PoleField } from './PoleField.js';
 import {
   extendMeshSamples, addTerrain, addPeaks, addForests,
-  addRamp, addObstacle, addStartLine, addFinishGate, debugSkierCapsule,
+  addRamp, addObstacle, addSnowLine, FinishGate, debugSkierCapsule,
 } from './SlopeScenery.js';
 
 // ---- camera + feel constants (starting values) --------------------------
@@ -78,6 +78,7 @@ export class SceneRenderer {
     this.onFrame = null;
     this.onPoleHit = null;     // (kick 0.35..1.4) — an edge pole snapped off; impact-speed scale for SFX
     this.poles = null;         // PoleField, built per setTrack
+    this.finishGate = null;    // FinishGate (post bends when clipped), built per setTrack
     this.orbit = false;
     this.camMode = 'chase';    // 'chase' (default follow rig) | 'side' (profile rig for the labs — setCamMode)
     this._running = false;
@@ -224,9 +225,11 @@ export class SceneRenderer {
 
     const cl = track.centerline;
     for (const r of (track.ramps || [])) addRamp(this.propGroup, cl, r, this._hitboxDebug);
-    for (const o of (track.obstacles || [])) addObstacle(this.propGroup, cl, o, this._hitboxDebug);
-    addStartLine(this.propGroup, cl, 1, pisteHalf);                   // start: snow line at the held skiers' ski tips (spawn s≈0, tips ~0.9u)
-    addFinishGate(this.propGroup, cl, track.length - 0.2, pisteHalf); // finish: checkered gate at the piste edge
+    for (const o of (track.obstacles || [])) { if (o.kind === 'post') continue; addObstacle(this.propGroup, cl, o, this._hitboxDebug); } // 'post' = finish-gate posts, drawn by FinishGate below
+    addSnowLine(this.propGroup, cl, 1, pisteHalf, 0x6b7079, 0.5);                  // start: grey snow line at the held skiers' ski tips (spawn s≈0, tips ~0.9u)
+    addSnowLine(this.propGroup, cl, track.length - 0.2, pisteHalf, 0x14171d, 0.5); // finish: black snow line under the gate
+    // finish: checkered gate at the piste edge — its posts are 'post' obstacles (engine wipes you out); the clipped post bends + stays
+    this.finishGate = new FinishGate(this.propGroup, cl, track.length - 0.2, pisteHalf);
 
     // Overview framing for the lobby turntable + size the shadow camera.
     const box = new THREE.Box3();
@@ -485,6 +488,7 @@ export class SceneRenderer {
     if (this.trails) this.trails.addPoint(id, pos, c.pose.forward, c.pose.up, s.airborne);
 
     if (this.poles) this.poles.poke(s, c);
+    if (this.finishGate) this.finishGate.poke(s, c);
   }
 
   // Wipe all tracks + stand every knocked pole back up (called at the start of
@@ -492,6 +496,7 @@ export class SceneRenderer {
   clearTrails() {
     if (this.trails) this.trails.clear();
     if (this.poles) this.poles.reset();
+    if (this.finishGate) this.finishGate.reset();
   }
 
   setSkierHud(id, info) {
@@ -597,6 +602,7 @@ export class SceneRenderer {
     this._frameDt = dt;
     if (this.onFrame) this.onFrame(dt);
     if (this.poles) this.poles.update(dt); // after onFrame: same-frame response to this tick's pokes
+    if (this.finishGate) this.finishGate.update(dt);
 
     const W = window.innerWidth, H = window.innerHeight;
     const r = this.renderer;
