@@ -57,12 +57,20 @@ const AIR_TURN_MUL = 0.55;  // mid-air you can lean/steer, but with reduced auth
 
 // ---- Off-piste (deep snow) ----------------------------------------------
 // There are NO walls. Stray past the groomed piste edge and you plough into deep
-// powder: top speed collapses and you bog down fast (a real penalty for a wide
-// line). Wander a full half-slope-width past the edge and ski patrol resets you
-// back onto the piste (snapped just inside the edge, facing down, momentum lost).
-const DEEP_SNOW_SPEED = 0.34; // off-piste speed ceiling as a fraction of your top speed
-const DEEP_SNOW_DRAG = 18.0;  // u/s² bleed when over the deep-snow ceiling (you bog down)
+// powder — but the penalty is GRADED by how far out you are, not a cliff at the
+// edge: clipping a corner barely costs you, while a wide line into deep powder
+// bogs hard. The speed ceiling and bog-down drag both ramp from nothing at the
+// edge to their full values at the ski-patrol reset line. Wander a full
+// half-slope-width past the edge and ski patrol resets you back onto the piste
+// (snapped just inside the edge, facing down, momentum lost).
+const DEEP_SNOW_SPEED = 0.34; // off-piste speed ceiling (frac of top speed) at the DEEPEST point (the reset line)
+const DEEP_SNOW_DRAG = 18.0;  // u/s² bog-down bleed at the DEEPEST point (scales up with distance from the edge)
 const RESET_SPEED_FRAC = 0.4; // speed kept after a ski-patrol reset
+// After a ski-patrol reset the skier blinks and ghosts (passes through everyone,
+// no contact, no wipeout) for this long, so a skier popped back onto the piste
+// in front of the field can't instantly T-bone someone — it gives everyone time
+// to steer clear. See `ghostT` on the skier + the contact/obstacle skips.
+const RESET_GHOST_TIME = 2.0; // seconds of post-reset blink + collision immunity
 
 // ---- Wipeout (trees / rocks) --------------------------------------------
 // Rising-edge (s,lat) overlap → spin out: steering dies, speed bleeds, tuck is
@@ -229,6 +237,7 @@ export class SkiEngine {
         wantTrick: null, // a fresh analog air-trick command this frame ({ a, m })
         spin: 0,         // cosmetic wipeout angle (rad)
         spinT: 0,        // seconds of lost control left (0 = in control)
+        ghostT: 0,       // seconds of post-reset blink + collision immunity left (0 = solid)
         spinDur: CRASH_TIME, // total duration of the current spin (so it lands on a whole turn)
         boostT: 0,       // seconds left on a clean-landing speed boost
         boostMul: 1,     // current speed-ceiling multiplier from a landing boost
@@ -354,7 +363,8 @@ export class SkiEngine {
         if (c.spinT <= 0) { c.spinT = 0; c.spin = 0; spinning = false; }
       }
       // Obstacles only bite on the snow (you can fly over a tree). Rising-edge.
-      if (!c.finished && !c.dnf && !c.airborne) {
+      // A ghosting (just-reset) skier passes clean through them too.
+      if (!c.finished && !c.dnf && !c.airborne && c.ghostT <= 0) {
         if (this._enterObstacle(c) && !spinning) {
           c.spinT = c.spinDur = CRASH_TIME / c.control;   // better control = quicker recovery
           c.spin = 0; spinning = true;
@@ -454,6 +464,7 @@ export class SkiEngine {
       // --- LONGITUDINAL (gravity + tuck + edge-scrub) ----------------------
       if (c.boostT > 0) { c.boostT -= dt; if (c.boostT <= 0) { c.boostT = 0; c.boostMul = 1; } }
       if (c.landScrubT > 0) c.landScrubT -= dt;
+      if (c.ghostT > 0) { c.ghostT -= dt; if (c.ghostT < 0) c.ghostT = 0; }
       // steepness of the slope under the skier (tangent points down-slope → y<0)
       const frame = this.centerline.sampleAt(Math.max(0, c.totalS));
       const sinSlope = Math.max(0, -frame.tangent.y);
@@ -481,8 +492,15 @@ export class SkiEngine {
         // Squat state sets HOW FAST you approach the target, not just the ceiling.
         let accel = c.tuck ? ACCEL_TUCK : ACCEL_UPRIGHT;
         let decel = c.tuck ? DECEL_TUCK : DECEL_UPRIGHT;
-        // Deep snow off-piste: hard speed cap + a heavy bog-down drag (tuck can't save you).
-        if (c.offPiste) { targetV = Math.min(targetV, c.vmax * DEEP_SNOW_SPEED); decel = DEEP_SNOW_DRAG; }
+        // Deep snow off-piste: a GRADED bog-down. The penalty scales with how far
+        // past the groomed edge you are — 0 at the edge, full at the ski-patrol
+        // reset line — so clipping a corner barely costs you while a wide line into
+        // deep powder caps your speed hard (tuck can't save you out there).
+        if (c.offPiste) {
+          const depth = clamp((Math.abs(c.lat) - this.pisteHalf) / (this.resetLat - this.pisteHalf), 0, 1);
+          targetV = Math.min(targetV, c.vmax * (1 - (1 - DEEP_SNOW_SPEED) * depth));
+          decel = Math.max(decel, DEEP_SNOW_DRAG * depth);
+        }
         // Accel still scales with steepness (gravity pulls harder on a steep pitch).
         if (c.v < targetV) c.v = Math.min(targetV, c.v + accel * (0.4 + 0.6 * steepNorm) * dt);
         else c.v = Math.max(targetV, c.v - decel * dt);
@@ -523,6 +541,7 @@ export class SkiEngine {
         c.heading = 0;
         c.v *= RESET_SPEED_FRAC;
         c.offPiste = false;
+        c.ghostT = RESET_GHOST_TIME; // blink + pass through everyone while the field steers clear
         this.onEvent({ type: 'reset', id: c.id });
       }
 
@@ -559,10 +578,10 @@ export class SkiEngine {
     const next = new Map(arr.map((c) => [c.id, new Set()]));
     for (let i = 0; i < arr.length; i++) {
       const a = arr[i];
-      if (a.finished || a.dnf) continue;      // finished/parked skiers are out of the race — don't jostle them
+      if (a.finished || a.dnf || a.ghostT > 0) continue; // finished/parked/just-reset (ghosting) skiers don't jostle
       for (let j = i + 1; j < arr.length; j++) {
         const b = arr[j];
-        if (b.finished || b.dnf) continue;
+        if (b.finished || b.dnf || b.ghostT > 0) continue; // …and nobody collides with a ghosting skier
         const rr = a.radius + b.radius; // same capsules as every other contact
         if (Math.abs(a.air - b.air) > rr) continue;   // one is flying clean over the other
         // Capsule vs capsule: the closest pair among each skier's sample
@@ -714,6 +733,7 @@ export class SkiEngine {
         // current flip (for the renderer's somersault + the HUD tag)
         trickActive: c.trickActive, trickAngle: c.trickAngle, trickPhase: c.trickPhase,
         spin: c.spin, crashed: c.spinT > 0, offPiste: !!c.offPiste,
+        ghostT: c.ghostT, ghosting: c.ghostT > 0, // post-reset blink + collision immunity (renderer blinks the skier)
         boostActive: c.boostT > 0
       });
     }

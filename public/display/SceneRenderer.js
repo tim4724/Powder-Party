@@ -42,6 +42,8 @@ const LOBBY_ORBIT_SPEED = 0.12; // rad/s
 const BANK_MAX = 0.5;       // body bank (rad) into a full carve
 const TUCK_PITCH = 0.72;    // forward lean (rad) when fully tucked
 const TUCK_SHRINK = 0.3;    // squat: body shrinks toward the feet when tucked (0 = none)
+const GHOST_BLINK = 0.16;   // s per on/off step of the post-reset blink (a just-reset skier flickers while immune)
+const EDGE_RUNOUT = 3.5;    // u of clear flat deep-snow past the ski-patrol reset line before the walls/forest rise (keeps a skier from clipping scenery just before the reset)
 
 const _up = new THREE.Vector3(0, 1, 0);
 const _zAxis = new THREE.Vector3(0, 0, 1);
@@ -193,7 +195,12 @@ export class SceneRenderer {
     const samples = track.centerline.samples;
     const sw = track.slopeWidth || 11;
     const pisteHalf = sw / 2;          // groomed-piste edge (where poles + deep snow begin)
-    const edgeLat = sw;                // deep snow extends a half-slope-width past = the reset line
+    const resetLat = pisteHalf + sw * 0.5; // = SkiEngine.resetLat: a skier this far out is pulled back
+    // Walls + bank forest start a buffer BEYOND the reset line, not at it, so the
+    // flat deep-snow shoulder always extends past where ski patrol resets you —
+    // a skier drifting out is pulled back while still on open powder and never
+    // clips the rising mountainside or trees just before the reset fires.
+    const edgeLat = resetLat + EDGE_RUNOUT;
     const groundY = track.groundY != null ? track.groundY : -2;
     this._pisteHalf = pisteHalf;
 
@@ -441,6 +448,11 @@ export class SceneRenderer {
     const sh = Math.max(0.35, 1 - s.air * 0.09); // shrink + fade with height
     c.blob.scale.set(sh, sh, 1);
     c.blob.material.opacity = 0.42 * sh;
+
+    // post-reset blink: a just-reset (ghosting) skier flickers on/off while it's
+    // immune to contact, so the field can see it's a phantom and steer clear. The
+    // contact shadow (blob, above) stays solid so its position still reads.
+    c.group.visible = s.ghosting ? (Math.floor(s.ghostT / GHOST_BLINK) % 2 === 0) : true;
 
     // on-screen steer bar: mirror the player's RAW carve input (the way they tilt),
     // not the turn-aligned value — same convention as the phone's carve bar.

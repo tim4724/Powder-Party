@@ -290,6 +290,71 @@ test('straying off-piste bogs you down and a half-slope-width out resets you', a
   assert.ok(offPisteV < onPisteV, `deep snow (${offPisteV.toFixed(1)}) is slower than on-piste (${onPisteV.toFixed(1)})`);
 });
 
+test('off-piste penalty is GRADED — gentle near the edge, hard deep in the powder', async () => {
+  // width 20 → pisteHalf 10, resetLat 20. Park two skiers off-piste at very
+  // different depths and let them settle to their (graded) speed ceilings: one
+  // just over the edge should keep MUCH more speed than one deep in the powder.
+  const e = await makeEngine([1, 2], track({ length: 4000, width: 20 }), {});
+  // Build up speed straight, then shove each off-piste to a fixed depth and hold.
+  run(e, 4, () => { e.processInput(1, { s: 0, t: 1, j: 0 }); e.processInput(2, { s: 0, t: 1, j: 0 }); });
+  const sk = (id) => e.skiers.get(id);
+  // settle: pin lat each tick (just past the edge vs deep, near the reset line)
+  run(e, 4, () => {
+    e.processInput(1, { s: 0, t: 1, j: 0 });
+    e.processInput(2, { s: 0, t: 1, j: 0 });
+    sk(1).lat = 10.5;  // depth ≈ 0.05 — barely off-piste
+    sk(2).lat = 19.5;  // depth ≈ 0.95 — deep, about to be reset
+  });
+  const shallow = e.getSnapshot().skiers.find((s) => s.id === 1);
+  const deep = e.getSnapshot().skiers.find((s) => s.id === 2);
+  assert.ok(shallow.offPiste && deep.offPiste, 'both skiers are off-piste');
+  assert.ok(shallow.v > deep.v * 1.5,
+    `a corner-clip (${shallow.v.toFixed(1)}) keeps far more speed than deep powder (${deep.v.toFixed(1)})`);
+});
+
+test('a ski-patrol reset blinks + ghosts (no collision) for ~2s, then goes solid', async () => {
+  const events = [];
+  const e = await makeEngine([1], track({ length: 2000, width: 11 }), { onEvent: (ev) => events.push(ev) });
+  // Hard sustained carve runs the skier off-piste and past the reset line.
+  let sawGhost = false, ghostMax = 0;
+  run(e, 8, () => {
+    e.processInput(1, { s: 1, t: 1, j: 0 });
+    const s = e.getSnapshot().skiers[0];
+    if (s.ghosting) { sawGhost = true; ghostMax = Math.max(ghostMax, s.ghostT); }
+  });
+  assert.ok(events.some((ev) => ev.type === 'reset'), 'wandering out fires a reset');
+  assert.ok(sawGhost, 'a reset makes the skier ghost (collision-immune) afterwards');
+  assert.ok(ghostMax > 1.5 && ghostMax <= 2.0, `ghost window is ~2s (saw ${ghostMax.toFixed(2)})`);
+  // After the ghost window expires the skier is solid again.
+  run(e, 4, () => e.processInput(1, { s: 0, t: 1, j: 0 }));
+  assert.ok(!e.getSnapshot().skiers[0].ghosting, 'the ghost wears off — the skier is solid again');
+});
+
+test('a ghosting (just-reset) skier registers no contact — no bump, no T-bone', async () => {
+  const events = [];
+  const e = await makeEngine([1, 2], track({ length: 2000, width: 11 }), { onEvent: (ev) => events.push(ev) });
+  run(e, 3, () => { e.processInput(1, { s: 0, t: 1, j: 0 }); e.processInput(2, { s: 0, t: 1, j: 0 }); });
+  const a = e.skiers.get(1), b = e.skiers.get(2);
+  // Force #1 a hair past the reset line so the patrol reset fires and it ghosts.
+  a.lat = e.resetLat + 0.5; a.totalS = b.totalS;
+  run(e, 0.05, () => { e.processInput(1, { s: 0, t: 1, j: 0 }); e.processInput(2, { s: 0, t: 1, j: 0 }); });
+  assert.ok(a.ghostT > 0, '#1 is ghosting right after the reset');
+
+  // Pin the two DEAD-STACKED through the ghost window. A solid pair overlapping
+  // like this fires a rising-edge `bump` (and the control below proves it does) —
+  // a ghost must stay silent: no bump, no crash.
+  events.length = 0;
+  const stack = (i) => { e.processInput(1, { s: 0, t: 1, j: 0 }); e.processInput(2, { s: 0, t: 1, j: 0 }); a.lat = b.lat; a.totalS = b.totalS; };
+  run(e, a.ghostT - 0.1, stack); // stay just inside the ghost window
+  assert.equal(events.filter((ev) => ev.type === 'bump' || ev.type === 'crash').length, 0,
+    'a ghosting skier forced to overlap the field fires no bump and no crash');
+
+  // Control: once the ghost wears off, the SAME forced overlap DOES register a
+  // bump — proving the silence above was the ghost, not the stack geometry.
+  run(e, 1, stack);
+  assert.ok(events.some((ev) => ev.type === 'bump'), 'a SOLID skier overlapping the field bumps (control)');
+});
+
 test('a malformed (NaN/Infinity) control packet cannot corrupt a skier', async () => {
   const events = [];
   const e = await makeEngine([1], track({ length: 200 }), { onEvent: (ev) => events.push(ev) });
