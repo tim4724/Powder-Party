@@ -21,6 +21,13 @@ import {
 // ---- camera + feel constants (starting values) --------------------------
 const CHASE_DIST = 4.2;     // how far behind the skier the cam sits (tightened twice — 7.4 then 6.0 still read far)
 const CHASE_HEIGHT = 2.45;  // how far above (keeps ~the old 7.4:4.4 angle so the slope ahead still reads over the roll)
+// SIDE cam (a profile rig for inspecting jumps/flips in the labs — see setCamMode):
+// offset to the skier's side + a touch up, looking straight at them, so the launch
+// pitch and the ballistic arc read in profile instead of foreshortened head-on.
+const SIDE_DIST = 6.5;      // lateral offset from the skier
+const SIDE_HEIGHT = 1.6;    // a little above so the camera looks slightly down onto the line
+const SIDE_BACK = 1.0;      // trail a hair behind so the skier carries across frame rather than dead-centre
+const SIDE_FOV = 46;        // tighter than the chase lens — a profile rig wants less perspective stretch
 const CHASE_LOOK = 11.0;    // how far ahead it looks
 const CHASE_TGT_UP = -0.6;  // aim slightly DOWN-slope (toward the piste ahead, not the horizon)
 const CAM_UP_WORLD = 0.5;   // height/up blend: 0 = rig fully in the slope frame (pitch-invariant), 1 = gravity
@@ -40,6 +47,8 @@ const CELL_DOLLY = 0.75;    // short-cell compensation: the WHOLE rig (cam + loo
 const LOBBY_ORBIT_SPEED = 0.12; // rad/s
 
 const BANK_MAX = 0.5;       // body bank (rad) into a full carve
+const AIR_PITCH_GAIN = 1.25;// exaggerate the trajectory pitch a touch so the launch reads on a small cell (1 = physical)
+const AIR_PITCH_RATE = 14;  // how fast the model rotates onto/off the arc (1-exp-ish) — high enough to pop off the lip, low enough to not snap
 const TUCK_PITCH = 0.72;    // forward lean (rad) when fully tucked
 const TUCK_SHRINK = 0.3;    // squat: body shrinks toward the feet when tucked (0 = none)
 const GHOST_BLINK = 0.16;   // s per on/off step of the post-reset blink (a just-reset skier flickers while immune)
@@ -70,6 +79,7 @@ export class SceneRenderer {
     this.onPoleHit = null;     // (kick 0.35..1.4) — an edge pole snapped off; impact-speed scale for SFX
     this.poles = null;         // PoleField, built per setTrack
     this.orbit = false;
+    this.camMode = 'chase';    // 'chase' (default follow rig) | 'side' (profile rig for the labs — setCamMode)
     this._running = false;
     this._last = 0;
     this._frameDt = 0;
@@ -83,6 +93,7 @@ export class SceneRenderer {
     this._sTarget = new THREE.Vector3();
     this._sTrickAxis = new THREE.Vector3();
     this._sCamUp = new THREE.Vector3();
+    this._sSide = new THREE.Vector3();
 
     this._initThree();
     this._initOverlay();
@@ -339,7 +350,7 @@ export class SceneRenderer {
       colorIndex, celled,
       reconnecting: false, reconnectEl: null, // dropped-player reconnect card, centred in this cell by _loop
       camPos: new THREE.Vector3(), camTarget: new THREE.Vector3(),
-      fov: BASE_FOV, init: false, lean: 0, tuckAmt: 0, pose: null, finished: false,
+      fov: BASE_FOV, init: false, lean: 0, tuckAmt: 0, airPitchAmt: 0, pose: null, finished: false,
     });
   }
 
@@ -406,6 +417,7 @@ export class SceneRenderer {
       c.group.add(c.hitRing);
     }
     const pos = s.pose.pos;
+    const dt = this._frameDt || 0.016;
     c.spd = s.v; c.airborne = s.airborne;
     if (!c.pose) c.pose = { pos: new THREE.Vector3(), forward: new THREE.Vector3(), up: new THREE.Vector3() };
     c.pose.pos.copy(pos);
@@ -420,6 +432,15 @@ export class SceneRenderer {
     c.group.quaternion.setFromRotationMatrix(this._sBasis.makeBasis(x, y, z));
     // wipeout spin about the slope normal (cosmetic)
     if (s.spin) c.group.rotateY(s.spin);
+    // launch lift: pitch the skier NOSE-UP off the ramp lip (engine airPitch tapers
+    // to 0 by the apex and stays 0 coming down — no nose-down dive into the landing).
+    // Without this the engine pose stays glued flat to the slope and a kicker just
+    // elevates you straight up. Smoothed so it rotates ONTO the lift off the lip and
+    // back to flat instead of snapping. Group-only (rotateX) so the chase cam — which
+    // tracks pose.forward — holds steady, same as the trick somersault below.
+    const targetPitch = s.airborne ? (s.airPitch || 0) : 0; // || 0: a missing field can't poison the accumulator with NaN
+    c.airPitchAmt += (targetPitch - c.airPitchAmt) * Math.min(1, dt * AIR_PITCH_RATE);
+    if (Math.abs(c.airPitchAmt) > 1e-3) c.group.rotateX(-c.airPitchAmt * AIR_PITCH_GAIN);
     // air trick: somersault the WHOLE skier about an ANALOG axis built from the
     // flick angle — pitch (local x) = front/back flip, yaw (local y) = spin, a
     // blend = a cork. The chase cam tracks pose.forward (not the group), so the
@@ -430,12 +451,13 @@ export class SceneRenderer {
     }
 
     // body: bank INTO the carve (negated — +carve is turn-aligned, and a positive
-    // local-Z roll tilts the torso the opposite way), crouch + pitch when tucking
-    const dt = this._frameDt || 0.016;
+    // local-Z roll tilts the torso the opposite way), crouch + pitch when tucking.
+    // (Airborne the whole group already pitches onto the arc above, so the body
+    // doesn't add its own air lean — that would double up.)
     c.lean += (-s.carve * BANK_MAX - c.lean) * Math.min(1, dt * 12);
     c.tuckAmt += ((s.tuck ? 1 : 0) - c.tuckAmt) * Math.min(1, dt * 10);
     c.body.rotation.z = c.lean;
-    c.body.rotation.x = c.tuckAmt * TUCK_PITCH + (s.airborne ? -0.2 : 0);
+    c.body.rotation.x = c.tuckAmt * TUCK_PITCH;
     // squat: shrink toward the feet (pivot is at the base) rather than dropping the
     // body — keeps the whole skier above the snow, so it can't clip the surface.
     c.body.scale.setScalar(1 - c.tuckAmt * TUCK_SHRINK);
@@ -493,7 +515,31 @@ export class SceneRenderer {
     }
   }
 
+  // Profile rig (labs only): park the camera off to the skier's side and look
+  // straight at them, so a launch reads in profile — the nose-up pitch and the
+  // arc are obvious side-on but foreshortened away in the head-on chase view.
+  _updateSideCam(c, dt) {
+    const { pos, forward, up } = c.pose;
+    const side = this._sSide.copy(forward).cross(up).normalize(); // lateral (forward × up)
+    const camUp = this._sCamUp.copy(up).lerp(_up, CAM_UP_WORLD).normalize();
+    const want = this._sWant.copy(pos)
+      .addScaledVector(side, SIDE_DIST)
+      .addScaledVector(camUp, SIDE_HEIGHT)
+      .addScaledVector(forward, -SIDE_BACK);
+    const target = this._sTarget.copy(pos).addScaledVector(up, 0.4);
+    const aPos = 1 - Math.exp(-CAM_POS_RATE * dt);
+    const aTgt = 1 - Math.exp(-CAM_TGT_RATE * dt);
+    if (!c.init) { c.camPos.copy(want); c.camTarget.copy(target); c.init = true; }
+    else { c.camPos.lerp(want, aPos); c.camTarget.lerp(target, aTgt); }
+    c.fov += (SIDE_FOV - c.fov) * (1 - Math.exp(-6 * dt));
+    c.cam.position.copy(c.camPos);
+    c.cam.fov = c.fov;
+    c.cam.up.copy(camUp);
+    c.cam.lookAt(c.camTarget);
+  }
+
   _updateChase(c, dt, cellFrac = 1) {
+    if (this.camMode === 'side') return this._updateSideCam(c, dt);
     const { pos, forward, up } = c.pose;
     // FOV first — it feeds the counter-dolly below.
     const wantFov = BASE_FOV + (c.spd || 0) * FOV_GAIN + (c.airborne ? AIR_FOV : 0);
@@ -536,6 +582,12 @@ export class SceneRenderer {
     requestAnimationFrame((t) => this._loop(t));
   }
   stop() { this._running = false; }
+
+  // Camera mode: 'chase' (default follow rig) or 'side' (profile rig for the labs).
+  // The persistent camPos/camTarget glide smoothly between rigs on a live switch.
+  // Returns the mode actually set (unknown values fall back to 'chase').
+  setCamMode(mode) { this.camMode = mode === 'side' ? 'side' : 'chase'; return this.camMode; }
+  cycleCamMode() { return this.setCamMode(this.camMode === 'side' ? 'chase' : 'side'); }
 
   _loop(t) {
     if (!this._running) return;

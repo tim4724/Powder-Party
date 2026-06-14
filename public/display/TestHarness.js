@@ -80,6 +80,13 @@ export function runDisplayScenario(cfg, ctx) {
   const human = scn === 'tricks' || scn === 'bump' || scn === 'solo'; // skier 0 is keyboard-driven, the rest CPU
   const kb = human ? keyboardDriver() : null;
 
+  // Camera: ?cam=side starts in the profile rig (great for eyeballing the ramp
+  // launch / flips side-on); 'V' toggles chase ⇄ side live in any preview.
+  scene.setCamMode(cfg.cam === 'side' ? 'side' : 'chase');
+  window.addEventListener('keydown', (e) => {
+    if (e.key.toLowerCase() === 'v' && !e.repeat) scene.cycleCamMode();
+  });
+
   // build the field — CPU, except skier 0 when a human drives (the `tricks`/`bump` labs)
   const field = [];
   const bots = new Map();

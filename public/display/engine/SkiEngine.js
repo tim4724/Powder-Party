@@ -730,6 +730,14 @@ export class SkiEngine {
         carve: STEER_SIGN * c.carve, carveInput: c.carve,
         tuck: c.tuck,
         airborne: c.airborne, air: c.air,
+        // Launch pitch (rad): nose-up to match the takeoff off the lip — the angle
+        // the RISING velocity makes above the slope plane, atan2(vertical, horizontal).
+        // Tapers to 0 by the apex (vAir→0) and stays 0 on the way down: we pitch the
+        // model UP off the ramp (so a kicker launches you instead of elevating you
+        // flat) but DON'T nose it down into the landing — the fix is the on-ramp lift
+        // only. The renderer follows this; the chase cam ignores it. Floor the
+        // horizontal term so a near-vertical pop can't read as a 90° backflip.
+        airPitch: c.airborne && c.vAir > 0 ? Math.atan2(c.vAir, Math.max(8, c.v)) : 0,
         // current flip (for the renderer's somersault + the HUD tag)
         trickActive: c.trickActive, trickAngle: c.trickAngle, trickPhase: c.trickPhase,
         spin: c.spin, crashed: c.spinT > 0, offPiste: !!c.offPiste,
