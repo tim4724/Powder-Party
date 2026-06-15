@@ -66,9 +66,10 @@ const scene = new SceneRenderer(el('scene'), SKIER_COLORS);
 scene.orbit = true;
 const audio = new SlopeAudio();
 // Pole break-offs are renderer-only (the engine never sees the edge poles), so
-// their clack hooks in here rather than through onRaceEvent. Quiet once the
-// results panel is up, like every other run sound.
-scene.onPoleHit = (kick) => { if (!raceEnded) audio.pole(kick); };
+// their clack hooks in here rather than through onRaceEvent. Only during a live
+// run (`session`) — the lobby attract race is silent — and quiet once the results
+// panel is up, like every other run sound.
+scene.onPoleHit = (kick) => { if (session && !raceEnded) audio.pole(kick); };
 // Web Audio unlocks only via a user gesture ON THIS page — startRun is driven
 // by a phone message, which doesn't count, so without this the race can stay
 // silent until someone touches the display. Either gesture unlocks audio and
@@ -284,7 +285,7 @@ function renderRoster(roster, host) {
 
 // ---- run difficulty (Blue/Red/Black) -------------------------------------
 // The lobby shows the SAME Blue/Red/Black switch as the host's phone (shared
-// widget) and the orbiting slope preview re-rolls to the chosen tier, so the
+// widget) and the attract race re-rolls to the chosen tier, so the
 // difficulty reads before anyone starts. The big screen is authoritative, so its
 // switch is LIVE: a tap routes straight into `setLevel` (on a pointer-less TV
 // it's an inert mirror of the host's pick). `setLevel` is the one authoritative
@@ -306,7 +307,7 @@ function setLevel(level) {
   net.broadcast({ type: MSG.LEVEL_UPDATE, level: currentLevel });
   // Re-roll the lobby preview to the new tier (idle only — at results the live
   // world owns the scene; the pick still lands on the next slope at teardown).
-  if (!session) { slope = makeSlope(); window.__slope = slope; applyTrack(); }
+  if (!session) lobbyCrossfade(() => { slope = makeSlope(); window.__slope = slope; applyTrack(); startLobbyRace(); });
 }
 
 // ---- field build (humans + AI fill) -------------------------------------
@@ -340,9 +341,59 @@ function buildField(humans, reservedColors) {
   return field;
 }
 
+// ---- idle lobby backdrop -------------------------------------------------
+// A looping CPU-only AI race down the real slope, behind the lobby card, with the
+// camera following the pack. Reuses the run path wholesale: buildField + AiController
+// bots + RunSession, driven each frame by scene.onFrame (driveLobbyRace below). No
+// humans → no split-screen cells → it renders under the single follow camera. Torn
+// down the instant a real run starts (its CPU reuse the same ids).
+let lobbyField = [];
+let lobbySession = null;
+let lobbyFading = false;
+function startLobbyRace() {
+  stopLobbyRace();
+  if (session) return;                            // a live run owns the scene
+  aiBots = new Map();
+  lobbyField = buildField([], []);                // all-CPU; buildField fills aiBots
+  for (const p of lobbyField) scene.addSkier(p.peerIndex, p.colorIndex, p.name, { cell: false });
+  lobbySession = new RunSession(lobbyField, slope, {}); // the lobby attract is silent (no game sound)
+  lobbySession.racing = true;                     // ski immediately — no countdown overlay in the lobby
+  // Pose the fresh field NOW so the follow cam has skiers to lock onto this very
+  // frame — otherwise a re-roll (difficulty pick) flashes the orbit cam.
+  for (const s of lobbySession.getSnapshot().skiers) if (s.pose) scene.setSkierPose(s.id, s);
+  scene.setLobbyView('race');                     // follow cam (snaps to the fresh pack)
+}
+function stopLobbyRace() {
+  for (const p of lobbyField) scene.removeSkier(p.peerIndex);
+  lobbyField = [];
+  if (lobbySession) { lobbySession.dispose(); lobbySession = null; }
+  lobbyFading = false;
+  const f = el('lobby-fade'); if (f) f.classList.remove('is-on');
+}
+// Cross-fade the attract to snow-white, run `mid` at the peak (swap the race), then
+// fade back — the #lobby-fade layer covers the 3D scene only, so the cards stay crisp.
+// Used by the loop (finish → fresh race) AND the difficulty switch (re-roll).
+function lobbyCrossfade(mid) {
+  if (lobbyFading) return;
+  lobbyFading = true;
+  const fade = el('lobby-fade'); if (fade) fade.classList.add('is-on');
+  setTimeout(() => { mid(); if (fade) fade.classList.remove('is-on'); lobbyFading = false; }, 450);
+}
+function driveLobbyRace(dt) {
+  if (!lobbySession) return;
+  for (const [id, bot] of aiBots) {
+    const sk = lobbySession.engine.skiers.get(id);
+    if (sk && !sk.finished) lobbySession.processInput(id, bot.drive(sk, lobbySession.engine));
+  }
+  lobbySession.update(dt * 1000);
+  for (const s of lobbySession.getSnapshot().skiers) if (s.pose) scene.setSkierPose(s.id, s);
+  if (lobbySession.engine.raceOver) lobbyCrossfade(startLobbyRace); // whole field home → loop with a fade
+}
+
 // ---- run lifecycle -------------------------------------------------------
 function startRun() {
   if (session) return;
+  stopLobbyRace();        // the attract CPU reuse the same ids — drop them first
   net.flow.transitionTo(ROOM_STATE.COUNTDOWN);
   raceEnded = false; paused = false; coastSettled = false;
   aiBots = new Map();
@@ -415,7 +466,8 @@ function worldMoving() {
 }
 
 scene.onFrame = (dt) => {
-  if (!session || paused) return;
+  if (paused) return;
+  if (!session) { driveLobbyRace(dt); return; } // lobby attract: loop the CPU race
 
   if (!raceEnded) {
     // Live race. session.update can end the run itself (raceOver/timeout → _finish
@@ -644,6 +696,7 @@ function showLobby() {
   el('pause-overlay') && el('pause-overlay').classList.add('hidden');
   const c = el('countdown'); if (c) c.textContent = '';
   document.documentElement.classList.remove('in-session');
+  startLobbyRace(); // a looping CPU AI race behind the card, camera following the pack
   renderLevel(); // keep the difficulty badge current whenever the lobby surfaces
 }
 function showRace() {

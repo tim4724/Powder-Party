@@ -34,33 +34,37 @@
   <!-- Persistent 3D backdrop. In the lobby it slowly orbits the slope (live
        preview); in a run it draws the split-screen world. -->
   <div id="scene"></div>
+  <!-- Cross-fade layer for the looping lobby attract race (over #scene, under the cards). -->
+  <div id="lobby-fade"></div>
 
-  <!-- Lobby — the join/roster card on the left, QR on the right. -->
+  <!-- Lobby — roster card + QR side by side, the join-URL chip centred below them;
+       a live CPU race plays quietly on the slope behind. -->
   <section id="lobby">
-    <div class="lobby__card card">
-      <h1>Powder <span>Party</span></h1>
-      <div class="join">
-        <div class="join__label">Join at</div>
-        <div class="join__url" id="joinurl">…</div>
+    <div class="lobby__row">
+      <div class="lobby__card card">
+        <h1>Powder <span>Party</span></h1>
+        <div id="count">Scan the QR code to join</div>
+        <div id="players">
+          <div class="seat seat--open"><span class="seat__open">Open</span></div>
+          <div class="seat seat--open"><span class="seat__open">Open</span></div>
+          <div class="seat seat--open"><span class="seat__open">Open</span></div>
+          <div class="seat seat--open"><span class="seat__open">Open</span></div>
+        </div>
+        <!-- Difficulty — the SAME Blue/Red/Black switch as the host's phone (shared
+             widget). The attract race re-rolls to match, so the tier reads at a
+             glance. Live on the big screen too (the display is authoritative); on a
+             pointer-less TV it simply mirrors the host's pick. -->
+        <div id="level-select" class="level-select lobby__level" role="group" aria-label="Run difficulty" aria-live="polite">
+          <span class="level-select__cap">Difficulty</span>
+          <div id="level-seg" class="level-seg"></div>
+        </div>
       </div>
-      <div id="count">Scan the QR code to join</div>
-      <div id="players">
-        <div class="seat seat--open"><span class="seat__open">Open</span></div>
-        <div class="seat seat--open"><span class="seat__open">Open</span></div>
-        <div class="seat seat--open"><span class="seat__open">Open</span></div>
-        <div class="seat seat--open"><span class="seat__open">Open</span></div>
-      </div>
-      <!-- Difficulty — the SAME Blue/Red/Black switch as the host's phone (shared
-           widget). The orbiting backdrop re-rolls to match, so the tier reads at a
-           glance. Live on the big screen too (the display is authoritative); on a
-           pointer-less TV it simply mirrors the host's pick. -->
-      <div id="level-select" class="level-select lobby__level" role="group" aria-label="Run difficulty" aria-live="polite">
-        <span class="level-select__cap">Difficulty</span>
-        <div id="level-seg" class="level-seg"></div>
+      <div class="lobby__qr">
+        <div class="qr-card"><canvas id="qr"></canvas></div>
       </div>
     </div>
-    <div class="lobby__qr">
-      <div class="qr-card"><canvas id="qr"></canvas></div>
+    <div class="join-chip">
+      <span class="join__url" id="joinurl">…</span>
     </div>
   </section>
 

@@ -401,14 +401,15 @@ export class DisplayNet extends GameNet {
 // innerHTML) so the code is always treated as text.
 export function renderJoinUrl(el, fullText, code) {
   el.textContent = '';
-  if (code && fullText.endsWith(code)) {
-    el.append(fullText.slice(0, fullText.length - code.length));
+  const shown = fullText.replace(/^https?:\/\//, ''); // display without the scheme
+  if (code && shown.endsWith(code)) {
+    el.append(shown.slice(0, shown.length - code.length));
     const span = document.createElement('span');
     span.className = 'join__code';
     span.textContent = code;
     el.appendChild(span);
   } else {
-    el.textContent = fullText;
+    el.textContent = shown;
   }
 }
 

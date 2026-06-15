@@ -14,22 +14,22 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #cfeaf8; }
 /* ---- Lobby ---- */
 #lobby {
   position: fixed; inset: 0; z-index: 2;
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 4vw; padding: 5vh 6vw; box-sizing: border-box;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 3vh; padding: 5vh 6vw; box-sizing: border-box;
 }
-/* The card is the main element — grow to fill the space left of the QR (flex:1
-   with a 0 basis) so its width is stable regardless of the join URL's length,
-   capped at 2× the QR's width (qr-card = the clamp canvas + 1.2rem padding a side)
-   so it never more than doubles the QR on a wide display. */
-.lobby__card { padding: clamp(1.5rem, 3vw, 3rem); flex: 1; max-width: calc(2 * clamp(220px, 26vw, 420px) + 4.8rem); }
+/* Card + QR side by side; the join-URL chip is centred below the row. */
+.lobby__row { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 4vw; }
+/* The card is the main element (the live race just plays quietly behind it) — grow
+   to fill the space left of the QR (flex:1, 0 basis) so its width is stable, capped
+   just above the QR's width on a wide display. */
+.lobby__card { padding: clamp(1.5rem, 3vw, 3rem); flex: 1; max-width: calc(1.12 * clamp(220px, 26vw, 420px) + 4.8rem); }
 .lobby__card h1 {
   font-family: var(--font-display); font-weight: 700;
   font-size: clamp(2.4rem, 5vw, 4.2rem); margin: 0 0 1rem; color: var(--ink);
 }
 .lobby__card h1 span { color: var(--brand); }
-.join { margin-bottom: 1rem; }
-.join__label { font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.8rem; color: var(--ink-3); }
-.join__url { font-family: var(--font-display); font-size: clamp(1.2rem, 2.4vw, 2rem); font-weight: 600; color: var(--ink); word-break: break-all; }
+/* join URL lives in the bottom chip now (.join-chip); base type here, sized there */
+.join__url { font-family: var(--font-display); font-weight: 600; color: var(--ink); word-break: break-all; }
 .join__code { color: var(--accent); }
 #count { color: var(--ink-2); font-weight: 700; margin-bottom: 1.2rem; }
 
@@ -55,6 +55,16 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #cfeaf8; }
 .lobby__qr { flex: none; }
 .qr-card { background: #fff; padding: 1.2rem; border-radius: var(--r-lg); box-shadow: var(--shadow-float); }
 .qr-card canvas { display: block; width: clamp(220px, 26vw, 420px); height: auto; image-rendering: pixelated; }
+
+/* Join-URL chip — pinned to the bottom-centre of the page. */
+.join-chip { position: fixed; left: 50%; bottom: 3vh; transform: translateX(-50%); padding: 0.7rem 1.6rem; background: #fff; border-radius: var(--r-pill); box-shadow: var(--shadow-float); white-space: nowrap; }
+.join-chip .join__url { font-size: clamp(1.1rem, 2vw, 1.7rem); word-break: normal; }
+
+/* Cross-fade between looping lobby attract races — covers the 3D scene (z:0) but
+   sits UNDER the lobby cards (z:2), so the race dips to snow-white and back while
+   the join UI stays crisp. main.js toggles .is-on around each restart. */
+#lobby-fade { position: fixed; inset: 0; z-index: 1; background: #eaf2fb; opacity: 0; pointer-events: none; transition: opacity 0.4s ease; }
+#lobby-fade.is-on { opacity: 1; }
 
 /* ---- Run overlays ---- */
 #race { position: fixed; inset: 0; z-index: 2; pointer-events: none; }
@@ -161,7 +171,8 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #cfeaf8; }
 }
 
 @media (max-width: 860px) {
-  #lobby { flex-direction: column; justify-content: center; gap: 2vh; }
+  #lobby { gap: 2vh; }
+  .lobby__row { flex-direction: column; align-items: center; gap: 2vh; }
   .lobby__card { flex: none; max-width: 90vw; }
 }
 

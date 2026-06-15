@@ -7,7 +7,7 @@
 //   /?test=1&scenario=countdown           — countdown beat
 //   /?test=1&scenario=paused              — mid-run, frozen + pause overlay
 //   /?test=1&scenario=results             — results board
-//   /?test=1&scenario=lobby               — orbiting slope preview + fake roster
+//   /?test=1&scenario=lobby               — live CPU attract race + fake roster (mirrors the real lobby)
 //   /?test=1&scenario=slope               — clean orbiting slope preview, CPU field (endless)
 //   /?test=1&scenario=tricks              — TRICK LAB: a single full-screen skier on a
 //        STRAIGHT, tree-free practice run (the `trick-lab` slope) lined with kickers,
@@ -133,6 +133,23 @@ export function runDisplayScenario(cfg, ctx) {
 
   if (scn === 'lobby' || scn === 'welcome') {
     scene.orbit = true;
+    scene.setLobbyView('race'); // mirror the live lobby: CPU race behind the card, cam following
+    // A looping CPU race driven each frame — same shape as main.js driveLobbyRace.
+    for (const p of field) scene.addSkier(p.peerIndex, p.colorIndex, p.name, { cell: false });
+    let sess = new RunSession(field, slope, {}); // silent attract (mirrors the live lobby)
+    sess.racing = true;
+    for (const s of sess.getSnapshot().skiers) if (s.pose) scene.setSkierPose(s.id, s); // pose now → follow cam locks on
+    let fading = false;
+    scene.onFrame = (dt) => {
+      for (const [id, bot] of bots) { const sk = sess.engine.skiers.get(id); if (sk && !sk.finished) sess.processInput(id, bot.drive(sk, sess.engine)); }
+      sess.update(dt * 1000);
+      for (const s of sess.getSnapshot().skiers) if (s.pose) scene.setSkierPose(s.id, s);
+      if (sess.engine.raceOver && !fading) {
+        fading = true;
+        const fade = el('lobby-fade'); if (fade) fade.classList.add('is-on');
+        setTimeout(() => { sess.dispose(); sess = new RunSession(field, slope, {}); sess.racing = true; scene.setLobbyView('race'); if (fade) fade.classList.remove('is-on'); fading = false; }, 450);
+      }
+    };
     el('lobby') && el('lobby').classList.remove('hidden');
     el('race') && el('race').classList.add('hidden');
     // Share the REAL roster render — pads open seats, applies the live count copy,

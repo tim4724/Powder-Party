@@ -81,6 +81,17 @@ export class SceneRenderer {
     this.finishGate = null;    // FinishGate (post bends when clipped), built per setTrack
     this.orbit = false;
     this.camMode = 'chase';    // 'chase' (default follow rig) | 'side' (profile rig for the labs — setCamMode)
+    // Lobby/attract camera: 'race' (follow the live attract pack — the live lobby's
+    // backdrop) or 'orbit' (turntable, debug previews); set via setLobbyView. A dev
+    // ?preview=orbit|race URL param pins the choice.
+    const _pv = new URLSearchParams(location.search).get('preview');
+    this._lobbyView = _pv || 'orbit';
+    this._lobbyForced = !!_pv;
+    this._followCamPos = new THREE.Vector3(); // damped follow cam for the lobby 'race' attract
+    this._followCamTgt = new THREE.Vector3();
+    this._followInit = false;
+    this._followFwd = new THREE.Vector3(0, 0, 1); // damped rig heading + normal, so the
+    this._followUp = new THREE.Vector3(0, 1, 0);  // chase glides instead of jerking with carves
     this._running = false;
     this._last = 0;
     this._frameDt = 0;
@@ -580,6 +591,58 @@ export class SceneRenderer {
     c.cam.lookAt(c.camTarget);
   }
 
+  // Set the lobby/attract backdrop mode (main.js / TestHarness call this). A dev
+  // ?preview= URL param pins the mode and overrides this. Re-selecting 'race'
+  // snaps the follow cam to the fresh pack (so a looped attract doesn't sweep).
+  setLobbyView(mode) {
+    if (!this._lobbyForced) this._lobbyView = mode;
+    if (this._lobbyView === 'race') this._followInit = false;
+  }
+
+  // Lobby 'race' (live lobby default): a broadcast chase on the pack CENTRE at a
+  // fixed distance. No "who's 2nd?" guess (everyone's tied at the gun) — the leader
+  // sits naturally ahead in frame with the chasers around centre, the fixed distance
+  // keeps a steady size however far the field spreads, and the smoothed centroid has
+  // nothing to jump to. Returns false if nothing is posed yet so _loop can hold.
+  _camFollowLobby(dt) {
+    const cam = this.overview;
+    // Aggregate the pack: centroid + average heading (slope tangent) + average slope
+    // normal across every posed skier.
+    let n = 0;
+    const cen = this._sWant.set(0, 0, 0), afwd = this._sTarget.set(0, 0, 0), anrm = this._sCamUp.set(0, 0, 0);
+    for (const c of this.skiers.values()) {
+      if (!c.pose) continue;
+      cen.add(c.pose.pos); afwd.add(c.pose.forward); anrm.add(c.pose.up); n++;
+    }
+    if (!n) return false;
+    cen.multiplyScalar(1 / n);
+    if (afwd.lengthSq() < 1e-4) afwd.set(0, 0, 1); else afwd.normalize();
+    if (anrm.lengthSq() < 1e-4) anrm.set(0, 1, 0); else anrm.normalize();
+    const p = cen, sfwd = afwd, sup = anrm; // chase the pack centre (no "who's 2nd?" guess)
+    // Smooth the rig heading/normal so the camera glides down the line instead of
+    // jerking with the subject's carve (the main source of hectic motion).
+    if (!this._followInit) { this._followFwd.copy(sfwd); this._followUp.copy(sup); }
+    else {
+      const hk = 1 - Math.exp(-1.6 * dt);
+      this._followFwd.lerp(sfwd, hk); this._followUp.lerp(sup, hk);
+    }
+    if (this._followFwd.lengthSq() < 1e-4) this._followFwd.set(0, 0, 1); else this._followFwd.normalize();
+    if (this._followUp.lengthSq() < 1e-4) this._followUp.set(0, 1, 0); else this._followUp.normalize();
+    const fwd = this._followFwd, up = this._followUp;
+    // Chase behind ALONG the slope tangent (rises up-slope with the terrain so it
+    // can't burrow in) + normal clearance; look down-slope ahead toward the leader.
+    const want = this._sSide.copy(p).addScaledVector(fwd, -8).addScaledVector(up, 3.6);
+    const tgt = this._sz.copy(p).addScaledVector(fwd, 4); // look near the pack (not far ahead) so it stays framed on curves
+    if (!this._followInit) { this._followCamPos.copy(want); this._followCamTgt.copy(tgt); this._followInit = true; }
+    else { this._followCamPos.lerp(want, 1 - Math.exp(-3.2 * dt)); this._followCamTgt.lerp(tgt, 1 - Math.exp(-3.2 * dt)); }
+    cam.up.set(0, 1, 0);
+    cam.position.copy(this._followCamPos);
+    cam.lookAt(this._followCamTgt);
+    if (cam.view && cam.view.enabled) cam.clearViewOffset(); // centred (no gutter shift)
+    cam.updateProjectionMatrix();
+    return true;
+  }
+
   start() {
     if (this._running) return;
     this._running = true;
@@ -618,19 +681,34 @@ export class SceneRenderer {
     // race pays nothing. `visible=false` skips it entirely in render traversal.
     this.lobbyGroup.visible = ids.length === 0;
     if (ids.length === 0) {
-      // lobby / attract: single overview camera, slow orbit
-      this.overview.aspect = W / H; this.overview.updateProjectionMatrix();
-      if (this.orbit && this._trackCenter) {
-        this._orbitAngle += LOBBY_ORBIT_SPEED * dt;
-        this.overview.position.set(
-          this._trackCenter.x + Math.cos(this._orbitAngle) * this._ovRadius,
-          this._trackCenter.y + this._ovHeight,
-          this._trackCenter.z + Math.sin(this._orbitAngle) * this._ovRadius);
-      } else if (this._ovPos) {
-        this.overview.position.lerp(this._ovPos, 0.05);
+      // lobby / attract: a single overview camera (no split-screen cells).
+      const cam = this.overview;
+      cam.aspect = W / H;
+      // 'race' follows the live attract pack (falls back to orbit before any skier
+      // is posed); 'orbit' is the debug turntable.
+      let framed = false;
+      if (this._lobbyView === 'race') {
+        framed = true;
+        // Hold the last frame between attract races (no skiers posed yet) rather
+        // than dropping to the orbit cam — that fallback would visibly spin the
+        // view on every slope re-roll (e.g. picking a difficulty).
+        if (!this._camFollowLobby(dt)) cam.updateProjectionMatrix();
       }
-      this.overview.lookAt(this._ovTarget);
-      r.render(this.scene, this.overview);
+      if (!framed) {
+        if (cam.view && cam.view.enabled) cam.clearViewOffset();
+        cam.updateProjectionMatrix();
+        if (this.orbit && this._trackCenter) {
+          this._orbitAngle += LOBBY_ORBIT_SPEED * dt;
+          cam.position.set(
+            this._trackCenter.x + Math.cos(this._orbitAngle) * this._ovRadius,
+            this._trackCenter.y + this._ovHeight,
+            this._trackCenter.z + Math.sin(this._orbitAngle) * this._ovRadius);
+        } else if (this._ovPos) {
+          cam.position.lerp(this._ovPos, 0.05);
+        }
+        cam.lookAt(this._ovTarget);
+      }
+      r.render(this.scene, cam);
       requestAnimationFrame((tt) => this._loop(tt));
       return;
     }
