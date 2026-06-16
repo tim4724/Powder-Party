@@ -153,8 +153,10 @@ const net = new DisplayNet({
   },
 });
 
+let currentJoinUrl = '';   // full join link (the string the QR encodes); the chip copies it
 function onRoomReady({ joinUrl }) {
   const code = net.roomCode || '';
+  currentJoinUrl = joinUrl;
   renderJoinUrl(el('joinurl'), joinUrl, code);
   fetchQR(joinUrl).then((qr) => renderQR(el('qr'), qr)).catch(() => {});
 }
@@ -787,6 +789,37 @@ function showBailToast(text) {
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
+
+// ---- join link → clipboard -----------------------------------------------
+// The bottom join chip is a button: a click (or Enter/Space) copies the full
+// join link, confirmed by a brief toast. copyText falls back to a hidden
+// textarea on non-secure contexts where the async Clipboard API is unavailable.
+let copyToastTimer = null;
+function showToast(msg) {
+  const t = el('toast');
+  if (!t) return;
+  t.textContent = msg;
+  t.classList.add('is-on');
+  clearTimeout(copyToastTimer);
+  copyToastTimer = setTimeout(() => t.classList.remove('is-on'), 1600);
+}
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; }
+  } catch (_) { /* fall through to the legacy path */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch (_) { return false; }
+}
+el('joinbox') && el('joinbox').addEventListener('click', async () => {
+  if (!currentJoinUrl) return;
+  showToast(await copyText(currentJoinUrl) ? 'Copied' : 'Copy failed');
+});
 
 // ---- pause / results buttons + dev keys ----------------------------------
 el('pause-btn') && el('pause-btn').addEventListener('click', () => (paused ? resumeRun() : pauseRun()));

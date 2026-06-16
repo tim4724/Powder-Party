@@ -63,9 +63,9 @@
         <div class="qr-card"><canvas id="qr"></canvas></div>
       </div>
     </div>
-    <div class="join-chip">
+    <button type="button" class="join-chip" id="joinbox" aria-label="Copy join link">
       <span class="join__url" id="joinurl">…</span>
-    </div>
+    </button>
   </section>
 
   <!-- Run overlays over the persistent #scene backdrop -->
@@ -110,6 +110,9 @@
       <button id="dc-continue" type="button" class="btn btn--ghost">Continue on this device</button>
     </div>
   </div>
+
+  <!-- Transient confirmation toast (e.g. "Copied") — floats just above the join chip. -->
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <!-- Build stamp — populated by the server only on a preview deployment; :empty (hidden) otherwise. -->
   <div class="build-badge" role="status" aria-label="build version">__VERSION_BADGE__</div>

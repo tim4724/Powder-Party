@@ -67,12 +67,29 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #cfeaf8; }
    `height: auto` would lay it out half-height, then pop to full when the QR lands. */
 .qr-card canvas { display: block; width: clamp(220px, 26vw, 420px); aspect-ratio: 1; height: auto; image-rendering: pixelated; }
 
-/* Join-URL chip — pinned to the bottom-centre of the page. min-width reserves the
-   production URL's footprint (powder.couch-games.com/<code> ≈ 30rem on a big
-   screen) so the "…" placeholder already sits at final size, instead of the chip
-   expanding from the centre the moment the room code + join URL arrive. */
-.join-chip { position: fixed; left: 50%; bottom: 3vh; transform: translateX(-50%); min-width: 30rem; padding: 0.7rem 1.6rem; background: #fff; border-radius: var(--r-pill); box-shadow: var(--shadow-float); white-space: nowrap; }
+/* Join-URL chip — pinned to the bottom-centre of the page, and a <button>: a
+   click (or Enter/Space) copies the full join link, confirmed by the .toast.
+   min-width reserves the production URL's footprint (powder.couch-games.com/<code>
+   ≈ 30rem on a big screen) so the "…" placeholder already sits at final size,
+   instead of the chip expanding from the centre when the room code + URL arrive.
+   Transparent border (border-box) holds the box steady as :hover tints it. */
+.join-chip { position: fixed; left: 50%; bottom: 3vh; transform: translateX(-50%); min-width: 30rem; padding: 0.7rem 1.6rem; background: #fff; border: 2px solid transparent; border-radius: var(--r-pill); box-shadow: var(--shadow-float); white-space: nowrap; text-align: center; font: inherit; color: inherit; cursor: pointer; transition: border-color 0.15s ease, transform 0.06s ease; }
+.join-chip:hover { border-color: var(--brand); }
+.join-chip:active { transform: translateX(-50%) translateY(1px); }
+.join-chip:focus-visible { outline: 3px solid var(--brand); outline-offset: 3px; }
 .join-chip .join__url { font-size: clamp(1.1rem, 2vw, 1.7rem); word-break: normal; }
+
+/* Copy-confirmation toast — floats just above the join chip; fades + rises in,
+   then back out (main.js toggles .is-on for ~1.6s). */
+.toast {
+  position: fixed; left: 50%; bottom: calc(3vh + 5.5rem); z-index: 10;
+  transform: translate(-50%, 0.5rem);
+  font-weight: 800; font-size: 1rem; color: #fff;
+  background: var(--brand); padding: 0.55rem 1.3rem; border-radius: var(--r-pill);
+  box-shadow: var(--shadow-pop); opacity: 0; pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.toast.is-on { opacity: 1; transform: translate(-50%, 0); }
 
 /* Cross-fade between looping lobby attract races — covers the 3D scene (z:0) but
    sits UNDER the lobby cards (z:2), so the race dips to snow-white and back while
