@@ -113,7 +113,13 @@ export class SceneRenderer {
   }
 
   _initThree() {
-    const r = new THREE.WebGLRenderer({ antialias: true });
+    // Quality knobs (URL-overridable, static — chosen once at load, nothing adapts at
+    // runtime). MSAA is OFF by default — a big fill-rate win on integrated/TV-class GPUs
+    // across the up-to-4 split-screen passes; ?aa=1 forces it back. ?gfx=low additionally
+    // drops cast shadows. Pixel ratio is capped at 2 (HiDPI panels render at native, up to 2×).
+    const q = new URLSearchParams(location.search);
+    this._gfxLow = q.get('gfx') === 'low';
+    const r = new THREE.WebGLRenderer({ antialias: q.get('aa') === '1' });
     r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     r.setSize(window.innerWidth, window.innerHeight);
     r.outputColorSpace = THREE.SRGBColorSpace;
@@ -124,7 +130,7 @@ export class SceneRenderer {
     r.toneMapping = THREE.NeutralToneMapping;
     r.toneMappingExposure = 1.25;
     r.autoClear = false;                  // we clear once per frame, then render N viewports
-    r.shadowMap.enabled = true;
+    r.shadowMap.enabled = !this._gfxLow;  // ?gfx=low drops cast shadows wholesale (depth pass + per-fragment PCF sampling)
     r.shadowMap.type = THREE.PCFShadowMap; // (PCFSoft is deprecated in the vendored three and falls back to this)
     this.container.appendChild(r.domElement);
     this.renderer = r;
@@ -133,6 +139,7 @@ export class SceneRenderer {
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0xbfe3f7);              // bright alpine sky
     scene.fog = new THREE.Fog(0xf1f6fc, 110, 360);            // bright snowy haze (far enough for the peaks)
+    scene.matrixWorldAutoUpdate = false;                      // _loop walks the graph ONCE/frame, not once per split-screen viewport
     this.scene = scene;
 
     // Three.js uses physically-based lights: a light of intensity 1 yields only
@@ -144,8 +151,8 @@ export class SceneRenderer {
     scene.add(new THREE.HemisphereLight(0xffffff, 0xeaf2fb, 1.9)); // sky fill (keeps shadows light, not grey)
     const key = new THREE.DirectionalLight(0xffffff, 2.7);         // strong neutral sun → shape-defining gradient
     key.position.set(8, 15, 6);
-    key.castShadow = true;
-    key.shadow.mapSize.set(2048, 2048);
+    key.castShadow = !this._gfxLow;
+    key.shadow.mapSize.set(1024, 1024); // only static props/gate-posts cast; 1024 quarters the VRAM vs 2048 (low-end devices) — shadows are pale + props small, so the softer edge reads fine
     key.shadow.autoUpdate = false;        // refreshed once per frame in _loop (not once per viewport)
     key.shadow.bias = -0.0005;
     key.shadow.normalBias = 0.06;
@@ -155,7 +162,7 @@ export class SceneRenderer {
     // Surrounding snow field (the slope ribbon sits on top of it).
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(1200, 1200),
-      new THREE.MeshStandardMaterial({ color: 0xf4f8fc, roughness: 1 })
+      new THREE.MeshLambertMaterial({ color: 0xf4f8fc })
     );
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = -2;
@@ -508,6 +515,7 @@ export class SceneRenderer {
     if (this.trails) this.trails.clear();
     if (this.poles) this.poles.reset();
     if (this.finishGate) this.finishGate.reset();
+    if (this._key) this._key.shadow.needsUpdate = true; // gate posts straightened → repaint the static shadow once
   }
 
   setSkierHud(id, info) {
@@ -665,14 +673,27 @@ export class SceneRenderer {
     this._frameDt = dt;
     if (this.onFrame) this.onFrame(dt);
     if (this.poles) this.poles.update(dt); // after onFrame: same-frame response to this tick's pokes
+    // Capture BEFORE finishGate.update() — it clears _easing on the settle frame,
+    // and a bending gate post (a shadow caster) needs the map repainted that frame.
+    const gateEasing = !!(this.finishGate && this.finishGate._easing);
     if (this.finishGate) this.finishGate.update(dt);
+    // Walk the (large, mostly-static) scene graph ONCE per frame. All transform
+    // mutations (skier poses, pole/gate animation) happen above; render() no longer
+    // auto-walks it per viewport (scene.matrixWorldAutoUpdate is off).
+    this.scene.updateMatrixWorld();
 
     const W = window.innerWidth, H = window.innerHeight;
     const r = this.renderer;
     r.setScissorTest(false);
     r.setViewport(0, 0, W, H);
     r.clear();
-    if (this._key) this._key.shadow.needsUpdate = true;
+    // Shadow casters are all STATIC (ramps/rocks/obstacle-trees + the finish-gate
+    // posts); skiers, poles, trees and peaks cast none. setTrack primes the 2048²
+    // map once and clearTrails repaints it at each run start, so the ONLY per-frame
+    // refresh needed is while a clipped gate post is bending. Re-rendering the map
+    // every frame was a full extra scene depth pass at 60fps — the biggest fixed
+    // per-frame GPU cost on weak hardware, for a bit-identical shadow.
+    if (this._key && gateEasing) this._key.shadow.needsUpdate = true;
 
     const ids = this._order.filter((id) => this.skiers.has(id));
     // Flank forest renders only under the single overview camera (lobby + the

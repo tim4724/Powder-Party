@@ -41,6 +41,11 @@ export class PoleField {
     this._active = new Set();      // poles currently tumbling through the air
     this._kick = new THREE.Vector3(); // scratch
     this._off = new THREE.Vector3();
+    this._m4 = new THREE.Matrix4();    // instanced-matrix scratch
+    this._q = new THREE.Quaternion();
+    this._pos = new THREE.Vector3();
+    this._one = new THREE.Vector3(1, 1, 1);
+    this._im = null;                   // the field's InstancedMesh (1 draw call for the whole field)
 
     // One shared geometry + one shared material for the whole field — every pole is
     // SOLID-coloured to the run's grade, so the difficulty reads at a glance from
@@ -49,7 +54,7 @@ export class PoleField {
     // colour. No grade colour supplied → a neutral pale pole.
     const poleGeo = new THREE.CylinderGeometry(POLE_R, POLE_R, POLE_H, 6, 8);
     poleGeo.translate(0, POLE_H / 2, 0); // origin at the base (flight code re-centres tumbles)
-    const poleMat = new THREE.MeshStandardMaterial({ color: poleColor || POLE_DEFAULT });
+    const poleMat = new THREE.MeshLambertMaterial({ color: poleColor || POLE_DEFAULT });
     const n = samples.length;
     for (let i = 2; i < n - 2; i += 5) {
       const s = samples[i];
@@ -57,12 +62,9 @@ export class PoleField {
       const ex = s.pos.x + s.lateral.x * pisteHalf * side;
       const ey = s.pos.y + s.lateral.y * pisteHalf * side;
       const ez = s.pos.z + s.lateral.z * pisteHalf * side;
-      const pole = new THREE.Mesh(poleGeo, poleMat);
-      pole.position.set(ex, ey - 0.05, ez); // base-origin geo: -0.05 = the embed
-      group.add(pole);
       const p = {
-        mesh: pole, s: s.s, lat: pisteHalf * side,
-        bx: ex, by: ey - 0.05, bz: ez,       // home pose, restored on reset()
+        index: this._poles.length, s: s.s, lat: pisteHalf * side, // index = instance slot
+        bx: ex, by: ey - 0.05, bz: ez,       // home pose, restored on reset() (-0.05 = the base embed)
         mode: 0, // 0 standing · 1 tumbling through the air · 2 sunk in the snow
         fs: 0, flat: 0, h: 0, vs: 0, vlat: 0, vh: 0, // flight state in (s, lat, height)
         spinAxis: new THREE.Vector3(), spinRate: 0, spinAng: 0,
@@ -73,6 +75,20 @@ export class PoleField {
         group.add(p.hitMark);
       }
       this._poles.push(p);
+    }
+    // ONE InstancedMesh for the whole field — a single draw call per viewport instead
+    // of ~100 (each pole was its own mesh). Every pole is an instance carrying its own
+    // matrix; a broken-off pole simply rewrites its instance matrix each frame in
+    // update() (standing poles never re-upload). Poles cast no shadow, so breaking one
+    // never needs a shadow-map refresh.
+    if (this._poles.length) {
+      const im = this._im = new THREE.InstancedMesh(poleGeo, poleMat, this._poles.length);
+      im.castShadow = false; im.receiveShadow = false;
+      im.frustumCulled = false; // poles line the whole run; an origin-centred bound would wrongly cull
+      const m4 = this._m4;
+      for (const p of this._poles) { m4.makeTranslation(p.bx, p.by, p.bz); im.setMatrixAt(p.index, m4); }
+      im.instanceMatrix.needsUpdate = true;
+      group.add(im);
     }
   }
 
@@ -131,6 +147,7 @@ export class PoleField {
   // Standing poles cost nothing: only members of _active update.
   update(dt) {
     if (this._active.size === 0) return;
+    const m4 = this._m4, q = this._q, pos = this._pos, one = this._one;
     for (const p of this._active) { // active = airborne poles only
       p.vh -= POLE_G * dt;
       p.fs += p.vs * dt; p.flat += p.vlat * dt; p.h += p.vh * dt;
@@ -142,27 +159,34 @@ export class PoleField {
         p.mode = 2;
         const lie = this._kick.copy(f.tangent).multiplyScalar(p.vs).addScaledVector(f.lateral, p.vlat);
         lie.addScaledVector(f.up, -POLE_SINK * lie.length()).normalize();
-        p.mesh.quaternion.setFromUnitVectors(_up, lie);
-        p.mesh.position.copy(f.pos).addScaledVector(f.lateral, p.flat).addScaledVector(f.up, 0.04)
+        q.setFromUnitVectors(_up, lie);
+        pos.copy(f.pos).addScaledVector(f.lateral, p.flat).addScaledVector(f.up, 0.04)
           .addScaledVector(lie, -0.55); // base-origin geo: centre the lie on the landing point
         this._active.delete(p);
       } else {
-        p.mesh.quaternion.setFromAxisAngle(p.spinAxis, p.spinAng);
-        const off = this._off.set(0, 0.55, 0).applyQuaternion(p.mesh.quaternion); // origin → centre
-        p.mesh.position.copy(f.pos).addScaledVector(f.lateral, p.flat).addScaledVector(f.up, p.h).sub(off);
+        q.setFromAxisAngle(p.spinAxis, p.spinAng);
+        const off = this._off.set(0, 0.55, 0).applyQuaternion(q); // origin → centre
+        pos.copy(f.pos).addScaledVector(f.lateral, p.flat).addScaledVector(f.up, p.h).sub(off);
       }
+      m4.compose(pos, q, one);
+      this._im.setMatrixAt(p.index, m4);
     }
+    this._im.instanceMatrix.needsUpdate = true;
   }
 
   // Stand every knocked pole back up (the start of each run resets the field).
   reset() {
+    let any = false;
+    const m4 = this._m4;
     for (const p of this._poles) {
       if (p.mode === 0) continue;
       p.mode = 0;
-      p.mesh.position.set(p.bx, p.by, p.bz);
-      p.mesh.quaternion.identity();
+      m4.makeTranslation(p.bx, p.by, p.bz);
+      this._im.setMatrixAt(p.index, m4);
       if (p.hitMark) p.hitMark.visible = true;
+      any = true;
     }
     this._active.clear();
+    if (any) this._im.instanceMatrix.needsUpdate = true;
   }
 }

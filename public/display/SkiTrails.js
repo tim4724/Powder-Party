@@ -10,7 +10,10 @@
 // draws a straight line across a gap the skier flew over.
 import * as THREE from 'three';
 
-const MAX_POINTS = 2000;     // ring-buffer cap per skier (oldest points drop off)
+const MAX_POINTS = 1000;     // ring-buffer cap per skier (oldest points drop off). ~450u of tail
+                            // — far longer than the ~4-11u the chase cam ever frames behind a skier,
+                            // so halving it from 2000 halves the per-recording buffer re-upload +
+                            // index rebuild (a weak-hardware bandwidth/CPU win) with no visible change.
 const MIN_STEP   = 0.45;     // world units of travel between recorded points
 const MAX_GAP    = 3;        // break the ribbon past this jump. A ski-patrol reset snaps
                             // the skier ~0.6×slope-width (≥6u) sideways; normal travel is
@@ -41,8 +44,8 @@ export class SkiTrails {
     geom.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(MAX_POINTS * VPP * 3), 3));
     geom.setIndex(new THREE.BufferAttribute(new Uint32Array(MAX_POINTS * IPP), 1));
     geom.setDrawRange(0, 0);
-    const mat = new THREE.MeshStandardMaterial({
-      color: TRACK_COLOR, roughness: 1, metalness: 0,
+    const mat = new THREE.MeshLambertMaterial({
+      color: TRACK_COLOR,
       transparent: true, opacity: 0.2, depthWrite: false, side: THREE.DoubleSide,
       polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
     });
