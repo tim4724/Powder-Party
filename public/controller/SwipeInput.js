@@ -4,8 +4,9 @@
 // gesture target — no buttons to aim at. Tucked (fast) is the DEFAULT resting
 // state; you only touch the pad to do something deliberate:
 //
-//   press DOWN and HOLD            →  BRAKE (sit up, scrub speed, sharp carve).
-//     t drops to 0 while held; releasing returns to the default tuck (t=1).
+//   TOUCH and HOLD anywhere        →  BRAKE (sit up, scrub speed, sharp carve).
+//     t drops to 0 the instant a finger lands — no gesture, no aiming, no
+//     downward push; releasing returns to the default tuck (t=1).
 //   quick FLICK in the air         →  a FLIP, fully ANALOG: the swipe ANGLE picks
 //     the trick — up = back, down = front, left/right = spin, diagonals = corks —
 //     and how hard you throw sets the spin rate. Every flick rides the {n,a,m}
@@ -14,10 +15,13 @@
 //     legacy jump edge `j`, which the display reads ONLY in the air, as a back-flip
 //     fallback for non-analog inputs (the air otherwise reads f's exact angle).
 //
-// A flick is a FAST swipe (released within FLICK_MAX_MS); a brake is a SUSTAINED
-// downward hold. A quick down-flick therefore reads as a front flip (in the air),
-// while a slow downward press reads as a brake — same direction, told apart by
-// speed.
+// Brake vs flick is told apart at RELEASE, by SPEED: a flick is a FAST swipe
+// (released within FLICK_MAX_MS); a brake is a SUSTAINED hold. So the brake STATE
+// (t→0) engages the moment you touch — instant and responsive, and harmless even
+// when the touch turns into a flick (a few ms of t=0 does nothing on the snow, and
+// t is ignored in the air). The brake CONFIRMATION (buzz + pad glow) waits out the
+// flick window so a quick flick — or a stray tap — never fires a false brake buzz;
+// a genuine hold is confirmed the instant that window passes.
 //
 // Both j and f are latest-wins-safe wrapping edges: the display fires one action
 // per CHANGE, so a dropped fastlane frame just re-delivers the same value.
@@ -34,9 +38,9 @@
 // callbacks for the HUD + haptics (every recognized input gets a confirming buzz
 // in main.js).
 
-const BRAKE_THRESHOLD_PX = 40;  // downward travel before a hold counts as a brake
 const FLICK_THRESHOLD_PX = 46;  // travel a quick swipe needs to count as a flick
-const FLICK_MAX_MS = 300;       // a flick must complete within this (else it's a hold/tap)
+const FLICK_MAX_MS = 300;       // a flick must complete within this (else it's a hold/tap);
+                                // also how long a hold must outlast before it's CONFIRMED a brake
 const FLICK_MAG_SPAN = 140;     // travel (px) PAST the threshold that maps to full strength (m=1)
 const UP_CONE = Math.PI / 3;    // a flick within ±60° of straight up also bumps the legacy jump edge j (air back-flip fallback)
 
@@ -53,7 +57,9 @@ export class SwipeInput {
     this.onBrakeEnd = onBrakeEnd || (() => {});      // () => …  brake released (t→1)
     this.onFlick = onFlick || (() => {});            // (a, m) => … angle (rad) + strength (0..1)
 
-    this._braking = false;
+    this._braking = false;        // brake STATE (t→0) — engaged the instant a touch lands
+    this._brakeConfirmed = false; // has the brake feedback (buzz + glow) fired? (waits out the flick window)
+    this._confirmTimer = null;    // pending brake-confirm timer
     this._jumpSeq = 0;         // wrapping JUMP edge (bumped by any upward flick)
     this._flickSeq = 0;        // wrapping analog trick edge
     this._flickAngle = 0;      // last flick angle (rad, up = +π/2)
@@ -72,7 +78,6 @@ export class SwipeInput {
     this._keyRight = false;
 
     this._down = this._down.bind(this);
-    this._move = this._move.bind(this);
     this._up = this._up.bind(this);
     this._bindKeys();
   }
@@ -80,7 +85,6 @@ export class SwipeInput {
   start() {
     if (!this.surface) return;
     this.surface.addEventListener('pointerdown', this._down);
-    this.surface.addEventListener('pointermove', this._move);
     this.surface.addEventListener('pointerup', this._up);
     this.surface.addEventListener('pointercancel', this._up);
     this.surface.addEventListener('pointerleave', this._up);
@@ -88,7 +92,6 @@ export class SwipeInput {
   stop() {
     if (this.surface) {
       this.surface.removeEventListener('pointerdown', this._down);
-      this.surface.removeEventListener('pointermove', this._move);
       this.surface.removeEventListener('pointerup', this._up);
       this.surface.removeEventListener('pointercancel', this._up);
       this.surface.removeEventListener('pointerleave', this._up);
@@ -104,14 +107,12 @@ export class SwipeInput {
     this._startY = e.clientY;
     this._startT = performance.now();
     this.onContact(e.clientX, e.clientY);        // ripple / "the whole pad is live"
+    // Touch = brake: drop the tuck the instant a finger lands (no gesture). The
+    // STATE is instant for a responsive sim; the CONFIRMATION feedback waits out
+    // the flick window, so a quick flick or a stray tap fires no false brake buzz.
+    this._braking = true;
+    this._confirmTimer = setTimeout(() => this._confirmBrake(), FLICK_MAX_MS);
     e.preventDefault();                          // stop iOS pull-to-refresh / scroll
-  }
-  _move(e) {
-    if (e.pointerId !== this._pointerId) return;
-    const dy = e.clientY - this._startY;
-    // Engage the brake once a sustained press has travelled down past the
-    // threshold (stays on while held, even if the finger drifts).
-    if (!this._braking && dy > BRAKE_THRESHOLD_PX) { this._braking = true; this.onBrakeStart(); }
   }
   _up(e) {
     if (e.pointerId !== this._pointerId) return;
@@ -120,9 +121,10 @@ export class SwipeInput {
     const dy = e.clientY - this._startY;
     const dt = performance.now() - this._startT;
     const dist = Math.hypot(dx, dy);
-    // A fast swipe is a FLICK (jump / flip). It overrides any brake that briefly
-    // engaged on the way (a few ms of t=0 is harmless on the snow, and t is
-    // ignored in the air where flips happen).
+    // A fast swipe is a FLICK (jump / flip). It ends the brake it briefly engaged
+    // on touchdown (a few ms of t=0 is harmless on the snow, and t is ignored in
+    // the air where flips happen) — and, having released inside the flick window,
+    // it never reached the brake confirmation, so no false brake buzz fires.
     if (dt < FLICK_MAX_MS && dist > FLICK_THRESHOLD_PX) {
       this._endBrake();
       // angle: math convention, up = +π/2 (screen y is down-positive → negate dy).
@@ -131,7 +133,7 @@ export class SwipeInput {
       const m = clamp((dist - FLICK_THRESHOLD_PX) / FLICK_MAG_SPAN, 0, 1);
       this._fireFlick(a, m);
     } else {
-      // a hold or a tap — release any brake, fire nothing
+      // a hold or a tap — release the brake (onBrakeEnd fires only if it was confirmed)
       this._endBrake();
     }
   }
@@ -147,10 +149,22 @@ export class SwipeInput {
     this.onFlick(a, m);
   }
 
+  // The flick window passed with the finger still down → it's a genuine hold, not
+  // a flick. Light the brake feedback now (the STATE has been on since touchdown).
+  _confirmBrake() {
+    this._confirmTimer = null;
+    if (!this._braking || this._brakeConfirmed) return;
+    this._brakeConfirmed = true;
+    this.onBrakeStart();
+  }
+
   _endBrake() {
+    if (this._confirmTimer != null) { clearTimeout(this._confirmTimer); this._confirmTimer = null; }
     if (!this._braking) return;
     this._braking = false;
-    this.onBrakeEnd();
+    // onBrakeEnd mirrors onBrakeStart — only fire it if the brake was confirmed
+    // (a sub-window tap/flick set the state but never lit the feedback).
+    if (this._brakeConfirmed) { this._brakeConfirmed = false; this.onBrakeEnd(); }
   }
 
   // latest-state-wins fields the CONTROL tick reads each frame.
@@ -184,7 +198,8 @@ export class SwipeInput {
       if (typing(e)) return;
       const k = e.key.toLowerCase();
       if (k === 's') {
-        if (!this._keyBrake) { this._keyBrake = true; this._braking = true; this.onBrakeStart(); }
+        // keyboard brake is unambiguous (no flick to disambiguate) — confirm at once
+        if (!this._keyBrake) { this._keyBrake = true; this._braking = true; this._brakeConfirmed = true; this.onBrakeStart(); }
         e.preventDefault();
       } else if (k === 'arrowup' || k === ' ') {
         if (!this._keyUp) { this._keyUp = true; this._fireFlick(Math.PI / 2); }   // back flip (air); nothing on the snow

@@ -1,5 +1,5 @@
 // Controller entry — name → lobby → run. The whole #game surface is an eyes-free
-// touch-pad: tilt to CARVE, push down + hold to BRAKE, and in the air flick any
+// touch-pad: tilt to CARVE, touch & hold to BRAKE, and in the air flick any
 // direction to FLIP — streamed as CONTROL {s,t,j,f} to the display; a light
 // position HUD comes back over PLAYER_STATE. (Ramps auto-launch; no jump input.)
 import { ControllerNet } from './Net.js';
@@ -419,8 +419,6 @@ function startDriving() {
   // fresh run → clear any stale brake/flick state from a previous run
   const play = el('play'); if (play) play.classList.remove('braking', 'flick');
   const fill = el('carve-fill');
-  const tip = el('motion-tip');
-  tip.classList.toggle('hidden', tilt.motionState === 'granted');
   const loop = () => {
     fill.style.transform = `translateX(${tilt.state.carve * 50}%)`;
     carveRaf = requestAnimationFrame(loop);

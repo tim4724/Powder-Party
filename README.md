@@ -19,7 +19,7 @@ You're **tucked and fast by default** — you only touch the pad to do something
 |---|---|
 | **Tilt** the phone left/right | **Carve** left/right (gyro roll) |
 | *(rest — nothing)* | **Tuck** — the default: squat for speed (soft steering) |
-| **Hold down** | **Brake** — sit up to scrub speed and carve hard (corners, trees) |
+| **Touch & hold** (anywhere) | **Brake** — sit up to scrub speed and carve hard (corners, trees) |
 | **Flick in the air** (any direction) | A **trick** — the angle picks it: up = back flip, down = front, sides = spin, diagonals = cork. Land it clean for a small boost; land mid-rotation and you wash out |
 
 There's **no jump button**: ramps **auto-launch** you when you ski over the lip — the faster you
@@ -51,7 +51,7 @@ npm start            # http://localhost:4000  (PORT env overrides)
 1. Open the display URL on a big screen.
 2. Players scan the QR code with their phones to join.
 3. The first player to join is the host and starts the run from their phone.
-4. Tilt to carve, push down to brake, and in the air flick **any direction** to pull a trick (the
+4. Tilt to carve, touch & hold to brake, and in the air flick **any direction** to pull a trick (the
    angle picks it — up/down flip, sides spin, diagonals cork; ramps launch you). First to the bottom wins.
 
 > Phones need **HTTPS** for the tilt sensors — front the server with a tunnel or TLS cert when

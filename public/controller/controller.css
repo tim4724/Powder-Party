@@ -118,7 +118,7 @@ input[type=text]:disabled { opacity: 0.6; }
 #pos.leader { background: var(--accent); color: var(--ink); }
 
 /* ---- the eyes-free touch-pad ----
-   The WHOLE area is the gesture target: push down + hold = BRAKE, in the air a
+   The WHOLE area is the gesture target: touch & hold = BRAKE, in the air a
    flick in ANY direction = a FLIP (the angle picks the trick). No outer panel —
    the instruction card + the dashed swipe zone sit straight on the screen so it
    doesn't read as a box-in-a-box. touch-action:none (also set on #game by
@@ -130,15 +130,20 @@ input[type=text]:disabled { opacity: 0.6; }
   touch-action: none;
 }
 
-/* structured instructions, pinned at the top — one clean row per move: a
-   livery-coloured icon chip + the move name + how to do it. */
+/* touch-gesture guide, pinned at the top — a heading, then one row per touch move
+   (a livery-coloured icon chip + the move name + a short how-to). Carve is a TILT,
+   not a touch, so it lives down by the carve bar instead. */
 .play__legend {
   width: 100%; z-index: 1;
-  display: flex; flex-direction: column; gap: 0.45rem;
-  background: rgba(255, 255, 255, 0.7); border: 2px solid var(--hairline); border-radius: var(--r-sm);
-  padding: 0.7rem 0.75rem;
+  display: flex; flex-direction: column; gap: 0.6rem;
+  background: rgba(255, 255, 255, 0.78); border: 2px solid var(--hairline); border-radius: var(--r-sm);
+  padding: 0.9rem 0.95rem;
 }
-.legend-row { display: flex; align-items: center; gap: 0.7rem; }
+.legend-head {
+  font-family: var(--font-display); font-weight: 700; color: var(--ink);
+  font-size: 1.1rem; line-height: 1.1;
+}
+.legend-row { display: flex; align-items: flex-start; gap: 0.7rem; }
 .legend-ico {
   flex: none; width: 2rem; height: 2rem; border-radius: 0.6rem;
   display: flex; align-items: center; justify-content: center;
@@ -147,13 +152,14 @@ input[type=text]:disabled { opacity: 0.6; }
 }
 /* Flip = "swipe any direction" — a 4-way arrow rather than a single glyph. */
 .legend-arrows { width: 1.35rem; height: 1.35rem; display: block; fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.legend-txt { font-weight: 800; color: var(--ink-2); font-size: 0.86rem; line-height: 1.15; }
-.legend-txt b { font-family: var(--font-display); font-weight: 700; color: var(--ink); font-size: 1rem; margin-right: 0.4rem; }
+.legend-txt { display: flex; flex-direction: column; gap: 0.1rem; }
+.legend-txt b { font-family: var(--font-display); font-weight: 700; color: var(--ink); font-size: 1rem; line-height: 1.1; }
+.legend-txt span { font-weight: 600; color: var(--ink-2); font-size: 0.82rem; line-height: 1.25; }
 
 /* the focal swipe target — a smaller, clearly-bounded pad. Swipes anywhere on the
    surface still register (eyes-free), but this reads as "touch here". */
 .play__zone {
-  flex: 1; align-self: stretch; z-index: 1;
+  flex: 1; min-height: 3.5rem; align-self: stretch; z-index: 1;
   margin-top: 0.9rem;
   display: flex; align-items: center; justify-content: center;
   border: 2px dashed color-mix(in srgb, var(--car), #fff 38%); border-radius: var(--r);
@@ -167,7 +173,7 @@ input[type=text]:disabled { opacity: 0.6; }
   100% { transform: scale(1); }
 }
 
-/* braking — push down + hold: the touch zone warms toward the livery + its border
+/* braking — touch & hold: the touch zone warms toward the livery + its border
    lights up, mirroring "sit up to scrub speed". */
 .play.braking .play__zone {
   border-color: var(--car);
@@ -197,9 +203,9 @@ input[type=text]:disabled { opacity: 0.6; }
 }
 .carve__track::before { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; background: var(--hairline); }
 #carve-fill { position: absolute; left: 50%; top: 0; bottom: 0; width: 50%; margin-left: -25%; background: var(--car); border-radius: var(--r-pill); transition: transform 0.05s linear; }
-.carve__label { text-align: center; color: var(--ink-2); font-weight: 700; font-size: 0.82rem; margin-top: 0.35rem; }
-
-#motion-tip { color: var(--ink-2); font-weight: 700; text-align: center; font-size: 0.95rem; }
+/* the sole carve cue now (carve isn't in the top touch guide) — sits just under
+   the indicator bar. */
+.carve__label { text-align: center; color: var(--ink-2); font-weight: 700; font-size: 0.9rem; margin-top: 0.4rem; }
 
 /* ---- latency chip ---- */
 /* One-way latency (RTT/2), pinned to the bottom-right corner. A dark pill keeps

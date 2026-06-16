@@ -49,7 +49,6 @@ export function runControllerScenario(opts) {
     show('game');
     el('drive-hud').classList.remove('hidden');
     el('pause-btn').classList.remove('hidden'); // present the whole time you drive (main.js COUNTDOWN/GAME_START)
-    el('motion-tip').classList.add('hidden');
   }
 
   // The #conn overlay covers whatever in-room screen the drop interrupted —
@@ -131,7 +130,7 @@ export function runControllerScenario(opts) {
       break;
 
     case 'brake':
-      // Braking: push down + hold. The pad warms toward the livery and the brake
+      // Braking: touch & hold. The pad warms toward the livery and the brake
       // label lights up. Eyeball the eyes-free touch-pad surface.
       showDriveHud();
       setCarve(-0.2);

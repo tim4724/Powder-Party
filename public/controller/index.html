@@ -60,7 +60,7 @@
   </section>
 
   <!-- Game: tucked-and-fast is the default. The whole #play surface is one
-       eyes-free TOUCH-PAD — push down to BRAKE · in the air flick ANY direction to
+       eyes-free TOUCH-PAD — touch & hold to BRAKE · in the air flick ANY direction to
        FLIP (the angle picks the trick). Ramps launch you automatically. The player
        watches the big screen, not the phone. -->
   <section id="game" class="hidden">
@@ -75,22 +75,24 @@
            (swipes anywhere still register — see SwipeInput). Carve bar at the foot. -->
       <div id="play" class="play">
         <div class="play__legend" aria-hidden="true">
-          <div class="legend-row"><span class="legend-ico">↓</span><span class="legend-txt"><b>Brake</b>push &amp; hold</span></div>
+          <div class="legend-head">Your moves</div>
+          <div class="legend-row">
+            <span class="legend-ico">●</span>
+            <span class="legend-txt"><b>Brake</b><span>Touch &amp; hold</span></span>
+          </div>
           <div class="legend-row">
             <span class="legend-ico"><svg class="legend-arrows" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.5V19.5M4.5 12H19.5M9.7 6.8L12 4.5L14.3 6.8M9.7 17.2L12 19.5L14.3 17.2M6.8 9.7L4.5 12L6.8 14.3M17.2 9.7L19.5 12L17.2 14.3"/></svg></span>
-            <span class="legend-txt"><b>Flip</b>in the air, flick any way</span>
+            <span class="legend-txt"><b>Flip</b><span>In the air, flick any direction</span></span>
           </div>
         </div>
         <div id="touch-zone" class="play__zone" aria-hidden="true">
-          <span class="play__zone-label">swipe here</span>
+          <span class="play__zone-label">touch here</span>
         </div>
         <div class="carve">
           <div class="carve__track"><div id="carve-fill"></div></div>
-          <div class="carve__label">tilt to carve</div>
+          <div class="carve__label">Tilt your phone to carve</div>
         </div>
       </div>
-
-      <div id="motion-tip" class="hidden">No tilt? Use ◄ ► keys to carve.</div>
     </div>
     <!-- Pause overlay — frosted glass with the same choices as the big screen -->
     <div id="pause-overlay" class="hidden">
