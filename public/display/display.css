@@ -53,13 +53,25 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #cfeaf8; }
 .lobby__level { align-items: flex-start; gap: 0.55rem; margin-top: 1.3rem; }
 .lobby__level .level-select__cap { font-size: 0.95rem; letter-spacing: 0.05em; }
 .lobby__level .level-seg__btn { font-size: 1.2rem; padding: 0.55rem 1.5rem; }
+/* Reserve the switch's built box (3 buttons: Blue/Red/Black) so it's at final
+   size on first paint — buildLevelSeg fills this empty container from JS, which
+   would otherwise snap the pill from a bare nub to full width (and grow the card
+   a row taller) a frame after load. justify-content: center keeps the buttons
+   centred in the reserved width if font metrics land a hair under the reserve. */
+.lobby__level .level-seg { min-width: 18.25rem; min-height: 3.25rem; justify-content: center; }
 
 .lobby__qr { flex: none; }
 .qr-card { background: #fff; padding: 1.2rem; border-radius: var(--r-lg); box-shadow: var(--shadow-float); }
-.qr-card canvas { display: block; width: clamp(220px, 26vw, 420px); height: auto; image-rendering: pixelated; }
+/* aspect-ratio holds the final SQUARE box from first paint: the canvas starts at
+   its default 300×150 intrinsic (until renderQR makes it square), and without this
+   `height: auto` would lay it out half-height, then pop to full when the QR lands. */
+.qr-card canvas { display: block; width: clamp(220px, 26vw, 420px); aspect-ratio: 1; height: auto; image-rendering: pixelated; }
 
-/* Join-URL chip — pinned to the bottom-centre of the page. */
-.join-chip { position: fixed; left: 50%; bottom: 3vh; transform: translateX(-50%); padding: 0.7rem 1.6rem; background: #fff; border-radius: var(--r-pill); box-shadow: var(--shadow-float); white-space: nowrap; }
+/* Join-URL chip — pinned to the bottom-centre of the page. min-width reserves the
+   production URL's footprint (powder.couch-games.com/<code> ≈ 30rem on a big
+   screen) so the "…" placeholder already sits at final size, instead of the chip
+   expanding from the centre the moment the room code + join URL arrive. */
+.join-chip { position: fixed; left: 50%; bottom: 3vh; transform: translateX(-50%); min-width: 30rem; padding: 0.7rem 1.6rem; background: #fff; border-radius: var(--r-pill); box-shadow: var(--shadow-float); white-space: nowrap; }
 .join-chip .join__url { font-size: clamp(1.1rem, 2vw, 1.7rem); word-break: normal; }
 
 /* Cross-fade between looping lobby attract races — covers the 3D scene (z:0) but
