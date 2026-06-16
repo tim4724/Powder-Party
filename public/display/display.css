@@ -17,8 +17,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #cfeaf8; }
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 3vh; padding: 5vh 6vw; box-sizing: border-box;
 }
-/* Card + QR side by side; the join-URL chip is centred below the row. */
-.lobby__row { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 4vw; }
+/* Card + QR side by side; the join-URL chip is centred below the row. The row is
+   capped and centred (#lobby centres it) so on a wide display the pair sits as a
+   balanced group framing the race in the gap, rather than hugging the far edges. */
+.lobby__row { width: 100%; max-width: 1800px; display: flex; align-items: center; justify-content: space-between; gap: 4vw; }
 /* The card is the main element (the live race just plays quietly behind it) — grow
    to fill the space left of the QR (flex:1, 0 basis) so its width is stable, capped
    just above the QR's width on a wide display. */
