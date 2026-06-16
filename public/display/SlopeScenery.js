@@ -414,6 +414,7 @@ function checkerTexture(cols, rows) {
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 8;
+  tex.magFilter = THREE.NearestFilter; // crisp cell edges up close (linear mag blurs the boundaries); minFilter keeps mipmaps for clean distance averaging
   _checkerCache.set(key, tex);
   return tex;
 }
