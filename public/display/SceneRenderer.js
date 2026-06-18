@@ -128,7 +128,10 @@ export class SceneRenderer {
     // (the mountain shapes stay readable). Khronos "Neutral" keeps whites neutral
     // (ACES/Filmic would add the beige cast we don't want).
     r.toneMapping = THREE.NeutralToneMapping;
-    r.toneMappingExposure = 1.25;
+    // Modest exposure (was 1.25) leaves headroom so the snow palette doesn't pile
+    // up against the clip ceiling — paired with the cooler/darker off-piste tones
+    // (SlopeScenery.addTerrain), the slope stays legible on TVs that crush highlights.
+    r.toneMappingExposure = 0.98;
     r.autoClear = false;                  // we clear once per frame, then render N viewports
     r.shadowMap.enabled = !this._gfxLow;  // ?gfx=low drops cast shadows wholesale (depth pass + per-fragment PCF sampling)
     r.shadowMap.type = THREE.PCFShadowMap; // (PCFSoft is deprecated in the vendored three and falls back to this)
@@ -138,7 +141,7 @@ export class SceneRenderer {
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0xbfe3f7);              // bright alpine sky
-    scene.fog = new THREE.Fog(0xf1f6fc, 110, 360);            // bright snowy haze (far enough for the peaks)
+    scene.fog = new THREE.Fog(0xd4e2f1, 110, 360);            // cool snowy haze (cooled/darkened so the far piste doesn't wash into white — see addTerrain contrast note)
     scene.matrixWorldAutoUpdate = false;                      // _loop walks the graph ONCE/frame, not once per split-screen viewport
     this.scene = scene;
 
@@ -162,7 +165,8 @@ export class SceneRenderer {
     // Surrounding snow field (the slope ribbon sits on top of it).
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(1200, 1200),
-      new THREE.MeshLambertMaterial({ color: 0xf4f8fc })
+      // surrounding off-piste snow: same cool/darker family as the deep-snow shoulders.
+      new THREE.MeshLambertMaterial({ color: 0xbac9dd })
     );
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = -2;

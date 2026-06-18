@@ -129,10 +129,18 @@ function addSlopeStrip(group, samples, offA, offB, riseA, riseB, material) {
 // The two-tone snow ribbon + valley cross-section: groomed piste (alternating
 // corduroy passes), deep-snow shoulders, then snow rising into mountainside
 // walls on each side — all built from the centerline so the whole valley
-// descends with the run. Near-white, no warm tint.
+// descends with the run.
+//
+// CONTRAST FOR BAD-DYNAMIC-RANGE TVS: every surface used to sit in 237–255 luma,
+// so on a panel that crushes highlights the whole slope collapsed to one flat
+// white blob — no piste edge, no corduroy, no terrain depth. We keep the groomed
+// piste bright white but step everything off-piste progressively DARKER and
+// COOLER-BLUE. Hue (chroma) survives highlight-crush where near-white luma does
+// not, and shadowed/ungroomed snow genuinely reads blue-grey — so the piste now
+// stands out as a bright ribbon framed by visibly darker snow.
 export function addTerrain(group, meshSamples, pisteHalf, edgeLat, groundY) {
   const NB = 6;                       // groomer passes across the piste
-  const PASS = 0xffffff, GROOVE = 0xf6f9fc, DEEP = 0xedf2f8, WALL = 0xf4f8fd;
+  const PASS = 0xffffff, GROOVE = 0xe2ecf6, DEEP = 0xbccadf, WALL = 0xa0b4d1;
   // Lambert, not Standard: matte snow has no specular lobe worth the per-fragment
   // GGX cost, and this is the largest screen-coverage surface ×N split-screen passes.
   const mat = (color) => new THREE.MeshLambertMaterial({ color, side: THREE.DoubleSide });
@@ -157,7 +165,8 @@ export function addTerrain(group, meshSamples, pisteHalf, edgeLat, groundY) {
 // the elevated run so it reads as a solid mountain from every orbit angle.
 function addFlanks(group, samples, edgeLat, groundY) {
   const offInner = edgeLat + 72, riseInner = 48, offOuter = edgeLat + 240;
-  const mat = new THREE.MeshLambertMaterial({ color: 0xeef3f9, side: THREE.DoubleSide });
+  // deepest, coolest snow — the valley walls fall away below the run (see DEEP/WALL).
+  const mat = new THREE.MeshLambertMaterial({ color: 0x93a8c9, side: THREE.DoubleSide });
   const n = samples.length;
   for (const sign of [-1, 1]) {
     const oi = sign * offInner, oo = sign * offOuter;
