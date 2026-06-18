@@ -133,12 +133,11 @@ const TRICK_SKILL_MIN = 0.78;// only the bolder bots bother seeking kickers / th
 // `laneBias` is its preferred line — fanning the bots across the piste so the field
 // doesn't run nose-to-tail.
 export class AiController {
-  constructor({ skill = 0.9, lookahead = LOOKAHEAD, gain = STEER_GAIN, laneBias = 0, avoid = true } = {}) {
+  constructor({ skill = 0.9, lookahead = LOOKAHEAD, gain = STEER_GAIN, laneBias = 0 } = {}) {
     this.skill = clamp(skill, 0, 1);
     this.lookahead = lookahead;
     this.gain = gain;
     this.laneBias = laneBias;
-    this.avoid = avoid;             // false → ignore trees/skiers, just hold laneBias (bump-lab derby)
     this.tricks = this.skill >= TRICK_SKILL_MIN;
     this.jSeq = 0;                  // wrapping jump/flip counter (latest-wins, matches the engine idle 0)
     this._tuck = 1;                 // sticky tuck state for the stand-up-for-bends deadband
@@ -153,7 +152,7 @@ export class AiController {
 
     // Plan a clear lateral target, then pure-pursuit carve toward it. When a dodge
     // is on, steer harder (shorter lookahead) so the bot actually reaches the lane.
-    const plan = (engine && this.avoid) ? this._plan(skier, engine) : { lat: this.laneBias, urgent: false };
+    const plan = engine ? this._plan(skier, engine) : { lat: this.laneBias, urgent: false };
     const dodging = Math.abs(plan.lat - skier.lat) > 0.6 || plan.urgent;
     const look = dodging ? DODGE_LOOK : this.lookahead;
     const s = pursue(skier, centerline, { lookahead: look, gain: this.gain, laneBias: plan.lat });

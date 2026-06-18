@@ -4,8 +4,7 @@
 // reference kart display main.js — same orchestration shape, ski game logic.
 import { DisplayNet, fetchQR, renderQR, renderJoinUrl, buildReconnectCard } from './Net.js';
 import { SceneRenderer } from './SceneRenderer.js';
-import { buildSlopeById, buildGeneratedSlope } from './SlopeBuilder.js';
-import { SLOPES } from '../shared/slopes.js';
+import { buildGeneratedSlope } from './SlopeBuilder.js';
 import { RunSession } from './RunSession.js';
 import { AiController, AI_PERSONALITIES } from './AiDriver.js';
 import { SlopeAudio } from './Audio.js';
@@ -35,20 +34,14 @@ const testMode = params.get('test') === '1' || !!params.get('scenario');
 // the host's choice. Only the procedural HILL changes per tier — never the physics.
 let currentLevel = isLevel(params.get('level')) ? params.get('level') : DEFAULT_LEVEL;
 
-// Build the slope for the NEXT run. Precedence: an explicit catalog id (the
-// gallery's Slopes page / the `powder-bowl` reference) → the `tricks` scenario's
-// straight `trick-lab` practice run → an explicit `?seed` (deterministic repro +
-// tests) → a fixed seed in test mode (stable gallery + snapshots) → a fresh
-// random seed (live play, a new mountain every run). Generated slopes carry the
-// current difficulty tier; the catalog/lab slopes are fixed by their own data.
+// Build the slope for the NEXT run — always procedural. Precedence: an explicit
+// `?seed` (deterministic repro + tests) → a fixed seed in test mode (stable gallery
+// + snapshots) → a fresh random seed (live play, a new mountain every run). The
+// mountain always carries the current difficulty tier.
 // `reroll` is a "Play again" build: it skips test mode's seed-1 pin (so a solo
 // rematch is a NEW mountain, not the same one) while still honouring an explicit
 // `?seed=` — a deliberately pinned mountain replays identically for repro.
 function makeSlope({ reroll = false } = {}) {
-  const id = params.get('slope');
-  if (id && SLOPES[id]) return buildSlopeById(id);
-  if (params.get('scenario') === 'tricks') return buildSlopeById('trick-lab');
-  if (params.get('scenario') === 'bump') return buildSlopeById('bump-lab');
   const opts = { level: currentLevel };
   const seedParam = params.get('seed');
   if (seedParam != null && seedParam !== '') {
@@ -844,8 +837,8 @@ const scenario = params.get('scenario');
 if (testMode && scenario !== 'device-choice') dismissDeviceChoice();
 if (params.get('test') === '1' || scenario) {
   import('./TestHarness.js').then(({ runDisplayScenario }) => runDisplayScenario(
-    // tricks defaults to a single full-screen skier (just you, drilling flips); add ?players=N for a CPU field
-    { scenario: scenario || 'running', players: parseInt(params.get('players'), 10) || (scenario === 'tricks' ? 1 : 4), host: parseInt(params.get('host'), 10) || 0, cam: params.get('cam') },
+    // scenarios default to a 4-skier field (solo = you + 3 CPU); ?players=N overrides
+    { scenario: scenario || 'running', players: parseInt(params.get('players'), 10) || 4, host: parseInt(params.get('host'), 10) || 0, cam: params.get('cam') },
     // Inject the REAL render fns so the harness previews the live DOM path rather
     // than a hand-copy (which drifts — see renderRoster/showResults).
     { scene, slope, AiController, AI_PERSONALITIES, RunSession, renderRoster, renderLevel, showResults, buildReconnectCard, audio, showSoundHint, rerollSlope }
@@ -878,8 +871,6 @@ initDebugMenu([
     ['', 'live (off)'],
     ['running', 'running — CPU split-screen run'],
     ['solo', 'solo — keyboard race vs CPU'],
-    ['tricks', 'tricks — trick lab (keyboard)'],
-    ['bump', 'bump — contact lab (keyboard)'],
     ['slope', 'slope — orbiting slope preview'],
     ['lobby', 'lobby — fake roster'],
     ['countdown', 'countdown beat'],
@@ -888,8 +879,7 @@ initDebugMenu([
     ['reconnect', 'reconnect — rejoin QR card'],
     ['device-choice', 'device choice — phone-on-display chooser'],
   ] },
-  { key: 'players', label: 'Players', type: 'number', min: 1, max: 4, hint: 'field size in scenarios (default 4, tricks 1)' },
-  { key: 'slope', label: 'Slope', type: 'select', hint: 'catalog slope — else a generated mountain', options: [['', 'generated'], ...Object.keys(SLOPES)] },
+  { key: 'players', label: 'Players', type: 'number', min: 1, max: 4, hint: 'field size in scenarios (default 4)' },
   { key: 'level', label: 'Difficulty', type: 'select', hint: 'procedural tier — host picks live; this pins it', options: [['', `default (${DEFAULT_LEVEL})`], ...LEVELS.map((l) => [l.id, l.label])] },
   { key: 'seed', label: 'Seed', type: 'number', hint: 'pins the generated mountain (deterministic repro)' },
   { key: 'hitbox', label: 'Hitbox overlay', type: 'check', hint: 'wireframe collision footprints in the (s, lat) plane' },

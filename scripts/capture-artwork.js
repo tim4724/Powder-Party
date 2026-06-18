@@ -17,13 +17,13 @@
 // Chromium's own high-quality resampler. Self-contained — no ImageMagick/ffmpeg.
 //
 //   node scripts/capture-artwork.js                      # → artwork/splitscreen-4p.png (1920x1080, 2x SSAA)
-//   node scripts/capture-artwork.js --slope powder-bowl  # pin a named slope (default: test seed)
+//   node scripts/capture-artwork.js --seed 42            # pin a deterministic mountain (default: test seed)
 //   node scripts/capture-artwork.js --width 2560 --height 1440 --wait 6000
 //   node scripts/capture-artwork.js --ssaa 1             # no supersampling (raw render)
 //   node scripts/capture-artwork.js --out artwork/hero.png
 //
 // Flags (all optional): --out, --width, --height (FINAL output size), --ssaa
-// (supersample factor, default 2), --players, --slope, --seed, --scenario,
+// (supersample factor, default 2), --players, --seed, --scenario,
 // --wait (ms to let the run develop before the shot), --port, --headed.
 
 const http = require('http');
@@ -125,7 +125,6 @@ async function main() {
     page.on('console', (m) => { if (m.type() === 'error') console.error('[console]', m.text()); });
 
     let url = `http://127.0.0.1:${PORT}/?test=1&scenario=${SCENARIO}&players=${PLAYERS}`;
-    if (args.slope) url += `&slope=${args.slope}`;
     if (args.seed != null) url += `&seed=${args.seed}`;
     await page.goto(url, { waitUntil: 'networkidle' });
 

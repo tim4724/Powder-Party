@@ -9,26 +9,16 @@
 //   /?test=1&scenario=results             — results board
 //   /?test=1&scenario=lobby               — live CPU attract race + fake roster (mirrors the real lobby)
 //   /?test=1&scenario=slope               — clean orbiting slope preview, CPU field (endless)
-//   /?test=1&scenario=tricks              — TRICK LAB: a single full-screen skier on a
-//        STRAIGHT, tree-free practice run (the `trick-lab` slope) lined with kickers,
-//        driven from the KEYBOARD to feel the brake/jump/flip loop, no phone or relay:
-//          A / D (or ← / →) carve · hold S brake · Space / ↑ back flip · W / ↓ front flip
-//          Q spin-left · E spin-right · Z / C corks (off-axis)
-//        (add &players=4 for a CPU field, or &slope=powder-bowl for the real run)
 //   /?test=1&scenario=solo                — SINGLE-PLAYER on the main display, no phone: a
 //        REAL race down a generated mountain against a CPU field, you in a full-screen
 //        chase cell (CPU share your world). Keyboard: A / D carve · hold S brake ·
 //        Q spin-left · W front flip · E spin-right · Space back flip (Z / C corks). On the
 //        finish the results board holds; ENTER (or "Play again") skis it again.
 //        (&players=N sizes the field — default you + 3 CPU; &seed=N picks the mountain)
-//   /?test=1&scenario=bump                — BUMP LAB: a KEYBOARD skier dropped into a tight
-//        pack of CPU bots (lane-bias zeroed so they converge and jostle) on a wide, straight,
-//        tree/kicker-free run — for feeling skier-vs-skier contact: soft bumps + blocking
-//        happen on their own; carve hard across the pack (A/D) at speed to land a T-bone.
 
 const el = (id) => document.getElementById(id);
 
-// Minimal keyboard → CONTROL {s,t,j,f} reader for the `tricks` scenario, mirroring
+// Minimal keyboard → CONTROL {s,t,j,f} reader for the `solo` scenario, mirroring
 // the controller's TiltInput (carve) + SwipeInput (brake/jump/flip) key maps so the
 // no-relay preview exercises the real engine input path. Flicks are ANALOG: each
 // trick key emits an angle (rad, up = +π/2) on f, matching SwipeInput's gesture
@@ -79,7 +69,7 @@ export function runDisplayScenario(cfg, ctx) {
 
   const N = Math.max(1, Math.min(4, cfg.players || 4));
   const scn = cfg.scenario || 'running';
-  const human = scn === 'tricks' || scn === 'bump' || scn === 'solo'; // skier 0 is keyboard-driven, the rest CPU
+  const human = scn === 'solo'; // skier 0 is keyboard-driven, the rest CPU
   const kb = human ? keyboardDriver() : null;
 
   // Camera: ?cam=side starts in the profile rig (great for eyeballing the ramp
@@ -89,7 +79,7 @@ export function runDisplayScenario(cfg, ctx) {
     if (e.key.toLowerCase() === 'v' && !e.repeat) scene.cycleCamMode();
   });
 
-  // build the field — CPU, except skier 0 when a human drives (the `tricks`/`bump` labs)
+  // build the field — CPU, except skier 0 when a human drives (the `solo` scenario)
   const field = [];
   const bots = new Map();
   for (let i = 0; i < N; i++) {
@@ -97,39 +87,8 @@ export function runDisplayScenario(cfg, ctx) {
     const persona = AI_PERSONALITIES[i % AI_PERSONALITIES.length];
     const id = 'cpu-' + i;
     field.push({ peerIndex: id, name: persona.name, colorIndex: i, ai: true, stats: { glide: persona.glide, edge: persona.edge } });
-    // `bump` zeroes laneBias AND disables avoidance so the bots ignore each other
-    // and pile up on the fall line (their normal fanned lanes + dodging exist
-    // precisely to AVOID contact — the opposite of the demolition derby).
-    bots.set(id, new AiController(scn === 'bump' ? { ...persona, laneBias: 0, avoid: false } : persona));
+    bots.set(id, new AiController(persona));
   }
-
-  // Drop the keyboard skier in just above the first ramp so the launch is a
-  // second away — fast iteration on flip-duration / air-gate / boost by feel.
-  function seedHuman(sess) {
-    if (!human) return;
-    const me = sess.engine.skiers.get('me');
-    // Only CENTRE the human on the fall line (the kickers sit at lat 0; the start
-    // grid fans players out). No seeded position or speed — a normal top-of-slope
-    // start from rest, so there's a calm run-in to the first kicker rather than a
-    // jump right off the line. Bombing straight down then hits every ramp in turn.
-    if (me) { me.lat = 0; me.heading = 0; }
-  }
-  // `bump` lab: pack the whole field into ONE tight cluster just below the gate so
-  // they're already overlapping (lanes ~0.55u apart < the ~0.8u contact footprint)
-  // and start jostling the instant the run begins — no waiting for a chance scrum.
-  function seedCluster(sess) {
-    const ids = field.map((p) => p.peerIndex);
-    ids.forEach((id, i) => {
-      const sk = sess.engine.skiers.get(id);
-      if (!sk) return;
-      sk.totalS = 6;
-      sk.lat = (i - (ids.length - 1) / 2) * 0.55; // symmetric about the fall line
-      sk.heading = 0; sk.v = 0;
-    });
-  }
-  // `solo` starts from the normal engine grid (a real race start); only the trick
-  // lab centres the human on the fall line, only the bump lab packs the cluster.
-  const seedField = (sess) => (scn === 'bump' ? seedCluster(sess) : scn === 'tricks' ? seedHuman(sess) : undefined);
 
   if (scn === 'lobby' || scn === 'welcome') {
     scene.orbit = true;
@@ -196,12 +155,11 @@ export function runDisplayScenario(cfg, ctx) {
   // re-gate on solo's results board so coasting CPU stay quiet behind it.
   scene.onPoleHit = (kick) => { if (!soloOver) audio.pole(kick); };
   let session = newSession();
-  seedField(session);
   window.__harness = () => session;       // current session (reassigned on restart) — for automated checks
   window.__scene = scene;                 // renderer handle (pole flex etc.) — for automated checks
   function newSession() {
     const s = new RunSession(field, slope, {
-      // Same SFX as live play (Audio.raceEvent) — the labs exist to FEEL the
+      // Same SFX as live play (Audio.raceEvent) — solo exists to FEEL the
       // jump/flip/bump loop, and sound is half of that feedback.
       onRaceEvent: (e) => audio.raceEvent(e),
       onCountdownTick: (n) => {
@@ -229,7 +187,6 @@ export function runDisplayScenario(cfg, ctx) {
     if (rerollSlope) slope = rerollSlope(); // new hill, same grade (setTrack keeps the skier meshes)
     scene.clearTrails();
     session = newSession();
-    seedField(session);
     session.startCountdown(3);
     soloOver = false;
   }
@@ -240,28 +197,13 @@ export function runDisplayScenario(cfg, ctx) {
     el('results-again') && el('results-again').addEventListener('click', again);
   }
 
-  // `bump` lab: stable per-bot phase so the cross-sweep is deterministic.
-  const bumpIdx = new Map();
-  field.filter((p) => p.peerIndex !== 'me').forEach((p, i) => bumpIdx.set(p.peerIndex, i));
   function driveBots(sess) {
     for (const [id, bot] of bots) {
       const sk = sess.engine.skiers.get(id);
       if (!sk || sk.finished) continue;
-      if (scn === 'bump') {
-        // DEMOLITION DERBY: sweep the target lane back and forth across the piste,
-        // out of phase per bot (alternating bots mirror each other so they meet at
-        // the fall line from opposite sides). Running straight can never build the
-        // ~9u/s lateral closing a T-bone needs; slicing ACROSS at speed does — and
-        // the lateral motion also keeps them from knotting up in a mutual block.
-        const idx = bumpIdx.get(id) || 0;
-        const dir = idx % 2 ? 1 : -1;
-        bot.laneBias = dir * 4.5 * Math.sin(1.3 * sess.engine.elapsed + idx * 0.7);
-        sess.processInput(id, bot.drive(sk, sess.engine)); // stays tucked/fast → matches a tucking human
-      } else {
-        // Hand the bot the full engine (not just the centerline) so its tree/skier
-        // avoidance + air tricks run exactly as in real play — matches main.js.
-        sess.processInput(id, bot.drive(sk, sess.engine));
-      }
+      // Hand the bot the full engine (not just the centerline) so its tree/skier
+      // avoidance + air tricks run exactly as in real play — matches main.js.
+      sess.processInput(id, bot.drive(sk, sess.engine));
     }
   }
 
@@ -282,11 +224,10 @@ export function runDisplayScenario(cfg, ctx) {
     if (!soloOver) audio.setWind(Math.min(1, packSpd / 26));
     // Run-over: auto-looping previews roll a fresh run; `solo` instead holds the
     // results board (shown from onRaceEnd) until the player replays.
-    if ((scn === 'running' || scn === 'slope' || scn === 'tricks' || scn === 'bump' || scn === 'reconnect') && session.engine.raceOver) {
+    if ((scn === 'running' || scn === 'slope' || scn === 'reconnect') && session.engine.raceOver) {
       session.dispose();
       scene.clearTrails(); // fresh snow when the preview loops the run
       session = newSession();
-      seedField(session);
       session.startCountdown(1);
     }
   };
@@ -306,7 +247,7 @@ export function runDisplayScenario(cfg, ctx) {
     // One fabricated late joiner so the preview exercises the unranked
     // "next run" row (live play derives these from the roster).
     showResults(session.getResults(), field, false, [{ name: 'Nova', colorIndex: 4 }]);
-  } else { // running / slope / tricks / bump / solo — start the run, onFrame loops it
+  } else { // running / slope / solo — start the run, onFrame loops it
     showSoundHint();
     session.startCountdown(scn === 'solo' ? 3 : 1); // solo gets a real 3-2-1 race start
   }

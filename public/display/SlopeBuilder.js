@@ -6,7 +6,7 @@
 // Returns { centerline, length, slopeWidth, groundY, ramps, obstacles, def }.
 import * as THREE from 'three';
 import { Centerline } from './Centerline.js';
-import { SLOPES, generateSlope } from '../shared/slopes.js';
+import { generateSlope } from '../shared/slopes.js';
 
 const DEG = Math.PI / 180;
 const STEP = 2.0; // arclength between centerline samples (Catmull-Rom smooths between)
@@ -131,15 +131,8 @@ export function buildSlope(def) {
   };
 }
 
-export function buildSlopeById(id) {
-  const def = SLOPES[id] || SLOPES[Object.keys(SLOPES)[0]];
-  return buildSlope(def);
-}
-
-// Build a fresh procedural slope from a seed (mirrors buildSlopeById — same
-// resolved { centerline, length, ramps, obstacles, … } the renderer/engine take).
+// Build a fresh procedural slope from a seed — returns the resolved
+// { centerline, length, ramps, obstacles, … } the renderer/engine take.
 export function buildGeneratedSlope(seed, opts) {
   return buildSlope(generateSlope(seed, opts));
 }
-
-export { SLOPES };

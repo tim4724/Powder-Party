@@ -71,7 +71,6 @@ Keyboard, where a scenario lets you drive: **A/D** carve · hold **S** brake · 
 - `/?test=1&scenario=running&players=4` — full split-screen run, CPU-driven (endless loop)
 - `/?test=1&scenario=lobby` (+ roster) · `…&scenario=slope` (clean) — orbiting slope preview
 - `/?test=1&scenario=results` · `…&scenario=countdown` · `…&scenario=paused` — the other states
-- `/?test=1&scenario=tricks` — drive skier 0 beside the ramps to feel the brake/flip loop
 - `/?test=1&scenario=device-choice&bail=game_ended` — the chooser a phone gets on this big-screen
   page (toast reasons: `game_ended`, `room_not_found`, `game_full`)
 - `/?scenario=solo` — **single player on the big screen, no phone**: a real race against a CPU
