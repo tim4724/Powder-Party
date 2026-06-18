@@ -51,45 +51,38 @@ npm start            # http://localhost:4000  (PORT env overrides)
 1. Open the display URL on a big screen.
 2. Players scan the QR code with their phones to join.
 3. The first player to join is the host and starts the run from their phone.
-4. Tilt to carve, touch & hold to brake, and in the air flick **any direction** to pull a trick (the
-   angle picks it — up/down flip, sides spin, diagonals cork; ramps launch you). First to the bottom wins.
+4. Tilt to carve, touch & hold to brake, flick **any direction** in the air to trick (ramps
+   launch you). First to the bottom wins.
 
 > Phones need **HTTPS** for the tilt sensors — front the server with a tunnel or TLS cert when
-> testing on real devices. The display works over plain HTTP, and desktop keyboard fallback
-> (A/D carve · hold S brake · ↑/Space back flip · ↓ front · Q/E spin · Z/C corks) lets you test
-> without a phone.
+> testing on real devices. The display works over plain HTTP, and a desktop keyboard fallback
+> (see [No-phone preview](#no-phone-preview)) lets you test without a phone.
 
 ### No-phone preview
 
-The display page drives itself from fake data with `?test=1&scenario=…` (no relay needed).
-No need to hand-build these URLs: the ⚙ button bottom-left on the display opens a debug menu
-that sets every param below interactively. (The controller has no debug menu — it's a
-player-facing surface; use the gallery or the URLs below to preview its screens.)
+The display page drives itself from fake data with `?test=1&scenario=…` (no relay needed). The
+⚙ button bottom-left opens a debug menu that sets every param below interactively, so you rarely
+hand-build these. (The controller has no debug menu — preview its screens via the gallery or the
+URL below.)
+
+Keyboard, where a scenario lets you drive: **A/D** carve · hold **S** brake · **W** front flip ·
+**Space** back flip · **Q/E** spin · **Z/C** corks.
 
 - `/?test=1&scenario=running&players=4` — full split-screen run, CPU-driven (endless loop)
-- `/?test=1&scenario=results` — the results board
-- `/?test=1&scenario=lobby` — orbiting slope preview + fake roster
-- `/?test=1&scenario=slope` — clean orbiting slope preview, CPU field (no overlays)
-- `/?test=1&scenario=tricks` — **drive skier 0 from the keyboard** beside the ramps to feel the
-  brake/flip loop (A/D carve · hold S brake · ↑/Space back flip · W/↓ front · Q/E spin · Z/C corks)
-- `/?scenario=solo` — **play single player on the big screen, no phone**: a real race down a
-  generated mountain against a CPU field, you in a full-screen chase cell. Keyboard: A/D carve ·
-  hold S brake · Q spin-left · W front flip · E spin-right · Space back flip (Z/C corks). The
-  finish holds the results board — Enter (or "Play again") skis a FRESH mountain at the same
-  difficulty. `&players=N` sizes the field (default you + 3 CPU), `&seed=N` pins one mountain
-  (every rematch replays it, for repro) and `&level=blue|red|black` sets the grade.
-- `/?test=1&scenario=countdown` · `…&scenario=paused`
-- `/?test=1&scenario=device-choice&bail=game_ended` — the chooser a phone gets when it lands on
-  this big-screen page (shared link, or a controller bailing out of a dead end with `?bail=…`;
-  toast reasons: `game_ended`, `room_not_found`, `game_full`)
+- `/?test=1&scenario=lobby` (+ roster) · `…&scenario=slope` (clean) — orbiting slope preview
+- `/?test=1&scenario=results` · `…&scenario=countdown` · `…&scenario=paused` — the other states
+- `/?test=1&scenario=tricks` — drive skier 0 beside the ramps to feel the brake/flip loop
+- `/?test=1&scenario=device-choice&bail=game_ended` — the chooser a phone gets on this big-screen
+  page (toast reasons: `game_ended`, `room_not_found`, `game_full`)
+- `/?scenario=solo` — **single player on the big screen, no phone**: a real race against a CPU
+  field in a full-screen chase cell. `&players=N` sizes the field, `&seed=N` pins the mountain
+  (rematches replay it), `&level=blue|red|black` sets the grade; "Play again" rolls a fresh
+  mountain at the same grade.
 
-The phone controller previews a single screen the same way, off the relay:
-`/controller/index.html?scenario=playing&color=2` (scenarios: `name`, `name-connecting`,
-`lobby-host`, `lobby-waiting`, `late-join` (run in progress without you), `countdown`,
-`playing`, `brake`, `paused`, `finished`, `results` (host), `results-waiting` (non-host),
-`results-join` (late joiner's board), `conn-reconnecting` / `conn-lost` /
-`conn-display-gone` / `conn-replaced` (the relay-link overlay states); `color` 0–7
-picks the livery).
+The phone controller previews the same way, off the relay:
+`/controller/index.html?scenario=playing&color=2`. Scenarios cover every screen — lobby,
+countdown, `playing`/`brake`, `paused`, `finished`, the results boards (host / waiting / late-
+joiner), late-join, and the `conn-*` relay-link overlay states; `color` 0–7 picks the livery.
 
 ### Gallery
 
@@ -108,31 +101,17 @@ driven by its `TestHarness`), so UI regressions are visible at a glance. Four ta
 ## Project structure
 
 ```
-server/index.js            # static host + QR/JSON API (no game logic)
+server/index.js   # static host + QR/JSON API (no game logic)
 public/
-  shared/protocol.js       # wire contract (MSG vocabulary, livery palette) — classic <script>
-  shared/slopes.js         # slope catalog (dependency-free data)
-  shared/theme.css         # shared design tokens + component kit
-  display/                 # the big screen (authoritative)
-    engine/SkiEngine.js    #   pure ribbon-follow ski sim (Node-testable, no THREE)
-    SlopeBuilder.js        #   procedural descending centerline from slope pieces
-    Centerline.js          #   open Catmull-Rom path sampler
-    RunSession.js          #   lifecycle (countdown / run / finish / pause)
-    AiDriver.js            #   pure-pursuit CPU skiers
-    SceneRenderer.js       #   Three.js slope + skiers + split-screen chase cams
-    Audio.js               #   Web-Audio synth SFX (wind / jumps / crashes / poles)
-    Net.js, main.js        #   relay + lobby + game loop
-    TestHarness.js         #   no-relay preview scenarios
-  controller/              # the phone (tilt + swipe)
-    TiltInput.js           #   gyro → carve
-    SwipeInput.js          #   hold → brake, flick (in the air) → trick
-    Net.js, main.js, ui.js
-  gallery*.{html,js}       # no-relay preview gallery (Display / Phone / Slopes / Sounds tabs)
-  gallery.css              #   shared gallery chrome
-partyplug/                 # reusable party-game transport kit (served under /partyplug/)
-vendor/three/              # vendored Three.js (served under /vendor/)
-tests/                     # SkiEngine + slope-generator unit tests (node:test)
-scripts/capture-artwork.js # headless 4-player split-screen hero shot → artwork/ (Playwright)
+  shared/         # wire protocol, slope catalog, theme tokens (all dependency-free)
+  display/        # the big screen (authoritative) — Node-testable sim in engine/SkiEngine.js,
+                  #   Three.js SceneRenderer, RunSession lifecycle, AiDriver bots, relay + lobby
+  controller/     # the phone — tilt → carve, swipe → brake/trick
+  gallery*        # no-relay preview gallery (Display / Phone / Slopes / Sounds)
+partyplug/        # reusable party-game transport kit (served under /partyplug/)
+vendor/three/     # vendored Three.js (served under /vendor/)
+tests/            # SkiEngine + slope-generator unit tests (node:test)
+scripts/          # headless split-screen hero-shot capture → artwork/ (Playwright)
 ```
 
 ## Testing
@@ -142,18 +121,14 @@ npm test          # node:test — SkiEngine physics + partyplug transport
 npm run test:e2e  # Playwright — real display + phone pages over the real relay
 ```
 
-The engine is THREE-free so the unit tests feed it a lightweight centerline stub and assert on
-the physics: gravity descent + finish, the tuck speed gain, carve-scrub, tree wipeouts,
-jumps + ramp auto-launch, air flips (land clean for a boost, land mid-flip and wash out, the
-min-air gate), ranking, and skier removal.
+The engine is THREE-free, so the unit tests feed it a lightweight centerline stub and assert the
+physics: gravity descent + finish, tuck speed gain, carve-scrub, tree wipeouts, ramp auto-launch,
+air flips (clean landing → boost, mid-flip → wash out, the min-air gate), ranking, and removal.
 
-The E2E suite (`tests/e2e`) drives the REAL pages end to end — the display page creates a live
-room on the relay, controller pages join it by room code at phone viewport, and runs are
-skipped with the display's own fast-forward lever (real physics, real broadcasts). It covers
-the full lifecycle (start → results → play again → new game), the late-join flow (waiting
-screen → "next run" board rows → rematch fold-in), same-device rejoin mid-run and during
-results, and the device-choice screen with its bail toasts (stale room via the boot probe,
-full room, back-gesture restore). One-time setup: `npx playwright install chromium`.
+The E2E suite (`tests/e2e`) drives the REAL pages over the real relay — the display opens a live
+room, controllers join by code at phone viewport, and runs are skipped with the display's
+fast-forward lever. It covers the full lifecycle, late-join, same-device rejoin, and the
+device-choice screen with its bail toasts. One-time setup: `npx playwright install chromium`.
 
 ## Tuning
 
