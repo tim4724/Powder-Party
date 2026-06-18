@@ -10,13 +10,21 @@
 // 16:9 viewport, lets the run develop for a beat so the skiers fan out down the
 // fall line, and screenshots the canvas to a PNG.
 //
-//   node scripts/capture-artwork.js                      # → artwork/splitscreen-4p.png (1920x1080)
+// To tame the hard polygon edges, it SUPERSAMPLES: the page renders at SSAA×
+// (Playwright deviceScaleFactor — Three.js caps pixelRatio at 2, so the 3D scene
+// and HUD render natively oversized while layout stays pixel-identical), then the
+// shot is downscaled to the target size in a second headless canvas using
+// Chromium's own high-quality resampler. Self-contained — no ImageMagick/ffmpeg.
+//
+//   node scripts/capture-artwork.js                      # → artwork/splitscreen-4p.png (1920x1080, 2x SSAA)
 //   node scripts/capture-artwork.js --slope powder-bowl  # pin a named slope (default: test seed)
 //   node scripts/capture-artwork.js --width 2560 --height 1440 --wait 6000
+//   node scripts/capture-artwork.js --ssaa 1             # no supersampling (raw render)
 //   node scripts/capture-artwork.js --out artwork/hero.png
 //
-// Flags (all optional): --out, --width, --height, --players, --slope, --seed,
-// --scenario, --wait (ms to let the run develop before the shot), --port, --headed.
+// Flags (all optional): --out, --width, --height (FINAL output size), --ssaa
+// (supersample factor, default 2), --players, --slope, --seed, --scenario,
+// --wait (ms to let the run develop before the shot), --port, --headed.
 
 const http = require('http');
 const path = require('path');
@@ -44,8 +52,9 @@ const WIDTH = parseInt(args.width, 10) || 1920;        // 16:9 by default
 const HEIGHT = parseInt(args.height, 10) || 1080;
 const PLAYERS = parseInt(args.players, 10) || 4;       // 4 → 2x2 grid
 const SCENARIO = args.scenario || 'running';
-const WAIT_MS = parseInt(args.wait, 10) || 11000;      // let skiers get mid-slope, clear of the start gate
+const WAIT_MS = parseInt(args.wait, 10) || 17000;      // let skiers fan out mid-slope (the 2x render runs slower, so the frame-stepped sim needs more wall-clock)
 const PORT = parseInt(args.port, 10) || 4319;          // off the default 4000 dev port
+const SSAA = Math.max(1, parseInt(args.ssaa, 10) || 2); // render at SSAA×, downscale → clean edges
 const OUT = path.resolve(ROOT, args.out || 'artwork/splitscreen-4p.png');
 
 function waitForServer(port, timeoutMs = 15000) {
@@ -62,6 +71,33 @@ function waitForServer(port, timeoutMs = 15000) {
       });
     })();
   });
+}
+
+// Downscale a PNG buffer to w×h inside a headless Chromium canvas, using the
+// browser's own high-quality resampler. Keeps the supersampling step dependency-
+// free (no ImageMagick/ffmpeg/sharp) so the capture reproduces anywhere Playwright
+// runs. The source is an exact integer multiple of w×h, so this resolves cleanly.
+async function downscale(browser, pngBuf, w, h) {
+  const page = await browser.newPage({ viewport: { width: w, height: h }, deviceScaleFactor: 1 });
+  try {
+    const src = 'data:image/png;base64,' + pngBuf.toString('base64');
+    const dataUrl = await page.evaluate(async ({ src, w, h }) => {
+      const img = new Image();
+      img.src = src;
+      await img.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, w, h);
+      return canvas.toDataURL('image/png');
+    }, { src, w, h });
+    return Buffer.from(dataUrl.split(',')[1], 'base64');
+  } finally {
+    await page.close();
+  }
 }
 
 async function main() {
@@ -82,8 +118,8 @@ async function main() {
 
     browser = await chromium.launch({ headless: !args.headed });
     const page = await browser.newPage({
-      viewport: { width: WIDTH, height: HEIGHT },
-      deviceScaleFactor: 1, // canvas drawing buffer == WIDTHxHEIGHT (exact 16:9 PNG)
+      viewport: { width: WIDTH, height: HEIGHT }, // CSS layout stays at the target size...
+      deviceScaleFactor: SSAA,                    // ...but everything rasterizes at SSAA× (supersampling)
     });
     page.on('pageerror', (e) => console.error('[page error]', e.message));
     page.on('console', (m) => { if (m.type() === 'error') console.error('[console]', m.text()); });
@@ -109,8 +145,15 @@ async function main() {
     // rather than sitting stacked at the start gate.
     await page.waitForTimeout(WAIT_MS);
 
-    await page.screenshot({ path: OUT });
-    console.log(`Captured ${PLAYERS}-player ${WIDTH}x${HEIGHT} split-screen → ${path.relative(ROOT, OUT)}`);
+    // Headless never fires a gesture, so the "click for sound" hint lingers over
+    // the shot — drop it (and any transient toast) for a clean hero frame.
+    await page.evaluate(() => document.getElementById('sound-hint')?.remove());
+
+    // deviceScaleFactor=SSAA → this shot is (WIDTH*SSAA)x(HEIGHT*SSAA).
+    const shot = await page.screenshot();
+    const out = SSAA > 1 ? await downscale(browser, shot, WIDTH, HEIGHT) : shot;
+    fs.writeFileSync(OUT, out);
+    console.log(`Captured ${PLAYERS}-player ${WIDTH}x${HEIGHT} split-screen (${SSAA}x SSAA) → ${path.relative(ROOT, OUT)}`);
   } finally {
     if (browser) await browser.close();
     killServer();
