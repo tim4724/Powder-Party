@@ -91,11 +91,14 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #cfeaf8; }
 }
 .toast.is-on { opacity: 1; transform: translate(-50%, 0); }
 
-/* Cross-fade between looping lobby attract races — covers the 3D scene (z:0) but
-   sits UNDER the lobby cards (z:2), so the race dips to snow-white and back while
-   the join UI stays crisp. main.js toggles .is-on around each restart. */
-#lobby-fade { position: fixed; inset: 0; z-index: 1; background: #eaf2fb; opacity: 0; pointer-events: none; transition: opacity 0.4s ease; }
-#lobby-fade.is-on { opacity: 1; }
+/* Cross-DISSOLVE between lobby attract slopes (loop restart / difficulty re-roll).
+   Covers the 3D scene (z:0) but sits UNDER the lobby cards (z:2), so the join UI
+   stays crisp. main.js freezes a snapshot of the old frame here (inline
+   background-image), flips .is-frozen on (opaque, instant) to hide the swap, then
+   removes it so the base rule fades the old frame out — a straight old→new
+   dissolve, no flash to a flat colour. */
+#lobby-fade { position: fixed; inset: 0; z-index: 1; opacity: 0; pointer-events: none; transition: opacity 0.45s ease; background-size: cover; background-position: center; }
+#lobby-fade.is-frozen { opacity: 1; transition: none; }
 
 /* ---- Run overlays ---- */
 #race { position: fixed; inset: 0; z-index: 2; pointer-events: none; }

@@ -345,6 +345,7 @@ function buildField(humans, reservedColors) {
 let lobbyField = [];
 let lobbySession = null;
 let lobbyFading = false;
+let lobbyFadeTimer = null;          // pending overlay-clear timer (cancelable — see cancelLobbyCrossfade)
 function startLobbyRace() {
   stopLobbyRace();
   if (session) return;                            // a live run owns the scene
@@ -359,20 +360,45 @@ function startLobbyRace() {
   scene.setLobbyView('race');                     // follow cam (snaps to the fresh pack)
 }
 function stopLobbyRace() {
+  // Tear down the attract race ENTITIES only — never the #lobby-fade overlay. A
+  // crossfade runs its swap (this, via `mid`) BEHIND the frozen frame, so clearing
+  // the overlay here would reveal the swap mid-dissolve. The fade lifecycle is owned
+  // solely by lobbyCrossfade (set up + auto-clear) and cancelLobbyCrossfade (abort).
   for (const p of lobbyField) scene.removeSkier(p.peerIndex);
   lobbyField = [];
   if (lobbySession) { lobbySession.dispose(); lobbySession = null; }
-  lobbyFading = false;
-  const f = el('lobby-fade'); if (f) f.classList.remove('is-on');
 }
-// Cross-fade the attract to snow-white, run `mid` at the peak (swap the race), then
-// fade back — the #lobby-fade layer covers the 3D scene only, so the cards stay crisp.
-// Used by the loop (finish → fresh race) AND the difficulty switch (re-roll).
+// Cross-DISSOLVE the attract straight from the old slope to the new one — no flash
+// to a flat colour. Freeze the current frame onto #lobby-fade (opaque, instant —
+// indistinguishable from the live canvas), run `mid` (re-roll + restart the race)
+// BEHIND it, then fade the frozen frame out to reveal the new scene. The overlay
+// covers the 3D scene only, so the lobby cards stay crisp. Used by the attract loop
+// (finish → fresh race) AND the difficulty switch (re-roll).
 function lobbyCrossfade(mid) {
   if (lobbyFading) return;
   lobbyFading = true;
-  const fade = el('lobby-fade'); if (fade) fade.classList.add('is-on');
-  setTimeout(() => { mid(); if (fade) fade.classList.remove('is-on'); lobbyFading = false; }, 450);
+  const fade = el('lobby-fade');
+  const shot = scene.snapshot();
+  if (!fade || !shot) { mid(); lobbyFading = false; return; } // no overlay / readback failed → hard swap
+  fade.style.backgroundImage = `url("${shot}")`;
+  fade.classList.add('is-frozen');  // opaque NOW, no transition — hides the swap that follows
+  void fade.offsetWidth;            // commit the opaque state so removing it animates from opacity:1
+  mid();                            // swap the scene behind the frozen frame
+  fade.classList.remove('is-frozen'); // base rule transitions opacity 1 → 0: the old frame dissolves away
+  lobbyFadeTimer = setTimeout(() => {
+    lobbyFadeTimer = null;
+    fade.style.backgroundImage = '';
+    lobbyFading = false;
+  }, 450);
+}
+// Abort an in-flight dissolve: cancel the pending overlay-clear timer and drop the
+// frozen snapshot NOW, so it can't linger over the countdown/race (and reset the
+// guard). The slope swap itself already ran synchronously inside lobbyCrossfade —
+// this only tidies the overlay. Called from startRun and the lobby front door.
+function cancelLobbyCrossfade() {
+  if (lobbyFadeTimer) { clearTimeout(lobbyFadeTimer); lobbyFadeTimer = null; }
+  lobbyFading = false;
+  const f = el('lobby-fade'); if (f) { f.classList.remove('is-frozen'); f.style.backgroundImage = ''; }
 }
 function driveLobbyRace(dt) {
   if (!lobbySession) return;
@@ -389,6 +415,13 @@ function driveLobbyRace(dt) {
 function startRun() {
   if (session) return;
   stopLobbyRace();        // the attract CPU reuse the same ids — drop them first
+  // A difficulty pick moments before Start may still be mid-dissolve: clear its
+  // frozen-frame overlay now so it doesn't linger over the countdown. And if a rapid
+  // re-pick was dropped by the in-progress-dissolve guard, `slope` still sits on the
+  // OLD tier while currentLevel moved on — rebuild so the run is on the chosen tier
+  // before the session binds to its centerline.
+  cancelLobbyCrossfade();
+  if (!slope.def || slope.def.level !== currentLevel) { slope = makeSlope(); window.__slope = slope; applyTrack(); }
   net.flow.transitionTo(ROOM_STATE.COUNTDOWN);
   raceEnded = false; paused = false; coastSettled = false;
   aiBots = new Map();
@@ -691,6 +724,7 @@ function showLobby() {
   el('pause-overlay') && el('pause-overlay').classList.add('hidden');
   const c = el('countdown'); if (c) c.textContent = '';
   document.documentElement.classList.remove('in-session');
+  cancelLobbyCrossfade(); // front door: clear any stale dissolve overlay/guard (never a crossfade mid itself)
   startLobbyRace(); // a looping CPU AI race behind the card, camera following the pack
   renderLevel(); // keep the difficulty badge current whenever the lobby surfaces
 }
@@ -841,7 +875,7 @@ if (params.get('test') === '1' || scenario) {
     { scenario: scenario || 'running', players: parseInt(params.get('players'), 10) || 4, host: parseInt(params.get('host'), 10) || 0, cam: params.get('cam') },
     // Inject the REAL render fns so the harness previews the live DOM path rather
     // than a hand-copy (which drifts — see renderRoster/showResults).
-    { scene, slope, AiController, AI_PERSONALITIES, RunSession, renderRoster, renderLevel, showResults, buildReconnectCard, audio, showSoundHint, rerollSlope }
+    { scene, slope, AiController, AI_PERSONALITIES, RunSession, renderRoster, renderLevel, showResults, buildReconnectCard, audio, showSoundHint, rerollSlope, lobbyCrossfade }
   ));
 } else {
   showLobby();

@@ -663,6 +663,24 @@ export class SceneRenderer {
   }
   stop() { this._running = false; }
 
+  // Grab the CURRENT frame as a data URL — for a DOM cross-dissolve when the lobby
+  // re-rolls its slope (difficulty pick / attract loop). The renderer has no
+  // preserveDrawingBuffer (it would tax every frame), so the drawing buffer is gone
+  // once the browser composites; we render once and read it back in the SAME
+  // synchronous task — the one window where toDataURL still sees pixels. Lobby-only:
+  // re-renders the single overview cam at full viewport (no split-screen scissor),
+  // reproducing the last on-screen frame. Returns null if readback fails (context
+  // loss / tainted canvas) so the caller can fall back to a hard swap.
+  snapshot() {
+    const r = this.renderer, W = window.innerWidth, H = window.innerHeight;
+    try {
+      r.setScissorTest(false);
+      r.setViewport(0, 0, W, H);
+      r.render(this.scene, this.overview);
+      return r.domElement.toDataURL('image/jpeg', 0.92);
+    } catch (_) { return null; }
+  }
+
   // Camera mode: 'chase' (default follow rig) or 'side' (profile rig for the labs).
   // The persistent camPos/camTarget glide smoothly between rigs on a live switch.
   // Returns the mode actually set (unknown values fall back to 'chase').

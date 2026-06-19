@@ -63,7 +63,7 @@ function keyboardDriver() {
 }
 
 export function runDisplayScenario(cfg, ctx) {
-  const { scene, AiController, AI_PERSONALITIES, RunSession, renderRoster, renderLevel, showResults, buildReconnectCard, audio, showSoundHint, rerollSlope } = ctx;
+  const { scene, AiController, AI_PERSONALITIES, RunSession, renderRoster, renderLevel, showResults, buildReconnectCard, audio, showSoundHint, rerollSlope, lobbyCrossfade } = ctx;
   // `let` so solo's "Play again" can re-point it at a freshly rolled mountain.
   let slope = ctx.slope;
 
@@ -98,16 +98,18 @@ export function runDisplayScenario(cfg, ctx) {
     let sess = new RunSession(field, slope, {}); // silent attract (mirrors the live lobby)
     sess.racing = true;
     for (const s of sess.getSnapshot().skiers) if (s.pose) scene.setSkierPose(s.id, s); // pose now → follow cam locks on
-    let fading = false;
     scene.onFrame = (dt) => {
       for (const [id, bot] of bots) { const sk = sess.engine.skiers.get(id); if (sk && !sk.finished) sess.processInput(id, bot.drive(sk, sess.engine)); }
       sess.update(dt * 1000);
       for (const s of sess.getSnapshot().skiers) if (s.pose) scene.setSkierPose(s.id, s);
-      if (sess.engine.raceOver && !fading) {
-        fading = true;
-        const fade = el('lobby-fade'); if (fade) fade.classList.add('is-on');
-        setTimeout(() => { sess.dispose(); sess = new RunSession(field, slope, {}); sess.racing = true; scene.setLobbyView('race'); if (fade) fade.classList.remove('is-on'); fading = false; }, 450);
-      }
+      // Whole field home → loop with the SAME old→new cross-dissolve the live lobby
+      // uses (shared lobbyCrossfade, so the gallery mirror never drifts). Rebuild the
+      // session behind the frozen frame and re-pose at once so the follow cam locks on.
+      if (sess.engine.raceOver) lobbyCrossfade(() => {
+        sess.dispose(); sess = new RunSession(field, slope, {}); sess.racing = true;
+        for (const s of sess.getSnapshot().skiers) if (s.pose) scene.setSkierPose(s.id, s);
+        scene.setLobbyView('race');
+      });
     };
     el('lobby') && el('lobby').classList.remove('hidden');
     el('race') && el('race').classList.add('hidden');
