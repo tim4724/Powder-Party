@@ -329,24 +329,75 @@ export function addPeaks(group, center, orbitRadius, floorY) {
 }
 
 // ---- props ----------------------------------------------------------------
+function makeSnowRampGeometry(w, h, len) {
+  const x0 = -w / 2, x1 = w / 2, z0 = -len / 2, z1 = len / 2;
+  const positions = [];
+  const groups = [];
+
+  const tri = (a, b, c) => positions.push(...a, ...b, ...c);
+  const quad = (materialIndex, a, b, c, d) => {
+    const start = positions.length / 3;
+    tri(a, b, c); tri(a, c, d);
+    groups.push({ start, count: 6, materialIndex });
+  };
+
+  // material 0: packed snow riding surface; material 1: compacted side walls;
+  // material 2: compressed lip face.
+  quad(0, [x0, 0, z0], [x0, h, z1], [x1, h, z1], [x1, 0, z0]);
+  quad(2, [x0, 0, z1], [x1, 0, z1], [x1, h, z1], [x0, h, z1]);
+  {
+    const start = positions.length / 3;
+    tri([x0, 0, z0], [x0, 0, z1], [x0, h, z1]);
+    groups.push({ start, count: 3, materialIndex: 1 });
+  }
+  {
+    const start = positions.length / 3;
+    tri([x1, 0, z0], [x1, h, z1], [x1, 0, z1]);
+    groups.push({ start, count: 3, materialIndex: 1 });
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  for (const group of groups) geo.addGroup(group.start, group.count, group.materialIndex);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+function addSnowRampGrooves(ramp, w, h, len) {
+  const mat = new THREE.LineBasicMaterial({ color: 0x6f8ba5, transparent: true, opacity: 0.55 });
+  const yAt = (z) => ((z + len / 2) / len) * h + 0.018;
+  for (const x of [-0.28, -0.14, 0, 0.14, 0.28].map((n) => n * w)) {
+    const pts = [
+      new THREE.Vector3(x, yAt(-len * 0.38), -len * 0.38),
+      new THREE.Vector3(x, yAt(-len * 0.08), -len * 0.08),
+      new THREE.Vector3(x, yAt(len * 0.38), len * 0.38),
+    ];
+    ramp.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
+  }
+}
+
 export function addRamp(group, cl, r, hitboxDebug) {
   const f = cl.sampleAt(r.s);
-  // A LOW kicker, sized to the air scale (launch apex ~0.9u) so the skier
-  // clears it instead of driving through a too-tall box. Built as a box, tilted
-  // so its top face ramps up along the slope tangent.
+  // A LOW snow kicker, sized to the air scale (launch apex ~0.9u) so the skier
+  // clears it instead of driving through a too-tall wedge. The footprint matches
+  // the engine hitbox; only the visible body is packed snow now.
   const w = (r.width || 2.4), len = 3.0, h = 0.5;
-  const geo = new THREE.BoxGeometry(w, h, len);
-  const ramp = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: 0x7fc4ec }));
+  const geo = makeSnowRampGeometry(w, h, len);
+  const ramp = new THREE.Mesh(geo, [
+    new THREE.MeshLambertMaterial({ color: 0xb7e4ff }),
+    new THREE.MeshLambertMaterial({ color: 0xb9cadf }),
+    new THREE.MeshLambertMaterial({ color: 0x9fb4cd }),
+  ]);
   ramp.castShadow = true; ramp.receiveShadow = true;
+  addSnowRampGrooves(ramp, w, h, len);
   const lateral = f.lateral.clone().normalize();
   const tangent = f.tangent.clone().normalize();
   const up = f.up.clone().normalize();
-  ramp.position.copy(f.pos).addScaledVector(lateral, r.lat).addScaledVector(up, h * 0.25);
+  ramp.position.copy(f.pos).addScaledVector(lateral, r.lat).addScaledVector(up, 0.035);
   // Build a RIGHT-handed basis (x = up × tangent, NOT `lateral` = tangent × up,
   // which would be left-handed → setFromRotationMatrix mis-orients the wedge).
   const rx = new THREE.Vector3().crossVectors(up, tangent).normalize();
   ramp.quaternion.setFromRotationMatrix(_basis.makeBasis(rx, up, tangent));
-  ramp.rotateX(-0.32); // tip the lip up
   group.add(ramp);
   // Same footprint the engine collides with (SkiEngine track setup): the kicker
   // box, read with ONE rule — contact the moment the skier's ring touches it.

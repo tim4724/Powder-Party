@@ -1,0 +1,9 @@
+#:schema https://conductor.build/schemas/settings.repo.schema.json
+"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+
+[scripts]
+setup = "npm ci"
+run = "PORT=${CONDUCTOR_PORT:-4000} npm run dev"
+archive = "true"
+run_mode = "concurrent"
+auto_run_after_setup = true
