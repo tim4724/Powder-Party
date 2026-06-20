@@ -359,17 +359,57 @@ function makeSnowRampGeometry(w, h, len) {
   return geo;
 }
 
-function addSnowRampGrooves(ramp, w, h, len) {
-  const mat = new THREE.LineBasicMaterial({ color: 0x6f8ba5, transparent: true, opacity: 0.55 });
-  const yAt = (z) => ((z + len / 2) / len) * h + 0.018;
-  for (const x of [-0.28, -0.14, 0, 0.14, 0.28].map((n) => n * w)) {
-    const pts = [
-      new THREE.Vector3(x, yAt(-len * 0.38), -len * 0.38),
-      new THREE.Vector3(x, yAt(-len * 0.08), -len * 0.08),
-      new THREE.Vector3(x, yAt(len * 0.38), len * 0.38),
-    ];
-    ramp.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
+let _snowRampChevronTexture = null;
+function snowRampChevronTexture() {
+  if (_snowRampChevronTexture) return _snowRampChevronTexture;
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 512;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, c.width, c.height);
+  ctx.strokeStyle = 'rgba(72, 113, 145, 0.38)';
+  ctx.lineWidth = 18;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  for (const y of [125, 256, 387]) {
+    ctx.beginPath();
+    ctx.moveTo(66, y + 28);
+    ctx.quadraticCurveTo(98, y + 8, 128, y - 25);
+    ctx.quadraticCurveTo(158, y + 8, 190, y + 28);
+    ctx.stroke();
   }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  _snowRampChevronTexture = tex;
+  return tex;
+}
+
+function addSnowRampChevrons(ramp, w, h, len) {
+  const decalW = w * 0.82, decalLen = len * 0.78;
+  const x0 = -decalW / 2, x1 = decalW / 2, z0 = -decalLen / 2, z1 = decalLen / 2;
+  const yAt = (z) => ((z + len / 2) / len) * h + 0.024;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute([
+    x0, yAt(z0), z0,
+    x1, yAt(z0), z0,
+    x1, yAt(z1), z1,
+    x0, yAt(z0), z0,
+    x1, yAt(z1), z1,
+    x0, yAt(z1), z1,
+  ], 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute([
+    0, 0,
+    1, 0,
+    1, 1,
+    0, 0,
+    1, 1,
+    0, 1,
+  ], 2));
+  ramp.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+    map: snowRampChevronTexture(),
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  })));
 }
 
 export function addRamp(group, cl, r, hitboxDebug) {
@@ -384,7 +424,7 @@ export function addRamp(group, cl, r, hitboxDebug) {
     new THREE.MeshLambertMaterial({ color: 0xb9cadf }),
     new THREE.MeshLambertMaterial({ color: 0x9fb4cd }),
   ]);
-  addSnowRampGrooves(ramp, w, h, len);
+  addSnowRampChevrons(ramp, w, h, len);
   const lateral = f.lateral.clone().normalize();
   const tangent = f.tangent.clone().normalize();
   const up = f.up.clone().normalize();
