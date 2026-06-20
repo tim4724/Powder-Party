@@ -134,6 +134,32 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #cfeaf8; }
 .res--joining .res__rank { color: var(--ink-3); }
 .res--joining .res__time { font-style: italic; font-family: var(--font-body); font-weight: 700; color: var(--ink-3); }
 
+/* ---- Series board (multi-run scoring) ---- */
+/* "Run X of N" / "Final standings" tag above the title. */
+.results-runtag {
+  font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+  font-size: 0.85rem; color: var(--ink-3); margin-bottom: 0.35rem;
+}
+.results-runtag:empty { display: none; }
+/* This run's points (+N) — quiet; and the cumulative series score — prominent,
+   tabular, gold like the leader number. Both sit to the right of the finish time. */
+.res__pts { min-width: 2.2rem; text-align: right; font-weight: 700; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.res__score { min-width: 2rem; text-align: right; font-family: var(--font-display); color: var(--accent); font-variant-numeric: tabular-nums; }
+/* Champion row(s) on the overall board — ringed + tinted so the winner pops. */
+#results-list li.res--champ { background: color-mix(in srgb, var(--accent) 22%, var(--surface-2)); box-shadow: inset 0 0 0 2px var(--accent); }
+.results-champ {
+  font-family: var(--font-display); font-weight: 700; font-size: 1.5rem;
+  color: var(--ink); margin: -0.4rem 0 1rem;
+}
+.results-champ.hidden { display: none; }
+/* Between-runs countdown line under the board — big and brand-tinted so the
+   "next run starting" beat reads from across the room. */
+.results-intermission { font-family: var(--font-display); font-weight: 700; font-size: 2rem; color: var(--brand); margin-bottom: 1.1rem; }
+.results-intermission.hidden { display: none; }
+
+/* The two lobby selectors (Difficulty + Runs) sit close together. */
+.lobby__runs { margin-top: 0.7rem; }
+
 /* ---- Split-screen cell labels (positioned each frame by SceneRenderer) ---- */
 .race-labels { font-family: var(--font-display); }
 .cell-label {

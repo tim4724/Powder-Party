@@ -30,6 +30,12 @@ trees, **hit the ramps** for air, and **flip** off the big jumps for a
 boost — but only if you have the air to finish the rotation. First skier to the bottom wins.
 Short-handed lobbies are topped up with CPU skiers so a solo player still races.
 
+A session is a **series of runs** (the host picks **3 / 5 / 7** in the lobby, default 5). Each
+run scores by finish place — **4 / 3 / 2 / 1** for the four skiers, a DNF earns 0 — and the
+points accumulate across the runs. Between runs the board holds the standings for a beat, then
+the next run auto-starts on a fresh mountain; after the last run the **overall champion** (most
+points — a CPU can win the night) takes the crown.
+
 ## Architecture
 
 Same display-authoritative model as the sibling games (Tiny-Track-Party, HexStacker-Party):
@@ -50,9 +56,10 @@ npm start            # http://localhost:4000  (PORT env overrides)
 
 1. Open the display URL on a big screen.
 2. Players scan the QR code with their phones to join.
-3. The first player to join is the host and starts the run from their phone.
+3. The first player to join is the host: they pick the difficulty + number of runs and start
+   the series from their phone.
 4. Tilt to carve, touch & hold to brake, flick **any direction** in the air to trick (ramps
-   launch you). First to the bottom wins.
+   launch you). First to the bottom wins each run; most points across the series wins overall.
 
 > Phones need **HTTPS** for the tilt sensors — front the server with a tunnel or TLS cert when
 > testing on real devices. The display works over plain HTTP, and a desktop keyboard fallback
@@ -70,7 +77,10 @@ Keyboard, where a scenario lets you drive: **A/D** carve · hold **S** brake · 
 
 - `/?test=1&scenario=running&players=4` — full split-screen run, CPU-driven (endless loop)
 - `/?test=1&scenario=lobby` (+ roster) · `…&scenario=slope` (clean) — orbiting slope preview
-- `/?test=1&scenario=results` · `…&scenario=countdown` · `…&scenario=paused` — the other states
+- `/?test=1&scenario=results` (mid-series board; `…&over=1` → the final/champion board) ·
+  `…&scenario=countdown` · `…&scenario=paused` — the other states
+- `&runs=N` pins the series length (any N≥1; `runs=1` is a single run) · `&intermission=N`
+  shortens the between-runs auto-advance — both honoured in live play and previews/tests
 - `/?test=1&scenario=device-choice&bail=game_ended` — the chooser a phone gets on this big-screen
   page (toast reasons: `game_ended`, `room_not_found`, `game_full`)
 - `/?scenario=solo` — **single player on the big screen, no phone**: a real race against a CPU
@@ -80,8 +90,9 @@ Keyboard, where a scenario lets you drive: **A/D** carve · hold **S** brake · 
 
 The phone controller previews the same way, off the relay:
 `/controller/index.html?scenario=playing&color=2`. Scenarios cover every screen — lobby,
-countdown, `playing`/`brake`, `paused`, `finished`, the results boards (host / waiting / late-
-joiner), late-join, and the `conn-*` relay-link overlay states; `color` 0–7 picks the livery.
+countdown, `playing`/`brake`, `paused`, `finished`, the results boards (`results-series` mid-
+series / `results` final host / waiting / late-joiner), late-join, and the `conn-*` relay-link
+overlay states; `color` 0–7 picks the livery.
 
 ### Gallery
 

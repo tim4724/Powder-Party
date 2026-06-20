@@ -326,6 +326,25 @@ input[type=text]:disabled { opacity: 0.6; }
 #result-foot .btn { width: min(82%, 18rem); margin-top: 0; }
 .result-wait { color: var(--ink-2); font-weight: 700; text-align: center; }
 
+/* ---- series board (multi-run scoring) ---- */
+.result-runtag {
+  font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase;
+  font-size: 0.8rem; color: var(--ink-3); text-align: center; margin: 0 0 -0.4rem;
+}
+.result-runtag:empty { display: none; }
+.result-champ {
+  font-family: var(--font-display); font-weight: 700; font-size: 1.25rem;
+  color: var(--ink); text-align: center; margin: 0;
+}
+.result-champ.hidden { display: none; }
+/* This run's points (+N, quiet) + the cumulative score (prominent, gold). */
+.result-list .res-pts { margin-left: 0.5rem; min-width: 2rem; text-align: right; color: var(--ink-3); font-weight: 700; font-variant-numeric: tabular-nums; }
+.result-list .res-score { min-width: 1.8rem; text-align: right; font-family: var(--font-display); font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+/* res-time keeps its margin-left:auto — pts/score ride to the right of it. */
+.result-list li.is-champ { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent), #fff 55%), var(--shadow-pop); }
+.result-intermission { font-family: var(--font-display); font-weight: 700; font-size: 1.5rem; color: var(--brand); text-align: center; }
+.result-intermission.hidden { display: none; }
+
 /* Landscape: less vertical room, so compact the paddings and let the play surface
    stay big. The HUD stays a single column. */
 @media (orientation: landscape) {

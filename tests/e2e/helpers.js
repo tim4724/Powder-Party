@@ -7,10 +7,13 @@
 const PHONE_VIEWPORT = { width: 390, height: 740 };   // trips the device-choice media query
 const DISPLAY_VIEWPORT = { width: 1280, height: 720 }; // must NOT trip it
 
-// Boot a display page and wait for its live room. Returns the room code.
-async function createRoom(page) {
+// Boot a display page and wait for its live room. Returns the room code. Pins the
+// series length via ?runs (default 1 — a one-run series, i.e. the old single-run
+// flow: a run ends straight onto the final board with no auto-advance) so the
+// lifecycle specs stay deterministic; the series spec passes runs > 1.
+async function createRoom(page, { runs = 1, intermission = 1 } = {}) {
   await page.setViewportSize(DISPLAY_VIEWPORT); // enforce, don't assume, the config default
-  await page.goto('/');
+  await page.goto('/?runs=' + runs + '&intermission=' + intermission);
   await page.waitForFunction(() => window.__net && !!window.__net.roomCode, null, { timeout: 30000 });
   return await page.evaluate(() => window.__net.roomCode);
 }

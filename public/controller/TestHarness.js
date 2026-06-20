@@ -4,7 +4,7 @@
 // livery and lay out the requested screen from fake data.
 //
 // Pure DOM: the controller has no 3D scene, so nothing async to await.
-import { applyLatencyChip, renderWaitNote, renderResultsBoard, buildLevelSeg, renderLevelSeg } from './ui.js';
+import { applyLatencyChip, renderWaitNote, renderResultsBoard, buildLevelSeg, renderLevelSeg, buildRunsSeg, renderRunsSeg } from './ui.js';
 
 const FAKE_NAMES = ['Mia', 'Theo', 'Ava', 'Leo', 'Zoe', 'Max', 'Ivy', 'Sam'];
 
@@ -28,13 +28,21 @@ export function runControllerScenario(opts) {
   // rows. `over=false` is the "you just finished, others still out" state;
   // `over=true` is the final board. A finisher other than this player is
   // fabricated as host so the non-host footer shows the tinted name treatment.
-  function showBoard(order, over, isHost) {
+  function showBoard(order, over, isHost, series = {}) {
     show('results');
     const host = order.find((o) => !o.me);
     renderResultsBoard(order, {
       over, isHost,
+      seriesOver: series.seriesOver, runIndex: series.runIndex, runTotal: series.runTotal,
       host: host && { name: host.name, color: COLORS[host.colorIndex] },
     }, COLORS);
+    // The intermission countdown line is owned by the live INTERMISSION handler,
+    // not renderResultsBoard — stage it directly for the mid-series preview.
+    const line = el('result-intermission');
+    if (line) {
+      if (series.intermission != null) { line.textContent = `Next run in ${series.intermission}…`; line.classList.remove('hidden'); }
+      else line.classList.add('hidden');
+    }
   }
 
   // Latency chip preview — no relay here, so feed it a static reading.
@@ -84,9 +92,11 @@ export function runControllerScenario(opts) {
       el('me-name').textContent = FAKE_NAMES[color];
       el('start-btn').classList.remove('hidden');     // the host can start any time (fixed slope)
       el('wait-host').classList.add('hidden');
-      // Host owns the difficulty pick — live segments, default tier highlighted.
+      // Host owns the difficulty + series-length picks — live segments, defaults highlighted.
       buildLevelSeg(LEVELS, null);
       renderLevelSeg(window.DEFAULT_LEVEL, true);
+      buildRunsSeg(window.RUN_COUNTS || [3, 5, 7], null);
+      renderRunsSeg(window.DEFAULT_RUNS || 5, true);
       break;
 
     case 'lobby-waiting': {
@@ -99,9 +109,10 @@ export function runControllerScenario(opts) {
       // the tinted name treatment, mirroring main.js renderWaitHost.
       const hostColor = (color + 1) % COLORS.length;
       renderWaitNote(waitEl, { name: FAKE_NAMES[hostColor], color: COLORS[hostColor] }, ' to start…');
-      // A non-host doesn't see the difficulty — only the host picks (the big
-      // screen shows the tier to the room).
+      // A non-host doesn't see the difficulty or the series length — only the host
+      // picks them (the big screen shows the tier/count to the room).
       el('level-select').classList.add('hidden');
+      el('runs-select').classList.add('hidden');
       break;
     }
 
@@ -140,15 +151,16 @@ export function runControllerScenario(opts) {
       break;
 
     case 'finished':
-      // Your skier crossed the line — the phone flips to the results board with
-      // your finished row while the rest are still out (not the drive HUD).
+      // Your skier crossed the line mid-series — the phone flips to the results
+      // board with your finished row (this run's +points + running total) while the
+      // rest are still out (not the drive HUD).
       setLatency(19, true);
       showBoard([
-        { name: FAKE_NAMES[color], colorIndex: color, time: 31.2, me: true, finished: true },
-        { name: FAKE_NAMES[(color + 1) % FAKE_NAMES.length], colorIndex: (color + 1) % COLORS.length, finished: false },
-        { name: 'Bolt', colorIndex: (color + 2) % COLORS.length, ai: true, finished: false },
-        { name: FAKE_NAMES[(color + 3) % FAKE_NAMES.length], colorIndex: (color + 3) % COLORS.length, finished: false }
-      ], false, false);
+        { name: FAKE_NAMES[color], colorIndex: color, time: 31.2, me: true, finished: true, points: 4, score: 7 },
+        { name: FAKE_NAMES[(color + 1) % FAKE_NAMES.length], colorIndex: (color + 1) % COLORS.length, finished: false, score: 6 },
+        { name: 'Bolt', colorIndex: (color + 2) % COLORS.length, ai: true, finished: false, score: 5 },
+        { name: FAKE_NAMES[(color + 3) % FAKE_NAMES.length], colorIndex: (color + 3) % COLORS.length, finished: false, score: 4 }
+      ], false, false, { runIndex: 2, runTotal: 5, seriesOver: false });
       break;
 
     case 'paused':
@@ -161,43 +173,58 @@ export function runControllerScenario(opts) {
       el('pause-overlay').classList.remove('hidden');
       break;
 
-    case 'results':
-      // Final board (run over), viewed as the host so "Play again" + "New game" show.
+    case 'results-series':
+      // Mid-series board (a run is over, the series isn't): "Run 2 of 5", this
+      // run's +points + cumulative scores, and the between-runs countdown line.
+      // The board auto-advances — no button mid-series (host's "New game" aside).
       setLatency(20, true);
       showBoard([
-        { name: FAKE_NAMES[(color + 1) % FAKE_NAMES.length], colorIndex: (color + 1) % COLORS.length, time: 28.4, finished: true },
-        { name: FAKE_NAMES[color],                           colorIndex: color,                       time: 31.2, me: true, finished: true },
-        { name: 'Bolt',                                      colorIndex: (color + 2) % COLORS.length, time: 33.9, ai: true, finished: true },
-        { name: FAKE_NAMES[(color + 3) % FAKE_NAMES.length], colorIndex: (color + 3) % COLORS.length, time: 36.5, finished: true }
-      ], true, true);
+        { name: FAKE_NAMES[(color + 1) % FAKE_NAMES.length], colorIndex: (color + 1) % COLORS.length, time: 28.4, finished: true, points: 4, score: 10 },
+        { name: FAKE_NAMES[color],                           colorIndex: color,                       time: 31.2, me: true, finished: true, points: 3, score: 7 },
+        { name: 'Bolt',                                      colorIndex: (color + 2) % COLORS.length, time: 33.9, ai: true, finished: true, points: 2, score: 6 },
+        { name: FAKE_NAMES[(color + 3) % FAKE_NAMES.length], colorIndex: (color + 3) % COLORS.length, time: 36.5, finished: true, points: 1, score: 3 }
+      ], true, true, { runIndex: 2, runTotal: 5, seriesOver: false, intermission: 3 });
+      break;
+
+    case 'results':
+      // Final overall board (the whole series is over), viewed as the host so
+      // "Play again" + "New game" show. Rows are sorted by total score (most
+      // first), the leader crowned champion.
+      setLatency(20, true);
+      showBoard([
+        { name: FAKE_NAMES[(color + 1) % FAKE_NAMES.length], colorIndex: (color + 1) % COLORS.length, time: 28.4, finished: true, score: 18, champion: true },
+        { name: FAKE_NAMES[color],                           colorIndex: color,                       time: 31.2, me: true, finished: true, score: 16 },
+        { name: 'Bolt',                                      colorIndex: (color + 2) % COLORS.length, time: 33.9, ai: true, finished: true, score: 13 },
+        { name: FAKE_NAMES[(color + 3) % FAKE_NAMES.length], colorIndex: (color + 3) % COLORS.length, time: 36.5, finished: true, score: 10 }
+      ], true, true, { runIndex: 5, runTotal: 5, seriesOver: true });
       break;
 
     case 'results-waiting':
-      // Final board (run over), viewed as a non-host: no restart buttons, just the
-      // "Waiting for <host> to start the next run…" note (the leading finisher is
-      // the fabricated host, so the tinted name treatment shows).
+      // Final overall board, viewed as a non-host: no restart buttons, just the
+      // "Waiting for <host> to play again…" note (the champion is the fabricated
+      // host, so the tinted name treatment shows).
       setLatency(20, true);
       showBoard([
-        { name: FAKE_NAMES[(color + 1) % FAKE_NAMES.length], colorIndex: (color + 1) % COLORS.length, time: 28.4, finished: true },
-        { name: FAKE_NAMES[color],                           colorIndex: color,                       time: 31.2, me: true, finished: true },
-        { name: 'Bolt',                                      colorIndex: (color + 2) % COLORS.length, time: 33.9, ai: true, finished: true },
-        { name: FAKE_NAMES[(color + 3) % FAKE_NAMES.length], colorIndex: (color + 3) % COLORS.length, time: 36.5, finished: true }
-      ], true, false);
+        { name: FAKE_NAMES[(color + 1) % FAKE_NAMES.length], colorIndex: (color + 1) % COLORS.length, time: 28.4, finished: true, score: 18, champion: true },
+        { name: FAKE_NAMES[color],                           colorIndex: color,                       time: 31.2, me: true, finished: true, score: 16 },
+        { name: 'Bolt',                                      colorIndex: (color + 2) % COLORS.length, time: 33.9, ai: true, finished: true, score: 13 },
+        { name: FAKE_NAMES[(color + 3) % FAKE_NAMES.length], colorIndex: (color + 3) % COLORS.length, time: 36.5, finished: true, score: 10 }
+      ], true, false, { runIndex: 5, runTotal: 5, seriesOver: true });
       break;
 
     case 'results-join':
-      // Final board as the LATE JOINER sees it: the FULL field's results (4
-      // skiers — humans topped up with CPU) plus your own unranked trailing row
-      // ("next run"), so a one-joiner board is 5 rows. The footer waits on the
-      // host — the rematch countdown is what pulls you in.
+      // Final overall board as the LATE JOINER sees it: the FULL field's totals (4
+      // skiers — humans topped up with CPU, champion crowned) plus your own
+      // unranked trailing row ("next run"), so a one-joiner board is 5 rows. The
+      // footer waits on the host to play again.
       setLatency(22, false);
       showBoard([
-        { name: FAKE_NAMES[(color + 1) % FAKE_NAMES.length], colorIndex: (color + 1) % COLORS.length, time: 28.4, finished: true },
-        { name: 'Bolt',                                      colorIndex: (color + 2) % COLORS.length, time: 33.9, ai: true, finished: true },
-        { name: FAKE_NAMES[(color + 3) % FAKE_NAMES.length], colorIndex: (color + 3) % COLORS.length, time: 36.1, finished: true },
-        { name: 'Wedge',                                     colorIndex: (color + 4) % COLORS.length, ai: true, finished: false, dnf: true },
+        { name: FAKE_NAMES[(color + 1) % FAKE_NAMES.length], colorIndex: (color + 1) % COLORS.length, time: 28.4, finished: true, score: 18, champion: true },
+        { name: 'Bolt',                                      colorIndex: (color + 2) % COLORS.length, time: 33.9, ai: true, finished: true, score: 14 },
+        { name: FAKE_NAMES[(color + 3) % FAKE_NAMES.length], colorIndex: (color + 3) % COLORS.length, time: 36.1, finished: true, score: 11 },
+        { name: 'Wedge',                                     colorIndex: (color + 4) % COLORS.length, ai: true, finished: false, dnf: true, score: 6 },
         { name: FAKE_NAMES[color],                           colorIndex: color,                       me: true, newPlayer: true }
-      ], true, false);
+      ], true, false, { runIndex: 5, runTotal: 5, seriesOver: true });
       break;
 
     // --- connection overlay states (#conn) ---

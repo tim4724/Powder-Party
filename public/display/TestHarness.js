@@ -6,14 +6,16 @@
 //   /?test=1&scenario=running&players=4   — full split-screen run, CPU-driven (endless)
 //   /?test=1&scenario=countdown           — countdown beat
 //   /?test=1&scenario=paused              — mid-run, frozen + pause overlay
-//   /?test=1&scenario=results             — results board
+//   /?test=1&scenario=results             — results board (mid-series; &over=1 → final/champion board)
 //   /?test=1&scenario=lobby               — live CPU attract race + fake roster (mirrors the real lobby)
 //   /?test=1&scenario=slope               — clean orbiting slope preview, CPU field (endless)
 //   /?test=1&scenario=solo                — SINGLE-PLAYER on the main display, no phone: a
 //        REAL race down a generated mountain against a CPU field, you in a full-screen
 //        chase cell (CPU share your world). Keyboard: A / D carve · hold S brake ·
-//        Q spin-left · W front flip · E spin-right · Space back flip (Z / C corks). On the
-//        finish the results board holds; ENTER (or "Play again") skis it again.
+//        Q spin-left · W front flip · E spin-right · Space back flip (Z / C corks). Runs a
+//        full SERIES (&runs=N, default 5): each run's board holds for a beat then the next
+//        auto-starts on a fresh mountain; the overall board crowns the champion, and ENTER
+//        (or "Play again") starts a new series.
 //        (&players=N sizes the field — default you + 3 CPU; &seed=N picks the mountain)
 
 const el = (id) => document.getElementById(id);
@@ -63,7 +65,7 @@ function keyboardDriver() {
 }
 
 export function runDisplayScenario(cfg, ctx) {
-  const { scene, AiController, AI_PERSONALITIES, RunSession, renderRoster, renderLevel, showResults, buildReconnectCard, audio, showSoundHint, rerollSlope, lobbyCrossfade } = ctx;
+  const { scene, AiController, AI_PERSONALITIES, RunSession, renderRoster, renderLevel, renderRuns, showResults, setSeriesPreview, buildReconnectCard, audio, showSoundHint, rerollSlope, lobbyCrossfade } = ctx;
   // `let` so solo's "Play again" can re-point it at a freshly rolled mountain.
   let slope = ctx.slope;
 
@@ -117,6 +119,7 @@ export function runDisplayScenario(cfg, ctx) {
     // escapes names. First skier is host (matches the live "first to join" rule).
     renderRoster(field, field[0] && field[0].peerIndex);
     renderLevel && renderLevel(); // mirror the difficulty badge (?level= pins the tier)
+    renderRuns && renderRuns();   // and the series-length switch
     return;
   }
 
@@ -153,6 +156,16 @@ export function runDisplayScenario(cfg, ctx) {
   // `solo` latches its results board once (shown from onRaceEnd below) so it isn't
   // re-rendered every frame; cleared on replay.
   let soloOver = false;
+  // `solo` runs a full SERIES like live play, but self-contained here (it owns its
+  // own session, not main.js's): a points tally across runsTotal runs, the real
+  // series board via setSeriesPreview + showResults, and an auto-advance between
+  // runs. seriesScores holds totals through COMPLETED runs (this run's points are
+  // layered on live by buildSeriesRows); runIndex is the current run (1-based).
+  const runsTotal = cfg.runsTotal || 5;
+  let runIndex = 1;
+  let seriesScores = {}; // playerId -> points through prior runs
+  let seriesOver = false;
+  let interTimer = null;
   // main.js gates pole clacks on ITS raceEnded (always false in test mode) —
   // re-gate on solo's results board so coasting CPU stay quiet behind it.
   scene.onPoleHit = (kick) => { if (!soloOver) audio.pole(kick); };
@@ -170,20 +183,47 @@ export function runDisplayScenario(cfg, ctx) {
         if (n >= 0) audio.countdown(n);
       },
       onRaceStart: () => audio.startWind(),
-      // `solo` lands on the real results board the instant the run ends. This fires on
-      // a normal finish (whole field across → real times) AND on the MAX_RUN_MS
+      // `solo` lands on the real series board the instant the run ends. This fires
+      // on a normal finish (whole field across → real times) AND on the MAX_RUN_MS
       // failsafe, so a stuck run still shows results instead of freezing on a dead
       // frame. The other previews ignore this and auto-loop from onFrame instead.
-      onRaceEnd: (results) => { if (scn === 'solo' && !soloOver) { soloOver = true; audio.stopWind(); audio.finish(); showResults(results, field); } },
+      onRaceEnd: (results) => {
+        if (scn !== 'solo' || soloOver) return;
+        soloOver = true; audio.stopWind(); audio.finish();
+        seriesOver = runIndex >= runsTotal;
+        // Stage the series state so showResults renders the real board: scores are
+        // the totals through PRIOR runs; buildSeriesRows adds this run's points on top.
+        if (setSeriesPreview) setSeriesPreview({ index: runIndex, total: runsTotal, over: seriesOver, scores: { ...seriesScores } });
+        showResults(results, field);
+        if (!seriesOver) startInter(); // hold the scores a beat, then auto-advance
+      },
     });
     return s;
   }
-  // `solo` replay: rather than auto-looping like the other run previews, the results
-  // board holds (shown above) until the player skis again — ENTER or the board's
-  // "Play again". Each rematch rolls a FRESH mountain at the same difficulty (live
-  // play does the same), unless &seed=N pins one for repro. (No lobby in solo, so
-  // "New game" is hidden.)
-  function restartSolo() {
+  // Bank a finished run's points into the prior-runs tally (mirrors the live
+  // foldRunScores). window.seriesPoints is protocol.js's shared scoring rule.
+  function foldRun(resultsObj) {
+    const res = (resultsObj && resultsObj.results) || [];
+    for (const r of res) seriesScores[r.playerId] = (seriesScores[r.playerId] || 0) + window.seriesPoints(r.rank, res.length, r.finished);
+  }
+  // Between-runs auto-advance countdown — drives the same #results-intermission
+  // line the live INTERMISSION ticks do.
+  function clearInter() { if (interTimer) { clearInterval(interTimer); interTimer = null; } }
+  function startInter() {
+    clearInter();
+    let n = cfg.intermission || 3;
+    const line = el('results-intermission');
+    if (line) line.textContent = `Next run in ${n}…`;
+    interTimer = setInterval(() => {
+      n -= 1;
+      if (n <= 0) { advanceSolo(); return; } // advanceSolo clears the timer
+      if (line) line.textContent = `Next run in ${n}…`;
+    }, 1000);
+  }
+  // Start the next run on a FRESH mountain (same grade) — shared by the auto/skip
+  // advance and a brand-new series. Keeps the field + bots (stable scoring ids).
+  function nextSoloRun() {
+    clearInter();
     el('results') && el('results').classList.add('hidden');
     session.dispose();
     if (rerollSlope) slope = rerollSlope(); // new hill, same grade (setTrack keeps the skier meshes)
@@ -192,9 +232,23 @@ export function runDisplayScenario(cfg, ctx) {
     session.startCountdown(3);
     soloOver = false;
   }
+  // Mid-series: bank this run, step the index, ski the next.
+  function advanceSolo() {
+    if (!soloOver || seriesOver) return;
+    foldRun(session.getResults());
+    runIndex += 1;
+    nextSoloRun();
+  }
+  // From the overall board ("Play again" / ENTER): a brand-new series.
+  function newSoloSeries() {
+    seriesScores = {}; runIndex = 1; seriesOver = false;
+    nextSoloRun();
+  }
   if (scn === 'solo') {
-    el('results-newgame') && el('results-newgame').classList.add('hidden');
-    const again = () => { if (soloOver) restartSolo(); };
+    el('results-newgame') && el('results-newgame').classList.add('hidden'); // no lobby in solo
+    // Mid-series the board auto-advances on its own; only the overall board offers
+    // a restart (ENTER or the "Play again" button → a brand-new series).
+    const again = () => { if (soloOver && seriesOver) newSoloSeries(); };
     window.addEventListener('keydown', (e) => { if (e.key === 'Enter') again(); });
     el('results-again') && el('results-again').addEventListener('click', again);
   }
@@ -246,9 +300,20 @@ export function runDisplayScenario(cfg, ctx) {
     session.racing = true; // skip the countdown delay so fast-forward actually runs
     driveBots(session);
     session.fastForwardToEnd(() => driveBots(session));
-    // One fabricated late joiner so the preview exercises the unranked
-    // "next run" row (live play derives these from the roster).
-    showResults(session.getResults(), field, false, [{ name: 'Nova', colorIndex: 4 }]);
+    // Stage a SERIES board: give the field some prior-run points so the cumulative
+    // score column (and, on the final board, the champion banner) have something to
+    // show. `&over=1` previews the overall board; otherwise it's a mid-series run.
+    const total = cfg.runsTotal || 5;
+    const over = !!cfg.seriesOver;
+    const scores = {};
+    field.forEach((p, i) => { scores[p.peerIndex] = (field.length - i) * 2; }); // descending fake totals
+    setSeriesPreview && setSeriesPreview({ index: over ? total : Math.min(2, total), total, over, scores });
+    // One fabricated late joiner so the mid-series board exercises the unranked
+    // "next run" row; the final board drops it (the series is done).
+    showResults(session.getResults(), field, false, over ? null : [{ name: 'Nova', colorIndex: 4 }]);
+    // The intermission line is fed by the live INTERMISSION tick, absent here —
+    // stage it for the mid-series preview so the countdown row isn't blank.
+    if (!over) { const line = el('results-intermission'); if (line) line.textContent = 'Next run in 3…'; }
   } else { // running / slope / solo — start the run, onFrame loops it
     showSoundHint();
     session.startCountdown(scn === 'solo' ? 3 : 1); // solo gets a real 3-2-1 race start

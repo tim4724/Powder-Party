@@ -5,12 +5,13 @@
 import { ControllerNet } from './Net.js';
 import { TiltInput } from './TiltInput.js';
 import { SwipeInput } from './SwipeInput.js';
-import { applyLatencyChip, renderWaitNote, renderResultsBoard, buildLevelSeg, renderLevelSeg } from './ui.js';
+import { applyLatencyChip, renderWaitNote, renderResultsBoard, buildLevelSeg, renderLevelSeg, buildRunsSeg, renderRunsSeg } from './ui.js';
 import { keepScreenOn, letScreenSleep } from '../shared/WakeLock.js';
 
-const { MSG, RUN_STATE_MSGS, RELAY_ERRORS, ROOM_STATE, SKIER_COLORS, LEVELS, DEFAULT_LEVEL } = window;
+const { MSG, RUN_STATE_MSGS, RELAY_ERRORS, ROOM_STATE, SKIER_COLORS, LEVELS, DEFAULT_LEVEL, RUN_COUNTS, DEFAULT_RUNS } = window;
 const el = (id) => document.getElementById(id);
 const isLevel = (id) => LEVELS.some((l) => l.id === id);
+const isRunCount = (n) => RUN_COUNTS.includes(n);
 
 const screens = { name: el('name'), lobby: el('lobby'), waiting: el('waiting'), game: el('game'), results: el('results') };
 // Screen "depth": name is the entry point (0); every in-room screen sits one
@@ -46,6 +47,7 @@ let hostPeerIndex = null;
 let inResults = false;     // showing the results overlay (my skier finished / run over)
 let waitingForRun = false; // late joiner: a run is on WITHOUT us — parked on #waiting until it ends
 let currentLevel = DEFAULT_LEVEL; // room's run difficulty (Blue/Red/Black); host picks, display is authoritative
+let currentRuns = DEFAULT_RUNS;   // series length (number of runs); host picks, display is authoritative
 
 const NAME_KEY = 'powder_name';
 const storedName = () => { try { return localStorage.getItem(NAME_KEY) || ''; } catch (_) { return ''; } };
@@ -193,6 +195,7 @@ function handleMessage(data) {
       hostPeerIndex = data.hostPeerIndex;
       amHost = net.isHost(data.hostPeerIndex);
       currentLevel = isLevel(data.level) ? data.level : DEFAULT_LEVEL; // land the selector on the room's tier (older display omits it → default)
+      currentRuns = isRunCount(data.runs) ? data.runs : DEFAULT_RUNS;  // and the series length (older display omits it → default)
       const me = roster.find((p) => p.peerIndex === net.peerIndex);
       if (me && me.name) myName = me.name;
       renderLobby();
@@ -266,8 +269,20 @@ function handleMessage(data) {
       // LOBBY_UPDATE, so a late joiner's lobby stays in sync.
       if (isLevel(data.level)) { currentLevel = data.level; renderLevelSeg(currentLevel, amHost); }
       break;
+    case MSG.RUNS_UPDATE:
+      // Series length changed (host picked, lobby only). Like LEVEL_UPDATE it's
+      // room config, not gated by waitingForRun — cache it and repaint the
+      // host-only selector (a no-op paint for everyone else).
+      if (isRunCount(data.runs)) { currentRuns = data.runs; renderRunsSeg(currentRuns, amHost); }
+      break;
+    case MSG.INTERMISSION:
+      // Between-runs countdown — the display auto-advances the series. Show it on
+      // the results board for everyone (host and not).
+      if (inResults) { const line = el('result-intermission'); if (line) { line.textContent = `Next run in ${data.n}…`; line.classList.remove('hidden'); } }
+      break;
     case MSG.COUNTDOWN:
       inResults = false;               // a fresh run clears any leftover results overlay
+      el('result-intermission') && el('result-intermission').classList.add('hidden'); // a fresh run ends the intermission
       show('game');
       el('drive-hud').classList.remove('hidden'); // full HUD up front — the countdown lives on the display
       if (data.n >= 0) buzz(data.n > 0 ? 20 : [0, 90]); // haptic tick on counts, stronger on GO
@@ -319,6 +334,7 @@ function handleMessage(data) {
       stopDriving();
       setPauseOverlay(false);
       el('pause-btn').classList.add('hidden');
+      el('result-intermission') && el('result-intermission').classList.add('hidden');
       show('lobby');
       break;
     case MSG.DISPLAY_CLOSED:
@@ -363,6 +379,8 @@ function renderResults(data) {
   const host = order.find((o) => o.playerId === hostPeerIndex);
   renderResultsBoard(rows, {
     over: !!data.over,
+    seriesOver: !!data.seriesOver,
+    runIndex: data.runIndex, runTotal: data.runTotal,
     isHost: amHost,
     host: host && { name: host.name, color: SKIER_COLORS[host.colorIndex] },
   }, SKIER_COLORS);
@@ -378,6 +396,7 @@ function applyLivery() {
 function renderLobby() {
   el('me-name').textContent = myName || 'Skier'; // who you are, up top (livery dot is var(--car))
   renderLevelSeg(currentLevel, amHost);
+  renderRunsSeg(currentRuns, amHost);
   el('start-btn').classList.toggle('hidden', !amHost);
   const waitEl = el('wait-host');
   waitEl.classList.toggle('hidden', amHost);
@@ -398,6 +417,19 @@ function pickLevel(level) {
   net.send(MSG.SET_LEVEL, { level });
 }
 buildLevelSeg(LEVELS, pickLevel);
+
+// Series length picker — host-only, same optimistic pattern as difficulty: the
+// display's RUNS_UPDATE confirms + syncs the room. The segment ids are the counts
+// as strings (see buildRunsSeg), so parse before validating/sending.
+function pickRuns(id) {
+  const runs = parseInt(id, 10);
+  if (!amHost || runs === currentRuns || !isRunCount(runs)) return;
+  buzz(15);
+  currentRuns = runs;     // optimistic — the display's RUNS_UPDATE confirms it
+  renderRunsSeg(currentRuns, amHost);
+  net.send(MSG.SET_RUNS, { runs });
+}
+buildRunsSeg(RUN_COUNTS, pickRuns);
 
 function renderWaitHost(waitEl) {
   const host = roster.find((p) => p.peerIndex === hostPeerIndex);

@@ -43,7 +43,13 @@
       <span class="level-select__cap">Difficulty</span>
       <div id="level-seg" class="level-seg"></div>
     </div>
-    <button id="start-btn" class="btn btn--brand hidden">Start run</button>
+    <!-- Series length (3 / 5 / 7 runs) — host-only, like difficulty. Points
+         accumulate across the runs to an overall champion. -->
+    <div id="runs-select" class="level-select hidden" role="group" aria-label="Number of runs">
+      <span class="level-select__cap">Runs</span>
+      <div id="runs-seg" class="level-seg"></div>
+    </div>
+    <button id="start-btn" class="btn btn--brand hidden">Start series</button>
     <div id="wait-host" class="hidden">Waiting for the host to start…</div>
   </section>
 
@@ -103,11 +109,15 @@
   </section>
 
   <!-- Results — shown once your skier finishes; the board fills in as the rest of
-       the field crosses the line. The host starts the next run from here. -->
+       the field crosses the line. Mid-series it auto-advances to the next run; on
+       the final board the host can play again. -->
   <section id="results" class="hidden">
+    <div id="result-runtag" class="result-runtag"></div>
     <h2 class="results-title">Results</h2>
+    <div id="result-champ" class="result-champ hidden"></div>
     <ol id="result-list" class="result-list"></ol>
     <div id="result-foot">
+      <div id="result-intermission" class="result-intermission hidden"></div>
       <button id="again-btn" class="btn btn--brand hidden">Play again</button>
       <button id="newgame-btn" class="btn btn--ghost hidden">New game</button>
       <div id="result-wait" class="result-wait hidden"></div>

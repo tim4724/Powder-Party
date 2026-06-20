@@ -51,6 +51,13 @@ single-screen previews stay relay-free via `/?test=1&scenario=…` (see README)
 - PartyPlug (`partyplug/`) is the reusable transport kit shared across the sibling games;
   Three.js (`vendor/`) is vendored — both live OUTSIDE `public/` and are served via route
   remaps in `server/index.js`, so update the Dockerfile + CSP when changing them.
+- **Series, not single runs:** a session is N runs (host picks 3/5/7 in the lobby, like the
+  difficulty switch — `SET_RUNS`/`RUNS_UPDATE`). The SkiEngine stays run-only (no series
+  concept); the series tally lives in `display/main.js` (`seriesScores`, `runIndex`). Points
+  per run come from the pure `seriesPoints()` in `protocol.js` (linear N..1, DNF 0 — tested in
+  `tests/series.test.js`); cumulative score + champion are folded in `endRun`/`buildSeriesRows`.
+  Between runs the display auto-advances after an `INTERMISSION` countdown. `?runs=N`/`?intermission=N`
+  pin them for previews/tests (any N≥1; `runs=1` = the old single-run flow — E2E helpers use it).
 - Slope layout is plain data in `public/shared/slopes.js`; `SlopeBuilder.js` turns it into a
   descending `Centerline`. Feel constants are starting values commented atop `SkiEngine.js`
   and `SceneRenderer.js`.

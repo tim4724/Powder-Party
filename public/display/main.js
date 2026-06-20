@@ -14,8 +14,10 @@ import { buildLevelSeg, paintLevelSeg } from '../shared/levelSeg.js';
 
 const {
   MSG, ROOM_STATE, COUNTDOWN_SECONDS, MAX_PLAYERS, SKIER_COLORS, LEVELS, DEFAULT_LEVEL,
+  RUN_COUNTS, DEFAULT_RUNS, INTERMISSION_SECONDS, seriesPoints,
 } = window;
 const isLevel = (id) => LEVELS.some((l) => l.id === id);
+const isRunCount = (n) => RUN_COUNTS.includes(n);
 
 const FIELD_SIZE = MAX_PLAYERS;     // skiers in a run (humans topped up with CPU)
 const AI_PREFIX = 'ai-';
@@ -33,6 +35,19 @@ const testMode = params.get('test') === '1' || !!params.get('scenario');
 // pins it for previews/snapshots; otherwise it starts at DEFAULT_LEVEL and follows
 // the host's choice. Only the procedural HILL changes per tier — never the physics.
 let currentLevel = isLevel(params.get('level')) ? params.get('level') : DEFAULT_LEVEL;
+
+// Series length — how many runs make up one head-to-head session. The host picks
+// it in the lobby (SET_RUNS, restricted to the RUN_COUNTS presets); the display is
+// authoritative. `?runs=N` pins it for previews/snapshots/tests and accepts ANY
+// positive integer (e.g. ?runs=1 for a one-run series, the old single-run flow);
+// otherwise it starts at DEFAULT_RUNS and follows the host's choice. Locked once a
+// series starts (the selector is lobby-only).
+const runsParam = parseInt(params.get('runs'), 10);
+let runsTotal = Number.isInteger(runsParam) && runsParam >= 1 ? runsParam : DEFAULT_RUNS;
+// Between-runs auto-advance countdown (seconds). `?intermission=N` shortens it for
+// tests/previews; live play uses the INTERMISSION_SECONDS default.
+const interParam = parseInt(params.get('intermission'), 10);
+const intermissionSeconds = Number.isInteger(interParam) && interParam >= 1 ? interParam : INTERMISSION_SECONDS;
 
 // Build the slope for the NEXT run — always procedural. Precedence: an explicit
 // `?seed` (deterministic repro + tests) → a fixed seed in test mode (stable gallery
@@ -118,6 +133,19 @@ let raceEndedAt = 0;         // performance.now() when the panel went up — bou
 let coastSettled = false;    // one-shot: final board refresh once the coast-out comes to rest
 let lastHud = 0;
 
+// ---- series state --------------------------------------------------------
+// A series is `runsTotal` head-to-head runs with points accumulating to an
+// overall champion. `runIndex` is the current run (1-based; 0 in the lobby).
+// `seriesScores` is the running tally through COMPLETED runs only (the live run's
+// points are added on top each render), keyed by playerId so it survives a player
+// leaving/reconnecting and CPU-id reuse. `seriesOver` flips on the final run's end
+// → the overall board (sorted by total). Between runs the display auto-advances
+// after a short intermission countdown.
+let runIndex = 0;
+let seriesOver = false;
+let seriesScores = new Map(); // playerId -> { name, colorIndex, ai, points }
+let intermissionTimer = null;
+
 // ---- net -----------------------------------------------------------------
 const net = new DisplayNet({
   onRoomReady,
@@ -135,9 +163,10 @@ const net = new DisplayNet({
   // stamp the frozen state instead, so a rejoiner's phone comes back showing
   // the pause overlay rather than a live HUD over a frozen world.
   welcomeExtras: () => {
-    // Every WELCOME carries the room's current difficulty so a joiner's lobby
-    // selector lands on the right tier; mid-run/results extras ride alongside.
-    const extra = { level: currentLevel };
+    // Every WELCOME carries the room's current difficulty + series length so a
+    // joiner's lobby selectors land on the right tier/count; mid-run/results
+    // extras ride alongside.
+    const extra = { level: currentLevel, runs: runsTotal };
     if (session) {
       if (raceEnded) extra.standings = standingsPayload(true);
       else if (paused) extra.paused = true;
@@ -157,12 +186,15 @@ function onRoomReady({ joinUrl }) {
 function onControllerMessage(from, data) {
   if (!data) return;
   if (data.type === MSG.CONTROL) { if (session) session.processInput(from, data); }
-  // Host's start/rematch. From the lobby this starts the first run; from the results
-  // board (run already over) it plays again on a fresh slope.
-  else if (data.type === MSG.START_GAME) { if (from === net.flow.host && net.flow.connectedCount > 0) (raceEnded ? playAgain() : startRun()); }
+  // Host's start button. From the lobby it kicks off a fresh series; from the final
+  // overall board it starts a brand-new series. Mid-series there's no button (the
+  // board auto-advances), so a mid-series press is ignored. See onStartPressed.
+  else if (data.type === MSG.START_GAME) { if (from === net.flow.host && net.flow.connectedCount > 0) onStartPressed(); }
   // Host picks the run difficulty from the lobby. Honoured only in the lobby (the
   // selector is lobby-only) — it re-rolls the orbiting preview to the chosen tier.
   else if (data.type === MSG.SET_LEVEL) { if (from === net.flow.host && net.roomState === ROOM_STATE.LOBBY) setLevel(data.level); }
+  // Host picks the series length from the lobby (lobby-only, like difficulty).
+  else if (data.type === MSG.SET_RUNS) { if (from === net.flow.host && net.roomState === ROOM_STATE.LOBBY) setRuns(data.runs); }
   else if (data.type === MSG.PAUSE_GAME) pauseRun();   // any player may pause (friendly)
   else if (data.type === MSG.RESUME_GAME) resumeRun();
   // host-gated: aborting the run back to the lobby affects everyone.
@@ -228,6 +260,9 @@ function rekeyPlayer(oldId, newId) {
   if (humanIds.delete(oldId)) humanIds.add(newId);
   if (_rcShown.delete(oldId)) _rcShown.add(newId);
   for (const p of currentField) { if (p.peerIndex === oldId) p.peerIndex = newId; }
+  // Carry their accumulated series points onto the new slot so a cross-device
+  // reconnect mid-series doesn't lose the score they've banked.
+  if (seriesScores.has(oldId)) { seriesScores.set(newId, seriesScores.get(oldId)); seriesScores.delete(oldId); }
 }
 
 // Dropped-seat reconnect cards: a QR centred in each disconnected player's
@@ -303,6 +338,29 @@ function setLevel(level) {
   // Re-roll the lobby preview to the new tier (idle only — at results the live
   // world owns the scene; the pick still lands on the next slope at teardown).
   if (!session) lobbyCrossfade(() => { slope = makeSlope(); window.__slope = slope; applyTrack(); startLobbyRace(); });
+}
+
+// ---- series length (number of runs) --------------------------------------
+// A "Runs" segmented switch (3 / 5 / 7) sits next to Difficulty in the lobby,
+// reusing the same shared segment widget. Like the difficulty pick it's host-set
+// and display-authoritative: the host's phone (SET_RUNS) and a big-screen tap
+// both land in `setRuns`, which stores the count, repaints, and broadcasts
+// RUNS_UPDATE. Changing it has no scene side-effect (it's not a per-tier mountain).
+function renderRuns() {
+  const seg = el('runs-seg');
+  if (!seg) return;
+  // Items reuse the LEVELS shape ({ id, label, color }); the brand colour fills
+  // the active segment (runs have no per-option colour like the piste grades).
+  buildLevelSeg(seg, RUN_COUNTS.map((n) => ({ id: String(n), label: String(n), color: 'var(--brand)' })), setRuns);
+  paintLevelSeg(seg, String(runsTotal), false); // always live on the big screen — no host gate
+}
+
+function setRuns(runs) {
+  const n = parseInt(runs, 10);
+  if (!isRunCount(n) || n === runsTotal) return;
+  runsTotal = n;
+  renderRuns();
+  net.broadcast({ type: MSG.RUNS_UPDATE, runs: runsTotal });
 }
 
 // ---- field build (humans + AI fill) -------------------------------------
@@ -412,6 +470,51 @@ function driveLobbyRace(dt) {
 }
 
 // ---- run lifecycle -------------------------------------------------------
+// The host's Start button funnels here: from the lobby it begins a fresh series,
+// and from the final overall board it begins a NEW series. Mid-series there's no
+// manual control — the board auto-advances — so a mid-series START_GAME is ignored.
+// A stray START_GAME mid-run is ignored too (startRun guards on `session`, and we
+// only kick a series off from the lobby with no live session — scores can't be
+// wiped mid-run).
+function onStartPressed() {
+  if (raceEnded) { if (seriesOver) newSeriesFromResults(); return; }
+  if (!session && net.roomState === ROOM_STATE.LOBBY) startSeries();
+}
+
+// Kick off a fresh series: wipe the tally and drop into run 1. From the lobby
+// (host Start) or the final board ("Play again", via newSeriesFromResults).
+function startSeries() {
+  seriesScores = new Map();
+  runIndex = 0;
+  seriesOver = false;
+  startNextRun();
+}
+
+function startNextRun() {
+  runIndex += 1;
+  startRun();
+}
+
+// Advance the series by one run: bank the just-finished run's points (before its
+// session is torn down), then roll into the next. Fired by the intermission timer
+// when the countdown elapses. Guarded so a double-fire no-ops: once startRun flips
+// raceEnded back to false a re-entry returns early.
+function advanceToNextRun() {
+  if (!raceEnded || seriesOver) return;
+  clearIntermission();
+  foldRunScores();
+  teardownRun();
+  startNextRun();
+}
+
+// "Play again" from the final board → a brand-new series on a fresh mountain.
+function newSeriesFromResults() {
+  if (!session) return;
+  clearIntermission();
+  teardownRun();
+  startSeries();
+}
+
 function startRun() {
   if (session) return;
   stopLobbyRace();        // the attract CPU reuse the same ids — drop them first
@@ -524,7 +627,11 @@ scene.onFrame = (dt) => {
     // Settled — hold the final frame under the results panel. One last board
     // render flips any lingering "…" (still skiing) rows to DNF: nothing can
     // finish anymore, even when the engine's raceOver never tripped (timeout).
-    if (!coastSettled) { coastSettled = true; showResults(session.getResults(), currentField, true); }
+    if (!coastSettled) {
+      coastSettled = true;
+      showResults(session.getResults(), currentField, true);
+      maybeStartIntermission(); // timeout / stuck-skier end: the field is settled (DNFs shown) → start the countdown
+    }
     return;
   }
 
@@ -564,7 +671,10 @@ function onRaceEvent(e) {
   // times on the live board.
   if (e.type === 'finish') {
     broadcastStandings(raceEnded);
-    if (raceEnded && session) showResults(session.getResults());
+    if (raceEnded && session) {
+      showResults(session.getResults());
+      maybeStartIntermission(); // this crossing may be the last skier in → start the countdown now
+    }
     return;
   }
   // Run decided: the world keeps moving behind the results panel, but stay silent
@@ -582,24 +692,75 @@ function lateJoiners() {
   return net.roster().filter((p) => p.connected !== false && !inField.has(p.peerIndex));
 }
 
+// This run's series points for every skier, keyed by playerId. `seriesPoints`
+// lives in shared/protocol.js (one definition for both sides + the Node tests).
+function pointsForResults(res) {
+  const m = new Map();
+  for (const r of res) m.set(r.playerId, seriesPoints(r.rank, res.length, r.finished));
+  return m;
+}
+
+// Bank the just-finished run's points into the cumulative tally. Called from
+// advanceToNextRun BEFORE the session is torn down (it reads the live field +
+// results). seriesScores then holds totals through this run; the next run's points
+// are layered on top live again. Not called for the final run — the overall board
+// derives its totals as seriesScores(prior runs) + the final run's points, so the
+// last run is never double-counted.
+function foldRunScores() {
+  if (!session) return;
+  const pts = pointsForResults(session.getResults().results);
+  for (const p of currentField) {
+    const cur = seriesScores.get(p.peerIndex) || { points: 0 };
+    seriesScores.set(p.peerIndex, {
+      name: p.name, colorIndex: p.colorIndex, ai: !!p.ai,
+      points: cur.points + (pts.get(p.peerIndex) || 0),
+    });
+  }
+}
+
+// The ordered standings rows for the CURRENT run, each carrying this-run `points`
+// and the cumulative `score` (banked total through prior runs + this run's points).
+// Shared by the phone broadcast (standingsPayload) and the big-screen board
+// (showResults) so they can't drift. Per-run the rows stay in finish order; once
+// the series is over they're sorted by total score (the overall ranking), `place`
+// renumbered, and the leader(s) flagged champion. `resultsObj` is the engine's
+// getResults() output; `field` names/colours the rows. (Both are passed in rather
+// than read off the module `session` so the no-relay TestHarness, which owns its
+// own session, drives this exact path.)
+function buildSeriesRows(resultsObj, field) {
+  const res = (resultsObj && resultsObj.results) || [];
+  const byId = new Map(field.map((p) => [p.peerIndex, p]));
+  const pts = pointsForResults(res);
+  const rows = res.map((r) => {
+    const p = byId.get(r.playerId) || {};
+    const point = pts.get(r.playerId) || 0;
+    const prior = (seriesScores.get(r.playerId) || { points: 0 }).points;
+    return {
+      playerId: r.playerId, name: p.name || 'Skier',
+      colorIndex: p.colorIndex || 0, ai: !!p.ai,
+      finished: r.finished, time: r.time, dnf: !!r.dnf,
+      place: r.rank, points: point, score: prior + point,
+    };
+  });
+  if (seriesOver) {
+    // Overall ranking: most points first, this run's finish order breaks ties.
+    rows.sort((a, b) => b.score - a.score || a.place - b.place);
+    const top = rows.length ? rows[0].score : 0;
+    rows.forEach((row, i) => { row.place = i + 1; row.champion = top > 0 && row.score === top; });
+  }
+  return rows;
+}
+
 function standingsPayload(over) {
-  const byId = new Map(currentField.map((p) => [p.peerIndex, p]));
-  const results = session.getResults().results;
+  const rows = buildSeriesRows(session.getResults(), currentField);
   return {
     type: MSG.STANDINGS,
-    over,
+    over, seriesOver, runIndex, runTotal: runsTotal,
     hostPeerIndex: net.flow.host,
-    total: results.length,
-    order: results.map((r) => {
-      const p = byId.get(r.playerId) || {};
-      return {
-        playerId: r.playerId, name: p.name || 'Skier',
-        colorIndex: p.colorIndex || 0, ai: !!p.ai,
-        finished: r.finished, time: r.time, dnf: !!r.dnf,
-      };
+    total: rows.length,
     // Late joiners ride along under the board (newPlayer) so their own phone —
     // and everyone else's — shows who's queued up for the next run.
-    }).concat(lateJoiners().map((p) => ({
+    order: rows.concat(lateJoiners().map((p) => ({
       playerId: p.peerIndex, name: p.name || 'Skier',
       colorIndex: p.colorIndex || 0, ai: false,
       finished: false, dnf: false, newPlayer: true,
@@ -608,16 +769,59 @@ function standingsPayload(over) {
 }
 function broadcastStandings(over) { if (session) net.broadcast(standingsPayload(over)); }
 
+// ---- between-runs intermission (auto-advance) ----------------------------
+// Start the countdown ONLY once the run is fully decided — every skier across the
+// line or DNF (engine.raceOver), or the coast-out/timeout has forced the final
+// reading (coastSettled, which DNFs anyone still stuck). Called when the panel goes
+// up, on each later finish (a CPU coasting in may be the last one home) and at the
+// settle point; the intermissionTimer guard keeps it to a single start. No-op on
+// the final run (the overall board never advances) or once the field has emptied.
+function maybeStartIntermission() {
+  if (!raceEnded || seriesOver || intermissionTimer) return;
+  if (!session || !(session.engine.raceOver || coastSettled)) return;
+  startIntermission();
+}
+
+// After a non-final run the board holds the scores for a beat, then the series
+// rolls on automatically. The countdown ticks to every phone (INTERMISSION) and
+// the big screen, mirroring the pre-run COUNTDOWN beat.
+function startIntermission() {
+  clearIntermission();
+  let n = intermissionSeconds;
+  pushIntermission(n);
+  intermissionTimer = setInterval(() => {
+    n -= 1;
+    if (n <= 0) { advanceToNextRun(); return; } // advanceToNextRun clears the timer
+    pushIntermission(n);
+  }, 1000);
+}
+function pushIntermission(n) {
+  net.broadcast({ type: MSG.INTERMISSION, n, runIndex, runTotal: runsTotal });
+  const line = el('results-intermission');
+  if (line) line.textContent = `Next run in ${n}…`;
+}
+function clearIntermission() {
+  if (intermissionTimer) { clearInterval(intermissionTimer); intermissionTimer = null; }
+}
+
 function endRun(results) {
   if (raceEnded) return; // panel already up (humans done) — onRaceEvent keeps it refreshed
   raceEnded = true;
   raceEndedAt = performance.now();
+  seriesOver = runIndex >= runsTotal; // the final run is in the books → overall board
   net.flow.transitionTo(ROOM_STATE.RESULTS);
   broadcastStandings(true);
   audio.stopWind();
   audio.finish();
   showResults(results);
   releaseOrphanedResults(); // the whole field may have walked out mid-run
+  // Mid-series the next run auto-starts after a breather — but the countdown only
+  // begins once the WHOLE field is in (every skier across the line or DNF), not the
+  // instant the humans are home: the panel can go up with CPU still coasting down.
+  // maybeStartIntermission no-ops until then, and fires again on each later finish
+  // and at the coast-out's end. (If the field just emptied, releaseOrphanedResults
+  // folds to the lobby and the intermission is cleared in returnToLobby.)
+  maybeStartIntermission();
 }
 
 // `field` is the full roster (incl. AI) used to name + colour the rows; defaults
@@ -627,24 +831,29 @@ function endRun(results) {
 // finish anymore), covering the timeout end where raceOver never trips. `joiners`
 // lets the harness preview late-join rows; live renders derive them themselves.
 function showResults(results, field = currentField, settled = false, joiners = null) {
+  const rows = buildSeriesRows(results, field);
   const list = el('results-list');
   if (list) {
     list.innerHTML = '';
-    const byId = new Map(field.map((p) => [p.peerIndex, p]));
     // While the panel is up but skiers are still coasting in, an unfinished row is
     // "still going" (…), not a DNF. DNF is reserved for a forfeited (dropped)
     // skier and for when the run is fully over and someone truly never crossed.
     const fullyOver = settled || !session || session.engine.raceOver;
-    for (const r of results.results) {
-      const p = byId.get(r.playerId) || {};
+    for (const r of rows) {
       const li = document.createElement('li');
-      const color = SKIER_COLORS[(p.colorIndex || 0) % SKIER_COLORS.length];
+      if (r.champion) li.className = 'res--champ';
+      const color = SKIER_COLORS[(r.colorIndex || 0) % SKIER_COLORS.length];
       const time = r.finished && r.time != null ? r.time.toFixed(1) + 's' : (r.dnf || fullyOver ? 'DNF' : '…');
+      // Per-run board shows the run's place + this run's points won; the overall
+      // board shows the series place and drops the per-run "+pts" (the score column
+      // is the story). The cumulative score column rides on the right of both.
       li.innerHTML =
-        `<span class="res__rank">${r.rank}</span>` +
+        `<span class="res__rank">${r.place}</span>` +
         `<span class="dot" style="background:${color}"></span>` +
-        `<span class="res__name">${escapeHtml(p.name || 'Skier')}${p.ai ? ' <span class="res__cpu">CPU</span>' : ''}</span>` +
-        `<span class="res__time">${time}</span>`;
+        `<span class="res__name">${escapeHtml(r.name)}${r.ai ? ' <span class="res__cpu">CPU</span>' : ''}</span>` +
+        `<span class="res__time">${time}</span>` +
+        `<span class="res__pts">${seriesOver ? '' : (r.finished ? '+' + r.points : '')}</span>` +
+        `<span class="res__score">${r.score}</span>`;
       list.appendChild(li);
     }
     // Late joiners (seated but not in this run) close out the board as unranked
@@ -659,18 +868,59 @@ function showResults(results, field = currentField, settled = false, joiners = n
         `<span class="res__rank">–</span>` +
         `<span class="dot" style="background:${color}"></span>` +
         `<span class="res__name">${escapeHtml(p.name || 'Skier')}</span>` +
-        `<span class="res__time">next run</span>`;
+        `<span class="res__time">next run</span>` +
+        `<span class="res__pts"></span>` +
+        `<span class="res__score"></span>`;
       list.appendChild(li);
     }
   }
+
+  // Header: "Run X of N" mid-series, "Final standings" once it's over.
+  const tag = el('results-runtag');
+  if (tag) tag.textContent = runIndex ? (seriesOver ? `Final standings · ${runsTotal} runs` : `Run ${runIndex} of ${runsTotal}`) : '';
+
+  // Champion banner — only on the overall board. Co-champions on a points tie.
+  const champ = el('results-champ');
+  if (champ) {
+    const winners = seriesOver ? rows.filter((r) => r.champion) : [];
+    if (winners.length) {
+      champ.classList.remove('hidden');
+      // Assigned via textContent (below), so names need no escaping — the browser
+      // never parses them as markup.
+      const names = winners.map((w) => w.name).join(' & ');
+      champ.textContent = winners.length === 1 ? `🏆 ${names} wins the series!` : `🏆 It's a tie — ${names}!`;
+    } else { champ.classList.add('hidden'); champ.textContent = ''; }
+  }
+
+  // Buttons + intermission line. Mid-series the board auto-advances on its own —
+  // no button, just the intermission countdown; only the final board offers a
+  // button ("Play again" → a brand-new series).
+  const again = el('results-again');
+  if (again) { again.textContent = 'Play again'; again.classList.toggle('hidden', !seriesOver); }
+  const line = el('results-intermission');
+  if (line) line.classList.toggle('hidden', seriesOver);
+
   const res = el('results');
   if (res) res.classList.remove('hidden');
 }
 
+// Stage series state for a no-relay preview (the gallery 'results' scenario) so
+// showResults renders a mid-series or final board through the live path. Injected
+// into the TestHarness — never used in live play.
+function setSeriesPreview({ index = 1, total = runsTotal, over = false, scores = null } = {}) {
+  runIndex = index;
+  runsTotal = total;
+  seriesOver = over;
+  if (scores) seriesScores = new Map(Object.entries(scores).map(([id, points]) => [id, { points }]));
+}
+
 // Tear down the current run and roll a FRESH random slope for the next one (live
-// play only — test mode pins a stable seed). Shared by "New game" (→ lobby) and
-// "Play again" (→ straight into the next run); both get a new mountain.
+// play only — test mode pins a stable seed). Shared by "New game" (→ lobby),
+// the between-runs auto-advance, and "Play again" (→ a new series); all get a new
+// mountain. Does NOT touch seriesScores — advanceToNextRun banks the run's points
+// (foldRunScores) before calling this, and startSeries resets the tally.
 function teardownRun() {
+  clearIntermission();
   if (session) { session.dispose(); session = null; }
   for (const p of currentField) scene.removeSkier(p.peerIndex);
   _rcShown.clear(); // drop any stale reconnect-card bookkeeping before the next run
@@ -684,20 +934,13 @@ function teardownRun() {
 
 function returnToLobby() {
   teardownRun();
+  // Abort the series outright: reset the tally so the lobby (and the next series)
+  // starts clean.
+  runIndex = 0; seriesOver = false; seriesScores = new Map();
   net.flow.transitionTo(ROOM_STATE.LOBBY);
   net.broadcast({ type: MSG.GAME_END });
   scene.orbit = true;
   showLobby();
-}
-
-// Rematch from the results screen: fresh random slope, same lobby, straight into a
-// new run (RESULTS → COUNTDOWN is a valid flow transition). Only from a finished
-// run; startRun rebuilds the field from the current roster and broadcasts the
-// countdown, which pulls every phone off its results board into the new race.
-function playAgain() {
-  if (!session) return;
-  teardownRun();
-  startRun();
 }
 
 function pauseRun() {
@@ -727,6 +970,7 @@ function showLobby() {
   cancelLobbyCrossfade(); // front door: clear any stale dissolve overlay/guard (never a crossfade mid itself)
   startLobbyRace(); // a looping CPU AI race behind the card, camera following the pack
   renderLevel(); // keep the difficulty badge current whenever the lobby surfaces
+  renderRuns();  // and the series-length switch
 }
 function showRace() {
   el('lobby').classList.add('hidden');
@@ -852,10 +1096,12 @@ el('joinbox') && el('joinbox').addEventListener('click', async () => {
 el('pause-btn') && el('pause-btn').addEventListener('click', () => (paused ? resumeRun() : pauseRun()));
 el('pause-continue') && el('pause-continue').addEventListener('click', resumeRun);
 el('pause-newgame') && el('pause-newgame').addEventListener('click', returnToLobby);
-el('results-again') && el('results-again').addEventListener('click', playAgain);
+// The big-screen results button shows only on the final board ("Play again" → a
+// brand-new series); mid-series the board auto-advances with no button.
+el('results-again') && el('results-again').addEventListener('click', () => { if (seriesOver) newSeriesFromResults(); });
 el('results-newgame') && el('results-newgame').addEventListener('click', returnToLobby);
 window.addEventListener('keydown', (e) => {
-  if (e.key === 'g' && net.roomState === ROOM_STATE.LOBBY) startRun(); // dev: start without a phone
+  if (e.key === 'g' && net.roomState === ROOM_STATE.LOBBY) startSeries(); // dev: start without a phone
   else if (e.key === 'Escape') { if (session && !raceEnded) (paused ? resumeRun() : pauseRun()); }
 });
 
@@ -871,11 +1117,12 @@ const scenario = params.get('scenario');
 if (testMode && scenario !== 'device-choice') dismissDeviceChoice();
 if (params.get('test') === '1' || scenario) {
   import('./TestHarness.js').then(({ runDisplayScenario }) => runDisplayScenario(
-    // scenarios default to a 4-skier field (solo = you + 3 CPU); ?players=N overrides
-    { scenario: scenario || 'running', players: parseInt(params.get('players'), 10) || 4, host: parseInt(params.get('host'), 10) || 0, cam: params.get('cam') },
+    // scenarios default to a 4-skier field (solo = you + 3 CPU); ?players=N overrides.
+    // `runsTotal`/`seriesOver` stage the results scenario as a mid-series or final board.
+    { scenario: scenario || 'running', players: parseInt(params.get('players'), 10) || 4, host: parseInt(params.get('host'), 10) || 0, cam: params.get('cam'), runsTotal, seriesOver: params.get('over') === '1', intermission: intermissionSeconds },
     // Inject the REAL render fns so the harness previews the live DOM path rather
     // than a hand-copy (which drifts — see renderRoster/showResults).
-    { scene, slope, AiController, AI_PERSONALITIES, RunSession, renderRoster, renderLevel, showResults, buildReconnectCard, audio, showSoundHint, rerollSlope, lobbyCrossfade }
+    { scene, slope, AiController, AI_PERSONALITIES, RunSession, renderRoster, renderLevel, renderRuns, showResults, setSeriesPreview, buildReconnectCard, audio, showSoundHint, rerollSlope, lobbyCrossfade }
   ));
 } else {
   showLobby();
@@ -915,6 +1162,9 @@ initDebugMenu([
   ] },
   { key: 'players', label: 'Players', type: 'number', min: 1, max: 4, hint: 'field size in scenarios (default 4)' },
   { key: 'level', label: 'Difficulty', type: 'select', hint: 'procedural tier — host picks live; this pins it', options: [['', `default (${DEFAULT_LEVEL})`], ...LEVELS.map((l) => [l.id, l.label])] },
+  { key: 'runs', label: 'Runs', type: 'number', min: 1, max: 9, hint: `series length — host picks live; this pins it (default ${DEFAULT_RUNS})` },
+  { key: 'over', label: 'Series over', type: 'check', hint: 'results scenario → the overall (final) board, champion crowned' },
+  { key: 'intermission', label: 'Intermission', type: 'number', min: 1, hint: 'between-runs auto-advance seconds (default for tests/previews)' },
   { key: 'seed', label: 'Seed', type: 'number', hint: 'pins the generated mountain (deterministic repro)' },
   { key: 'hitbox', label: 'Hitbox overlay', type: 'check', hint: 'wireframe collision footprints in the (s, lat) plane' },
 ]);

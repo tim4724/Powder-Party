@@ -37,17 +37,19 @@ var MSG = {
   //                       (ignored on the snow). Like j, the display fires one
   //                       action per CHANGE, so a dropped fastlane frame re-delivers.
   CONTROL: 'control',
-  START_GAME: 'start_game',           // host only
+  START_GAME: 'start_game',           // host only — from the lobby starts a fresh SERIES; from the final board starts a NEW series (mid-series there's no button — the display auto-advances)
   SET_LEVEL: 'set_level',             // {level} host picks the run difficulty (Blue/Red/Black) in the lobby — display validates + echoes LEVEL_UPDATE
-  RETURN_TO_LOBBY: 'return_to_lobby', // "New run" — abort back to the lobby (host)
+  SET_RUNS: 'set_runs',               // {runs} host picks how many runs the series is (RUN_COUNTS) in the lobby — display validates + echoes RUNS_UPDATE
+  RETURN_TO_LOBBY: 'return_to_lobby', // "New game" — abort the series back to the lobby (host)
   PAUSE_GAME: 'pause_game',           // request a pause (any player, mid-countdown/run)
   RESUME_GAME: 'resume_game',         // request resume from the pause overlay
   LEAVE: 'leave',                     // intentional exit (back-out) — display frees the seat at once (no reconnect QR)
   PING: 'ping',
 
   // Display -> specific controller
-  WELCOME: 'welcome',                 // {peerIndex, colorIndex, hostPeerIndex, roomState, players, inRun, level, standings?, paused?}
+  WELCOME: 'welcome',                 // {peerIndex, colorIndex, hostPeerIndex, roomState, players, inRun, level, runs, standings?, paused?}
                                       // level = the room's current run difficulty (Blue/Red/Black) so a joiner's lobby selector lands on the right tier (a MISSING level reads as DEFAULT_LEVEL).
+                                      // runs = the series length the host has picked (RUN_COUNTS) so a joiner's lobby selector lands on it (a MISSING runs reads as DEFAULT_RUNS).
                                       // inRun=false mid-run = no live skier (late joiner / expired seat) — the phone
                                       // parks on its "run in progress" screen; a MISSING flag reads as true (an older
                                       // display that never stamps it must not strand its rejoiners off the pad).
@@ -61,12 +63,17 @@ var MSG = {
 
   // Display -> all controllers (broadcast)
   LEVEL_UPDATE: 'level_update',       // {level} authoritative run difficulty changed (host picked) — phones repaint the selector. NOT a RUN_STATE msg: a parked late joiner still gets it (it's room config, like LOBBY_UPDATE). Joiners also read the current level off WELCOME.
+  RUNS_UPDATE: 'runs_update',         // {runs} authoritative series length changed (host picked, lobby only) — phones repaint the selector. Like LEVEL_UPDATE it's room config, not RUN_STATE, so a parked late joiner still gets it. Joiners also read it off WELCOME.
   COUNTDOWN: 'countdown',             // {n} 3..2..1..GO
   GAME_START: 'game_start',
-  STANDINGS: 'standings',             // {over, hostPeerIndex, total, order:[{playerId,name,colorIndex,ai,finished,time}]}
+  STANDINGS: 'standings',             // {over, seriesOver, runIndex, runTotal, hostPeerIndex, total, order:[{playerId,name,colorIndex,ai,finished,time,dnf,points,score,champion}]}
                                       // pushed as each skier finishes (over=false) + at run end (over=true).
+                                      // runIndex/runTotal = which run of the series this is (1-based) and how many in all.
+                                      // points = this run's series points for the row (see seriesPoints); score = cumulative across the series.
+                                      // seriesOver = the final run is done — the order is sorted by cumulative score and champion=true marks the leader(s).
                                       // Late joiners (seated, not in this run) trail the order as unranked
                                       // {newPlayer:true} rows — queued for the next run, not results
+  INTERMISSION: 'intermission',       // {n, runIndex, runTotal} between-runs countdown tick — the display auto-advances the series; phones show "Next run in n…". NOT a RUN_STATE msg (it fires during RESULTS, where the parked-run gate is already cleared).
   GAME_END: 'game_end',               // return-to-lobby signal (no payload); controllers go back to the lobby
   GAME_PAUSED: 'game_paused',         // run frozen — controllers show the pause overlay
   GAME_RESUMED: 'game_resumed',       // run resumed — controllers hide the pause overlay
@@ -115,6 +122,26 @@ var ROOM_STATE = {
 var MAX_PLAYERS = 4;
 var COUNTDOWN_SECONDS = 3;
 
+// A run is one race; a SERIES is N runs head-to-head with points accumulating to
+// an overall champion. The host picks the length in the lobby from these presets
+// (a segmented switch like the difficulty selector). DEFAULT_RUNS is the
+// pre-selected one. Series state is owned by the authoritative display.
+var RUN_COUNTS = [3, 5, 7];
+var DEFAULT_RUNS = 5;
+var INTERMISSION_SECONDS = 5; // breather between runs (the board shows the scores) before the next auto-starts
+
+// Series points a finishing place earns this run. Linear by place over the field:
+// 1st = fieldSize, last finisher = 1, a DNF (didn't cross) earns 0. With the
+// always-4 field that's 4/3/2/1. `rank` is the engine's 1-based finishing rank
+// (finishers by time, then DNFs); `fieldSize` is the number of skiers in the run.
+// Pure + side-effect-free so both the display (authoritative tally) and the Node
+// tests share one definition. The whole field — humans AND CPU — is scored; the
+// overall champion is simply whoever has the most.
+function seriesPoints(rank, fieldSize, finished) {
+  if (!finished) return 0;
+  return Math.max(0, fieldSize - rank + 1);
+}
+
 // Run difficulty tiers (the piste-grading colours), host-selectable in the lobby.
 // A tier only changes the procedural MOUNTAIN — slope shape + obstacle/jump
 // density (see LEVEL_TUNING in shared/slopes.js) — never the physics or the AI.
@@ -149,6 +176,7 @@ if (typeof module !== 'undefined' && module.exports) {
     MSG, FASTLANE_TYPES, RUN_STATE_MSGS, RELAY_ERRORS, ROOM_STATE,
     RELAY_URL, STUN_URL,
     MAX_PLAYERS, COUNTDOWN_SECONDS,
+    RUN_COUNTS, DEFAULT_RUNS, INTERMISSION_SECONDS, seriesPoints,
     SKIER_COLORS, LEVELS, DEFAULT_LEVEL
   };
 }

@@ -16,7 +16,8 @@ var DISPLAY_CARDS = [
   { key: 'running',   title: 'Run',       animated: true },
   { key: 'reconnect', title: 'Reconnect', animated: true },
   { key: 'paused',    title: 'Paused' },
-  { key: 'results',   title: 'Results' }
+  { key: 'results',   title: 'Results (run)' },
+  { key: 'results',   title: 'Results (series)', extra: { over: '1' } }
 ];
 
 var state = Gallery.loadState();

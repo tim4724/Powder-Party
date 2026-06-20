@@ -58,6 +58,13 @@
           <span class="level-select__cap">Difficulty</span>
           <div id="level-seg" class="level-seg"></div>
         </div>
+        <!-- Number of runs — the head-to-head series length (3 / 5 / 7). Same
+             host-set, display-authoritative switch as Difficulty; points
+             accumulate across the runs to an overall champion. -->
+        <div id="runs-select" class="level-select lobby__level lobby__runs" role="group" aria-label="Number of runs" aria-live="polite">
+          <span class="level-select__cap">Runs</span>
+          <div id="runs-seg" class="level-seg"></div>
+        </div>
       </div>
       <div class="lobby__qr">
         <div class="qr-card"><canvas id="qr"></canvas></div>
@@ -83,8 +90,11 @@
     </div>
     <div id="results" class="hidden">
       <div class="results-card card">
+        <div id="results-runtag" class="results-runtag"></div>
         <h2>Results</h2>
+        <div id="results-champ" class="results-champ hidden"></div>
         <ol id="results-list"></ol>
+        <div id="results-intermission" class="results-intermission hidden"></div>
         <div class="results-card__btns">
           <button id="results-again" class="btn btn--brand">Play again</button>
           <button id="results-newgame" class="btn btn--ghost">New game</button>
