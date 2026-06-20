@@ -122,7 +122,6 @@ function addSlopeStrip(group, samples, offA, offB, riseA, riseB, material) {
   g.setIndex(idx);
   g.computeVertexNormals();
   const m = new THREE.Mesh(g, material);
-  m.receiveShadow = true;
   group.add(m);
 }
 
@@ -183,7 +182,6 @@ function addFlanks(group, samples, edgeLat, groundY) {
     g.setIndex(idx);
     g.computeVertexNormals();
     const m = new THREE.Mesh(g, mat);
-    m.receiveShadow = true;
     group.add(m);
   }
 }
@@ -223,7 +221,6 @@ function addPineInstances(group, place) {
   }
   for (const im of parts) {
     im.instanceMatrix.needsUpdate = true;
-    im.castShadow = false; im.receiveShadow = false;
     im.frustumCulled = false;
     group.add(im);
   }
@@ -323,7 +320,6 @@ export function addPeaks(group, center, orbitRadius, floorY) {
     im.setMatrixAt(i, m4);
   }
   im.instanceMatrix.needsUpdate = true;
-  im.castShadow = false; im.receiveShadow = false;
   im.frustumCulled = false; // the ring encircles the whole scene; an origin-centred bound would wrongly cull it
   group.add(im);
 }
@@ -388,7 +384,6 @@ export function addRamp(group, cl, r, hitboxDebug) {
     new THREE.MeshLambertMaterial({ color: 0xb9cadf }),
     new THREE.MeshLambertMaterial({ color: 0x9fb4cd }),
   ]);
-  ramp.castShadow = true; ramp.receiveShadow = true;
   addSnowRampGrooves(ramp, w, h, len);
   const lateral = f.lateral.clone().normalize();
   const tangent = f.tangent.clone().normalize();
@@ -413,19 +408,19 @@ export function addObstacle(group, cl, o, hitboxDebug) {
       new THREE.IcosahedronGeometry(o.radius || 0.7, 0), // same default the engine collides at
       new THREE.MeshLambertMaterial({ color: 0x8a93a1, flatShading: true })
     );
-    rock.castShadow = true; rock.scale.set(1, 0.7, 1);
+    rock.scale.set(1, 0.7, 1);
     g.add(rock);
   } else {
     const trunk = new THREE.Mesh(
       new THREE.CylinderGeometry(0.12, 0.16, 0.9, 6),
       new THREE.MeshLambertMaterial({ color: 0x7a5230 })
     );
-    trunk.position.y = 0.45; trunk.castShadow = true;
+    trunk.position.y = 0.45;
     g.add(trunk);
     const foliage = new THREE.MeshLambertMaterial({ color: 0x2f8f5b, flatShading: true });
     for (let i = 0; i < 3; i++) {
       const cone = new THREE.Mesh(new THREE.ConeGeometry(0.95 - i * 0.22, 1.0, 7), foliage);
-      cone.position.y = 1.0 + i * 0.55; cone.castShadow = true;
+      cone.position.y = 1.0 + i * 0.55;
       g.add(cone);
     }
   }
@@ -470,7 +465,6 @@ export function addSnowLine(group, cl, s, halfW, color, opacity) {
     color, side: THREE.DoubleSide,
     transparent: true, opacity, depthWrite: false,
   }));
-  line.receiveShadow = true;
   group.add(line);
 }
 
@@ -544,7 +538,6 @@ export class FinishGate {
     this._posts = [-1, 1].map((side) => {
       const mesh = new THREE.Mesh(poleGeo, frameMat);
       mesh.position.set(side * halfW, 0, 0);
-      mesh.castShadow = true;
       g.add(mesh);
       return { mesh, side, bend: 0, target: 0 };
     });

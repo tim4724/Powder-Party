@@ -56,6 +56,7 @@ const EDGE_RUNOUT = 3.5;    // u of clear flat deep-snow past the ski-patrol res
 
 const _up = new THREE.Vector3(0, 1, 0);
 const _zAxis = new THREE.Vector3(0, 0, 1);
+const _m4 = new THREE.Matrix4();       // scratch for the contact-shadow decal basis
 const _TAU = Math.PI * 2;       // one full flip rotation
 
 function bestGrid(n, W, H) {
@@ -113,14 +114,25 @@ export class SceneRenderer {
   }
 
   _initThree() {
-    // Quality knobs (URL-overridable, static — chosen once at load, nothing adapts at
-    // runtime). MSAA is OFF by default — a big fill-rate win on integrated/TV-class GPUs
-    // across the up-to-4 split-screen passes; ?aa=1 forces it back. ?gfx=low additionally
-    // drops cast shadows. Pixel ratio is capped at 2 (HiDPI panels render at native, up to 2×).
+    // Quality knobs (URL-overridable). MSAA is OFF by default — a big fill-rate win on
+    // integrated/TV-class GPUs across the up-to-4 split-screen passes; ?aa=1 forces it
+    // back. ?gfx=low skips the static prop contact shadows (skier blobs always stay).
+    // Pixel ratio is capped at 2; the render scale below it adapts to frame time (_adaptScale).
     const q = new URLSearchParams(location.search);
     this._gfxLow = q.get('gfx') === 'low';
     const r = new THREE.WebGLRenderer({ antialias: q.get('aa') === '1' });
-    r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    // Dynamic resolution. The drawing buffer is (CSS size × basePR × renderScale);
+    // _adaptScale nudges renderScale (0.55..1) ~once/sec from measured frame time, so
+    // a struggling GPU — above all the 4-way split — sheds fragment-fill cost (which
+    // INCLUDES the per-fragment shadow sampling, the dominant weak-HW cost) instead of
+    // dropping features, and quietly restores resolution when there's headroom.
+    // ?scale=N pins it (and disables the monitor) for A/B testing.
+    this._basePR = Math.min(window.devicePixelRatio || 1, 2);
+    const pinned = parseFloat(q.get('scale'));
+    this._scalePinned = pinned > 0;
+    this._renderScale = this._scalePinned ? Math.min(Math.max(pinned, 0.3), 1) : 1;
+    this._scaleTick = 0; this._emaMs = 0;
+    r.setPixelRatio(this._basePR * this._renderScale);
     r.setSize(window.innerWidth, window.innerHeight);
     r.outputColorSpace = THREE.SRGBColorSpace;
     // Tone mapping rolls bright values off smoothly instead of hard-clipping to
@@ -133,11 +145,14 @@ export class SceneRenderer {
     // (SlopeScenery.addTerrain), the slope stays legible on TVs that crush highlights.
     r.toneMappingExposure = 0.98;
     r.autoClear = false;                  // we clear once per frame, then render N viewports
-    r.shadowMap.enabled = !this._gfxLow;  // ?gfx=low drops cast shadows wholesale (depth pass + per-fragment PCF sampling)
-    r.shadowMap.type = THREE.PCFShadowMap; // (PCFSoft is deprecated in the vendored three and falls back to this)
+    // No shadow MAP. Every shadow in the scene is a soft contact decal — the per-skier
+    // blob (added in addSkier) and the static prop decals (_addContactShadow, placed at
+    // setTrack). That removes the depth pass, the per-fragment PCF sampling on the snow
+    // (× up-to-4 split-screen viewports — the dominant weak-HW shadow cost), the shadow
+    // camera, the bias tuning, and the event-driven map refresh the old cast map needed.
     this.container.appendChild(r.domElement);
     this.renderer = r;
-    this._blobTex = this._makeBlobTexture(); // soft contact-shadow sprite
+    this._blobTex = this._makeBlobTexture(); // soft sprite shared by skier blobs + prop decals
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0xbfe3f7);              // bright alpine sky
@@ -153,14 +168,13 @@ export class SceneRenderer {
     // sun on top for mountainside form.
     scene.add(new THREE.HemisphereLight(0xffffff, 0xeaf2fb, 1.9)); // sky fill (keeps shadows light, not grey)
     const key = new THREE.DirectionalLight(0xffffff, 2.7);         // strong neutral sun → shape-defining gradient
-    key.position.set(8, 15, 6);
-    key.castShadow = !this._gfxLow;
-    key.shadow.mapSize.set(1024, 1024); // only static props/gate-posts cast; 1024 quarters the VRAM vs 2048 (low-end devices) — shadows are pale + props small, so the softer edge reads fine
-    key.shadow.autoUpdate = false;        // refreshed once per frame in _loop (not once per viewport)
-    key.shadow.bias = -0.0005;
-    key.shadow.normalBias = 0.06;
-    scene.add(key); scene.add(key.target);
-    this._key = key;
+    key.position.set(8, 16, 6);                                    // DIRECTION only (no shadow map) → fixed, never repositioned per-track
+    scene.add(key); scene.add(key.target);                        // target stays at origin; a directional light's diffuse depends only on its direction
+    // The way sunlight TRAVELS (target at origin → −position) = the way a contact shadow
+    // lies on the ground. _addContactShadow projects this onto each prop's slope facet so
+    // the decal stretches down-sun, faking a cast shadow's direction for free. (The light
+    // itself needs no further handle now that there's no shadow map to drive.)
+    this._sunAway = key.position.clone().negate().normalize();
 
     // Surrounding snow field (the slope ribbon sits on top of it).
     const ground = new THREE.Mesh(
@@ -170,7 +184,6 @@ export class SceneRenderer {
     );
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = -2;
-    ground.receiveShadow = true;
     scene.add(ground);
     this.ground = ground;
 
@@ -215,8 +228,47 @@ export class SceneRenderer {
     return tex;
   }
 
+  // Static contact shadow for a prop — a soft blob decal laid flush on the slope facet
+  // `f` (a centerline frame), offset `lat` across the piste to the prop's base. Built
+  // once at setTrack into propGroup (so _disposeGroup frees it on the next track) using
+  // the per-track `_decalGeo`/`_decalMat`. The decal is stretched along the slope-
+  // projected sun direction so it reads as a cast shadow, not a flat disc — no shadow
+  // map, no per-frame cost. halfW/halfL are the cross-sun / down-sun half-extents.
+  _addContactShadow(f, lat, halfW, halfL) {
+    const up = f.up.clone().normalize();
+    // sun-travel direction projected onto THIS facet = the in-plane axis the shadow lies along
+    const d = this._sunAway.clone().addScaledVector(up, -this._sunAway.dot(up));
+    if (d.lengthSq() < 1e-6) d.copy(f.tangent);      // sun ≈ straight down this facet → fall back to down-slope
+    d.normalize();
+    const right = new THREE.Vector3().crossVectors(d, up).normalize(); // in-plane, ⟂ the shadow axis
+    const m = new THREE.Mesh(this._decalGeo, this._decalMat);
+    m.quaternion.setFromRotationMatrix(_m4.makeBasis(right, d, up)); // +Z→up (lies flat), +Y→shadow axis
+    m.position.copy(f.pos).addScaledVector(f.lateral, lat).addScaledVector(up, 0.03); // a hair off the snow (no z-fight)
+    m.scale.set(halfW * 2, halfL * 2, 1);
+    this.propGroup.add(m);
+  }
+
   _aspect() { return window.innerWidth / Math.max(1, window.innerHeight); }
   _onResize() { this.renderer.setSize(window.innerWidth, window.innerHeight); }
+
+  // Dynamic resolution: track a smoothed frame time and step the render scale a notch
+  // each ~second when we're outside the [15ms, 22ms] (~45–66fps) deadband — the gap
+  // keeps it from flapping. Stalls/garbage frames (tab switches, NaN) are skipped so
+  // they can't poison the average. Cheap: one EMA per frame, a setSize only on change.
+  _adaptScale(ms) {
+    if (this._scalePinned || !(ms > 0) || ms > 100) return;
+    this._emaMs = this._emaMs ? this._emaMs * 0.9 + ms * 0.1 : ms;
+    if (++this._scaleTick < 45) return;
+    this._scaleTick = 0;
+    const e = this._emaMs, s = this._renderScale;
+    let ns = s;
+    if (e > 22 && s > 0.55) ns = Math.max(0.55, s - 0.1);      // struggling → shed pixels
+    else if (e < 15 && s < 1) ns = Math.min(1, s + 0.1);       // headroom → restore
+    if (ns === s) return;
+    this._renderScale = ns;
+    this.renderer.setPixelRatio(this._basePR * ns);
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+  }
 
   // ---- world geometry --------------------------------------------------
   setTrack(track, opts = {}) {
@@ -246,14 +298,29 @@ export class SceneRenderer {
     this.poles.onHit = (kick) => { if (this.onPoleHit) this.onPoleHit(kick); };
 
     const cl = track.centerline;
-    for (const r of (track.ramps || [])) addRamp(this.propGroup, cl, r, this._hitboxDebug);
-    for (const o of (track.obstacles || [])) { if (o.kind === 'post') continue; addObstacle(this.propGroup, cl, o, this._hitboxDebug); } // 'post' = finish-gate posts, drawn by FinishGate below
+    // Per-track contact-shadow decal resources, shared by every prop decal and freed by
+    // _disposeGroup with propGroup on the next setTrack (recreated here each time). ?gfx=low
+    // skips the prop decals entirely (the skier blobs always stay — they read position).
+    this._decalGeo = new THREE.PlaneGeometry(1, 1);
+    this._decalMat = new THREE.MeshBasicMaterial({ map: this._blobTex, transparent: true, opacity: 0.4, depthWrite: false, toneMapped: false });
+    const decals = !this._gfxLow;
+    for (const r of (track.ramps || [])) {
+      addRamp(this.propGroup, cl, r, this._hitboxDebug);
+      if (decals) this._addContactShadow(cl.sampleAt(r.s), r.lat || 0, (r.width || 2.4) / 2 + 0.3, 1.7); // kicker box ~3u long
+    }
+    for (const o of (track.obstacles || [])) {
+      if (o.kind === 'post') continue; // 'post' = finish-gate posts, drawn by FinishGate below
+      addObstacle(this.propGroup, cl, o, this._hitboxDebug);
+      // rocks sit low and flush in the snow → no contact shadow; only standing trees get one (stretched down-sun)
+      if (decals && o.kind !== 'rock') { const rr = o.radius || 0.8; this._addContactShadow(cl.sampleAt(o.s), o.lat || 0, rr * 1.35, rr * 1.35 * 1.5); }
+    }
     addSnowLine(this.propGroup, cl, 1, pisteHalf, 0x6b7079, 0.5);                  // start: grey snow line at the held skiers' ski tips (spawn s≈0, tips ~0.9u)
     addSnowLine(this.propGroup, cl, track.length - 0.2, pisteHalf, 0x14171d, 0.5); // finish: black snow line under the gate
     // finish: checkered gate at the piste edge — its posts are 'post' obstacles (engine wipes you out); the clipped post bends + stays
     this.finishGate = new FinishGate(this.propGroup, cl, track.length - 0.2, pisteHalf);
+    if (decals) { const gf = cl.sampleAt(track.length - 0.2); for (const side of [-1, 1]) this._addContactShadow(gf, side * pisteHalf, 0.4, 0.75); } // two gate-post bases (stretched down-sun)
 
-    // Overview framing for the lobby turntable + size the shadow camera.
+    // Overview framing for the lobby turntable.
     const box = new THREE.Box3();
     for (const s of samples) box.expandByPoint(s.pos);
     this._trackCenter = box.getCenter(new THREE.Vector3());
@@ -274,16 +341,6 @@ export class SceneRenderer {
     const groundSpan = Math.max(size.x, size.z) + this._ovRadius * 3;
     this.ground.position.set(this._trackCenter.x, groundY, this._trackCenter.z);
     this.ground.scale.set(groundSpan / 1200, groundSpan / 1200, 1);
-
-    const half = Math.max(size.x, size.y, size.z) * 0.5 + 6;
-    const k = this._key;
-    k.target.position.copy(this._trackCenter); k.target.updateMatrixWorld();
-    k.position.copy(this._trackCenter).add(new THREE.Vector3(8, 16, 6).normalize().multiplyScalar(half * 2.2));
-    const sc = k.shadow.camera;
-    sc.left = -half; sc.right = half; sc.top = half; sc.bottom = -half;
-    sc.near = half * 0.5; sc.far = half * 4 + 16;
-    sc.updateProjectionMatrix();
-    k.shadow.needsUpdate = true;
 
     // Scale fog + the far-planes to the ACTUAL track size, keyed off the lobby
     // orbit radius — so the encircling peaks stay crisp up close and only haze
@@ -519,7 +576,6 @@ export class SceneRenderer {
     if (this.trails) this.trails.clear();
     if (this.poles) this.poles.reset();
     if (this.finishGate) this.finishGate.reset();
-    if (this._key) this._key.shadow.needsUpdate = true; // gate posts straightened → repaint the static shadow once
   }
 
   setSkierHud(id, info) {
@@ -693,11 +749,9 @@ export class SceneRenderer {
     const dt = Math.min(rawMs / 1000, 0.05);
     this._last = t;
     this._frameDt = dt;
+    this._adaptScale(rawMs);
     if (this.onFrame) this.onFrame(dt);
     if (this.poles) this.poles.update(dt); // after onFrame: same-frame response to this tick's pokes
-    // Capture BEFORE finishGate.update() — it clears _easing on the settle frame,
-    // and a bending gate post (a shadow caster) needs the map repainted that frame.
-    const gateEasing = !!(this.finishGate && this.finishGate._easing);
     if (this.finishGate) this.finishGate.update(dt);
     // Walk the (large, mostly-static) scene graph ONCE per frame. All transform
     // mutations (skier poses, pole/gate animation) happen above; render() no longer
@@ -709,13 +763,6 @@ export class SceneRenderer {
     r.setScissorTest(false);
     r.setViewport(0, 0, W, H);
     r.clear();
-    // Shadow casters are all STATIC (ramps/rocks/obstacle-trees + the finish-gate
-    // posts); skiers, poles, trees and peaks cast none. setTrack primes the 2048²
-    // map once and clearTrails repaints it at each run start, so the ONLY per-frame
-    // refresh needed is while a clipped gate post is bending. Re-rendering the map
-    // every frame was a full extra scene depth pass at 60fps — the biggest fixed
-    // per-frame GPU cost on weak hardware, for a bit-identical shadow.
-    if (this._key && gateEasing) this._key.shadow.needsUpdate = true;
 
     const ids = this._order.filter((id) => this.skiers.has(id));
     // Flank forest renders only under the single overview camera (lobby + the
