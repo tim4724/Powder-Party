@@ -93,8 +93,12 @@ export class SkiTrails {
     t.lastAir = false;
     t.count++;
 
-    t.posAttr.needsUpdate = true;
-    t.nrmAttr.needsUpdate = true;
+    // Only this one slot (4 verts = VPP*3 = 12 array elements at offset vb) changed,
+    // so scope the GPU upload to that range instead of re-uploading the whole buffer.
+    // start/count are in array-INDEX units; three's WebGLAttributes auto-clears
+    // updateRanges after each upload, so we re-add the range every recorded point.
+    t.posAttr.addUpdateRange(vb, VPP * 3); t.posAttr.needsUpdate = true;
+    t.nrmAttr.addUpdateRange(vb, VPP * 3); t.nrmAttr.needsUpdate = true;
     this._rebuildIndex(t);
   }
 
@@ -122,6 +126,8 @@ export class SkiTrails {
       idx[n++] = a + 2; idx[n++] = b + 3; idx[n++] = b + 2;
     }
     t.geom.setDrawRange(0, n);
+    // Index is deliberately uploaded in full (no updateRange): the ring-buffer wrap
+    // seam makes incremental index updates unsafe to do hastily — separate concern.
     t.idxAttr.needsUpdate = true;
   }
 

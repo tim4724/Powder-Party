@@ -1,6 +1,7 @@
 // Small controller-UI helpers shared by the live phone (main.js) and the gallery
 // preview (TestHarness.js) so the two can't drift. No globals, no relay — pure DOM.
 import { buildLevelSeg as buildSeg, paintLevelSeg } from '../shared/levelSeg.js';
+import { runTag } from '../shared/seriesFormat.js';
 
 // Latency chip (bottom-right). halfMs is one-way (RTT/2); halfMs < 0 means the
 // PONG is overdue (no signal). viaFastlane lights the bolt when the reading came
@@ -66,7 +67,7 @@ export function renderResultsBoard(rows, { over, seriesOver, runIndex, runTotal,
 
   // Header tag + champion banner (overall board only).
   const tag = document.getElementById('result-runtag');
-  if (tag) tag.textContent = runTotal ? (seriesOver ? `Final standings · ${runTotal} runs` : `Run ${runIndex} of ${runTotal}`) : '';
+  if (tag) tag.textContent = runTotal ? runTag(runIndex, runTotal, seriesOver) : '';
   const champEl = document.getElementById('result-champ');
   if (champEl) {
     const winners = seriesOver ? rows.filter((r) => r.champion) : [];

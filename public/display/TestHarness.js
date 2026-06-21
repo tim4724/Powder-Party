@@ -160,7 +160,7 @@ export function runDisplayScenario(cfg, ctx) {
   // own session, not main.js's): a points tally across runsTotal runs, the real
   // series board via setSeriesPreview + showResults, and an auto-advance between
   // runs. seriesScores holds totals through COMPLETED runs (this run's points are
-  // layered on live by buildSeriesRows); runIndex is the current run (1-based).
+  // layered on live by tally.buildRows); runIndex is the current run (1-based).
   const runsTotal = cfg.runsTotal || 5;
   let runIndex = 1;
   let seriesScores = {}; // playerId -> points through prior runs
@@ -192,7 +192,7 @@ export function runDisplayScenario(cfg, ctx) {
         soloOver = true; audio.stopWind(); audio.finish();
         seriesOver = runIndex >= runsTotal;
         // Stage the series state so showResults renders the real board: scores are
-        // the totals through PRIOR runs; buildSeriesRows adds this run's points on top.
+        // the totals through PRIOR runs; tally.buildRows adds this run's points on top.
         if (setSeriesPreview) setSeriesPreview({ index: runIndex, total: runsTotal, over: seriesOver, scores: { ...seriesScores } });
         showResults(results, field);
         if (!seriesOver) startInter(); // hold the scores a beat, then auto-advance
@@ -201,7 +201,7 @@ export function runDisplayScenario(cfg, ctx) {
     return s;
   }
   // Bank a finished run's points into the prior-runs tally (mirrors the live
-  // foldRunScores). window.seriesPoints is protocol.js's shared scoring rule.
+  // tally.fold). window.seriesPoints is protocol.js's shared scoring rule.
   function foldRun(resultsObj) {
     const res = (resultsObj && resultsObj.results) || [];
     for (const r of res) seriesScores[r.playerId] = (seriesScores[r.playerId] || 0) + window.seriesPoints(r.rank, res.length, r.finished);

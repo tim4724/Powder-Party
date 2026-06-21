@@ -116,6 +116,7 @@ const TBONE_CLOSING = 6.0;  // lateral closing speed (u/s) above which a side-on
 // ---- Jump / air ---------------------------------------------------------
 export const GRAV_AIR = 22.0;      // u/s² pulling you back to the snow while airborne (lower = more hang time for tricks)
 const RAMP_POP = 7.5;       // u/s up from hitting a ramp (auto-launch, ∝ speed → ~0.9u apex). NB: "flick up to jump" on the snow was removed — ramps launch you automatically.
+const RAMP_HALF_S = 1.5;    // half the down-slope length of a kicker's footprint — half the 3.0-long kicker box SlopeScenery.addRamp draws.
 const LAND_CLEAN_ACROSS = 0.42; // |across| under this on touchdown = clean landing (keep speed + boost)
 const LAND_BOOST = 1.18;    // clean big-air landing multiplies speed briefly
 const LAND_BOOST_MIN_AIR = 1.2; // …only if the jump cleared at least this height
@@ -189,13 +190,12 @@ export class SkiEngine {
     // draws the same numbers), an obstacle's its radius; you're on either the
     // moment your body circle touches it.
     this.ramps = (track.ramps || []).map((r) => ({
-      s: r.s, lat: r.lat || 0, halfS: 1.5, halfW: (r.width || 2.4) / 2
+      s: r.s, lat: r.lat || 0, halfS: RAMP_HALF_S, halfW: (r.width || 2.4) / 2
     }));
     this.obstacles = (track.obstacles || []).map((o) => ({
-      // default footprints match the rendered props at body height: a tree's
-      // low canopy reaches ~0.8 from the trunk where it meets a shoulder; a
-      // rock is its 0.7 icosahedron.
-      s: o.s, lat: o.lat || 0, radius: o.radius || (o.kind === 'rock' ? 0.7 : 0.8), kind: o.kind || 'tree'
+      // the builder supplies per-kind radius (slopes.obstacleRadius); this is only
+      // a degenerate fallback for hand-built tracks/tests.
+      s: o.s, lat: o.lat || 0, radius: o.radius || 0.8, kind: o.kind || 'tree'
     }));
 
     // Start line: spread the field evenly across the groomed piste in DISTINCT

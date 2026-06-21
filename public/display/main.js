@@ -8,9 +8,11 @@ import { buildGeneratedSlope } from './SlopeBuilder.js';
 import { RunSession } from './RunSession.js';
 import { AiController, AI_PERSONALITIES } from './AiDriver.js';
 import { SlopeAudio } from './Audio.js';
+import { SeriesTally } from './SeriesTally.js';
 import { keepScreenOn } from '../shared/WakeLock.js';
 import { initDebugMenu } from '../shared/DebugMenu.js';
 import { buildLevelSeg, paintLevelSeg } from '../shared/levelSeg.js';
+import { runTag } from '../shared/seriesFormat.js';
 
 const {
   MSG, ROOM_STATE, COUNTDOWN_SECONDS, MAX_PLAYERS, SKIER_COLORS, LEVELS, DEFAULT_LEVEL,
@@ -43,7 +45,7 @@ let currentLevel = isLevel(params.get('level')) ? params.get('level') : DEFAULT_
 // otherwise it starts at DEFAULT_RUNS and follows the host's choice. Locked once a
 // series starts (the selector is lobby-only).
 const runsParam = parseInt(params.get('runs'), 10);
-let runsTotal = Number.isInteger(runsParam) && runsParam >= 1 ? runsParam : DEFAULT_RUNS;
+const initialRuns = Number.isInteger(runsParam) && runsParam >= 1 ? runsParam : DEFAULT_RUNS;
 // Between-runs auto-advance countdown (seconds). `?intermission=N` shortens it for
 // tests/previews; live play uses the INTERMISSION_SECONDS default.
 const interParam = parseInt(params.get('intermission'), 10);
@@ -94,9 +96,15 @@ function showSoundHint() {
   d.id = 'sound-hint';
   d.textContent = '🔈 Click or press a key for sound';
   document.body.appendChild(d);
-  // Some displays allow audio without a gesture (kiosk autoplay permission) —
-  // then the context unlocks on its own and the hint should clear itself.
-  const t = setInterval(() => { if (audio.ready) { d.remove(); clearInterval(t); } }, 500);
+  // Some displays allow audio without a gesture (kiosk autoplay permission) — then
+  // the context unlocks on its own and the hint clears itself. Bounded to ~30s so a
+  // display that never unlocks (no gesture, no autoplay) doesn't poll forever; a
+  // later gesture still clears the hint via the unlockAudio listeners above.
+  let ticks = 0;
+  const t = setInterval(() => {
+    if (audio.ready) { d.remove(); clearInterval(t); }
+    else if (++ticks >= 60) clearInterval(t);
+  }, 500);
 }
 const trackOpts = { hitbox: params.get('hitbox') === '1' }; // ?hitbox=1 — wireframe collision footprints
 // The grade colour for the run's tier (Blue/Red/Black), used to cap the edge
@@ -134,16 +142,15 @@ let coastSettled = false;    // one-shot: final board refresh once the coast-out
 let lastHud = 0;
 
 // ---- series state --------------------------------------------------------
-// A series is `runsTotal` head-to-head runs with points accumulating to an
-// overall champion. `runIndex` is the current run (1-based; 0 in the lobby).
-// `seriesScores` is the running tally through COMPLETED runs only (the live run's
-// points are added on top each render), keyed by playerId so it survives a player
-// leaving/reconnecting and CPU-id reuse. `seriesOver` flips on the final run's end
-// → the overall board (sorted by total). Between runs the display auto-advances
-// after a short intermission countdown.
-let runIndex = 0;
-let seriesOver = false;
-let seriesScores = new Map(); // playerId -> { name, colorIndex, ai, points }
+// A series is `tally.runsTotal` head-to-head runs with points accumulating to an
+// overall champion. The SeriesTally (display/SeriesTally.js) owns the run index,
+// length, over-flag, per-player banked scores and the points/folding/row derivation
+// — a dependency-free, unit-tested unit (tests/seriesTally.test.js). main.js keeps
+// the lifecycle/IO around it: the intermission timer, net broadcasts and DOM. The
+// live run's points layer on top of the banked tally each render, so the final run
+// is never double-counted. Between runs the display auto-advances after a short
+// intermission countdown.
+const tally = new SeriesTally(seriesPoints, initialRuns);
 let intermissionTimer = null;
 
 // ---- net -----------------------------------------------------------------
@@ -166,7 +173,7 @@ const net = new DisplayNet({
     // Every WELCOME carries the room's current difficulty + series length so a
     // joiner's lobby selectors land on the right tier/count; mid-run/results
     // extras ride alongside.
-    const extra = { level: currentLevel, runs: runsTotal };
+    const extra = { level: currentLevel, runs: tally.runsTotal };
     if (session) {
       if (raceEnded) extra.standings = standingsPayload(true);
       else if (paused) extra.paused = true;
@@ -262,7 +269,7 @@ function rekeyPlayer(oldId, newId) {
   for (const p of currentField) { if (p.peerIndex === oldId) p.peerIndex = newId; }
   // Carry their accumulated series points onto the new slot so a cross-device
   // reconnect mid-series doesn't lose the score they've banked.
-  if (seriesScores.has(oldId)) { seriesScores.set(newId, seriesScores.get(oldId)); seriesScores.delete(oldId); }
+  tally.rekey(oldId, newId);
 }
 
 // Dropped-seat reconnect cards: a QR centred in each disconnected player's
@@ -352,15 +359,15 @@ function renderRuns() {
   // Items reuse the LEVELS shape ({ id, label, color }); the brand colour fills
   // the active segment (runs have no per-option colour like the piste grades).
   buildLevelSeg(seg, RUN_COUNTS.map((n) => ({ id: String(n), label: String(n), color: 'var(--brand)' })), setRuns);
-  paintLevelSeg(seg, String(runsTotal), false); // always live on the big screen — no host gate
+  paintLevelSeg(seg, String(tally.runsTotal), false); // always live on the big screen — no host gate
 }
 
 function setRuns(runs) {
   const n = parseInt(runs, 10);
-  if (!isRunCount(n) || n === runsTotal) return;
-  runsTotal = n;
+  if (!isRunCount(n) || n === tally.runsTotal) return;
+  tally.setRunsTotal(n);
   renderRuns();
-  net.broadcast({ type: MSG.RUNS_UPDATE, runs: runsTotal });
+  net.broadcast({ type: MSG.RUNS_UPDATE, runs: tally.runsTotal });
 }
 
 // ---- field build (humans + AI fill) -------------------------------------
@@ -477,21 +484,19 @@ function driveLobbyRace(dt) {
 // only kick a series off from the lobby with no live session — scores can't be
 // wiped mid-run).
 function onStartPressed() {
-  if (raceEnded) { if (seriesOver) newSeriesFromResults(); return; }
+  if (raceEnded) { if (tally.seriesOver) newSeriesFromResults(); return; }
   if (!session && net.roomState === ROOM_STATE.LOBBY) startSeries();
 }
 
 // Kick off a fresh series: wipe the tally and drop into run 1. From the lobby
 // (host Start) or the final board ("Play again", via newSeriesFromResults).
 function startSeries() {
-  seriesScores = new Map();
-  runIndex = 0;
-  seriesOver = false;
+  tally.reset();
   startNextRun();
 }
 
 function startNextRun() {
-  runIndex += 1;
+  tally.startNextRun();
   startRun();
 }
 
@@ -500,9 +505,9 @@ function startNextRun() {
 // when the countdown elapses. Guarded so a double-fire no-ops: once startRun flips
 // raceEnded back to false a re-entry returns early.
 function advanceToNextRun() {
-  if (!raceEnded || seriesOver) return;
+  if (!raceEnded || tally.seriesOver) return;
   clearIntermission();
-  foldRunScores();
+  if (session) tally.fold(currentField, session.getResults()); // bank this run's points before teardown
   teardownRun();
   startNextRun();
 }
@@ -692,70 +697,15 @@ function lateJoiners() {
   return net.roster().filter((p) => p.connected !== false && !inField.has(p.peerIndex));
 }
 
-// This run's series points for every skier, keyed by playerId. `seriesPoints`
-// lives in shared/protocol.js (one definition for both sides + the Node tests).
-function pointsForResults(res) {
-  const m = new Map();
-  for (const r of res) m.set(r.playerId, seriesPoints(r.rank, res.length, r.finished));
-  return m;
-}
-
-// Bank the just-finished run's points into the cumulative tally. Called from
-// advanceToNextRun BEFORE the session is torn down (it reads the live field +
-// results). seriesScores then holds totals through this run; the next run's points
-// are layered on top live again. Not called for the final run — the overall board
-// derives its totals as seriesScores(prior runs) + the final run's points, so the
-// last run is never double-counted.
-function foldRunScores() {
-  if (!session) return;
-  const pts = pointsForResults(session.getResults().results);
-  for (const p of currentField) {
-    const cur = seriesScores.get(p.peerIndex) || { points: 0 };
-    seriesScores.set(p.peerIndex, {
-      name: p.name, colorIndex: p.colorIndex, ai: !!p.ai,
-      points: cur.points + (pts.get(p.peerIndex) || 0),
-    });
-  }
-}
-
-// The ordered standings rows for the CURRENT run, each carrying this-run `points`
-// and the cumulative `score` (banked total through prior runs + this run's points).
-// Shared by the phone broadcast (standingsPayload) and the big-screen board
-// (showResults) so they can't drift. Per-run the rows stay in finish order; once
-// the series is over they're sorted by total score (the overall ranking), `place`
-// renumbered, and the leader(s) flagged champion. `resultsObj` is the engine's
-// getResults() output; `field` names/colours the rows. (Both are passed in rather
-// than read off the module `session` so the no-relay TestHarness, which owns its
-// own session, drives this exact path.)
-function buildSeriesRows(resultsObj, field) {
-  const res = (resultsObj && resultsObj.results) || [];
-  const byId = new Map(field.map((p) => [p.peerIndex, p]));
-  const pts = pointsForResults(res);
-  const rows = res.map((r) => {
-    const p = byId.get(r.playerId) || {};
-    const point = pts.get(r.playerId) || 0;
-    const prior = (seriesScores.get(r.playerId) || { points: 0 }).points;
-    return {
-      playerId: r.playerId, name: p.name || 'Skier',
-      colorIndex: p.colorIndex || 0, ai: !!p.ai,
-      finished: r.finished, time: r.time, dnf: !!r.dnf,
-      place: r.rank, points: point, score: prior + point,
-    };
-  });
-  if (seriesOver) {
-    // Overall ranking: most points first, this run's finish order breaks ties.
-    rows.sort((a, b) => b.score - a.score || a.place - b.place);
-    const top = rows.length ? rows[0].score : 0;
-    rows.forEach((row, i) => { row.place = i + 1; row.champion = top > 0 && row.score === top; });
-  }
-  return rows;
-}
+// The cumulative tally (run index/length/over-flag, banked scores, points folding
+// and the standings-row derivation) lives in the SeriesTally `tally` — see the
+// series-state block above. main.js only wires it to the net/DOM below.
 
 function standingsPayload(over) {
-  const rows = buildSeriesRows(session.getResults(), currentField);
+  const rows = tally.buildRows(session.getResults(), currentField);
   return {
     type: MSG.STANDINGS,
-    over, seriesOver, runIndex, runTotal: runsTotal,
+    over, seriesOver: tally.seriesOver, runIndex: tally.runIndex, runTotal: tally.runsTotal,
     hostPeerIndex: net.flow.host,
     total: rows.length,
     // Late joiners ride along under the board (newPlayer) so their own phone —
@@ -777,7 +727,7 @@ function broadcastStandings(over) { if (session) net.broadcast(standingsPayload(
 // settle point; the intermissionTimer guard keeps it to a single start. No-op on
 // the final run (the overall board never advances) or once the field has emptied.
 function maybeStartIntermission() {
-  if (!raceEnded || seriesOver || intermissionTimer) return;
+  if (!raceEnded || tally.seriesOver || intermissionTimer) return;
   if (!session || !(session.engine.raceOver || coastSettled)) return;
   startIntermission();
 }
@@ -796,7 +746,7 @@ function startIntermission() {
   }, 1000);
 }
 function pushIntermission(n) {
-  net.broadcast({ type: MSG.INTERMISSION, n, runIndex, runTotal: runsTotal });
+  net.broadcast({ type: MSG.INTERMISSION, n, runIndex: tally.runIndex, runTotal: tally.runsTotal });
   const line = el('results-intermission');
   if (line) line.textContent = `Next run in ${n}…`;
 }
@@ -808,7 +758,7 @@ function endRun(results) {
   if (raceEnded) return; // panel already up (humans done) — onRaceEvent keeps it refreshed
   raceEnded = true;
   raceEndedAt = performance.now();
-  seriesOver = runIndex >= runsTotal; // the final run is in the books → overall board
+  tally.endCurrentRun(); // the final run is in the books → overall board
   net.flow.transitionTo(ROOM_STATE.RESULTS);
   broadcastStandings(true);
   audio.stopWind();
@@ -831,7 +781,7 @@ function endRun(results) {
 // finish anymore), covering the timeout end where raceOver never trips. `joiners`
 // lets the harness preview late-join rows; live renders derive them themselves.
 function showResults(results, field = currentField, settled = false, joiners = null) {
-  const rows = buildSeriesRows(results, field);
+  const rows = tally.buildRows(results, field);
   const list = el('results-list');
   if (list) {
     list.innerHTML = '';
@@ -852,7 +802,7 @@ function showResults(results, field = currentField, settled = false, joiners = n
         `<span class="dot" style="background:${color}"></span>` +
         `<span class="res__name">${escapeHtml(r.name)}${r.ai ? ' <span class="res__cpu">CPU</span>' : ''}</span>` +
         `<span class="res__time">${time}</span>` +
-        `<span class="res__pts">${seriesOver ? '' : (r.finished ? '+' + r.points : '')}</span>` +
+        `<span class="res__pts">${tally.seriesOver ? '' : (r.finished ? '+' + r.points : '')}</span>` +
         `<span class="res__score">${r.score}</span>`;
       list.appendChild(li);
     }
@@ -875,14 +825,15 @@ function showResults(results, field = currentField, settled = false, joiners = n
     }
   }
 
-  // Header: "Run X of N" mid-series, "Final standings" once it's over.
+  // Header: "Run X of N" mid-series, "Final standings" once it's over (shared
+  // wording with the phone board via shared/seriesFormat.js).
   const tag = el('results-runtag');
-  if (tag) tag.textContent = runIndex ? (seriesOver ? `Final standings · ${runsTotal} runs` : `Run ${runIndex} of ${runsTotal}`) : '';
+  if (tag) tag.textContent = tally.runIndex ? runTag(tally.runIndex, tally.runsTotal, tally.seriesOver) : '';
 
   // Champion banner — only on the overall board. Co-champions on a points tie.
   const champ = el('results-champ');
   if (champ) {
-    const winners = seriesOver ? rows.filter((r) => r.champion) : [];
+    const winners = tally.seriesOver ? rows.filter((r) => r.champion) : [];
     if (winners.length) {
       champ.classList.remove('hidden');
       // Assigned via textContent (below), so names need no escaping — the browser
@@ -896,9 +847,9 @@ function showResults(results, field = currentField, settled = false, joiners = n
   // no button, just the intermission countdown; only the final board offers a
   // button ("Play again" → a brand-new series).
   const again = el('results-again');
-  if (again) { again.textContent = 'Play again'; again.classList.toggle('hidden', !seriesOver); }
+  if (again) { again.textContent = 'Play again'; again.classList.toggle('hidden', !tally.seriesOver); }
   const line = el('results-intermission');
-  if (line) line.classList.toggle('hidden', seriesOver);
+  if (line) line.classList.toggle('hidden', tally.seriesOver);
 
   const res = el('results');
   if (res) res.classList.remove('hidden');
@@ -907,18 +858,15 @@ function showResults(results, field = currentField, settled = false, joiners = n
 // Stage series state for a no-relay preview (the gallery 'results' scenario) so
 // showResults renders a mid-series or final board through the live path. Injected
 // into the TestHarness — never used in live play.
-function setSeriesPreview({ index = 1, total = runsTotal, over = false, scores = null } = {}) {
-  runIndex = index;
-  runsTotal = total;
-  seriesOver = over;
-  if (scores) seriesScores = new Map(Object.entries(scores).map(([id, points]) => [id, { points }]));
+function setSeriesPreview(opts = {}) {
+  tally.stagePreview(opts);
 }
 
 // Tear down the current run and roll a FRESH random slope for the next one (live
 // play only — test mode pins a stable seed). Shared by "New game" (→ lobby),
 // the between-runs auto-advance, and "Play again" (→ a new series); all get a new
-// mountain. Does NOT touch seriesScores — advanceToNextRun banks the run's points
-// (foldRunScores) before calling this, and startSeries resets the tally.
+// mountain. Does NOT touch the tally — advanceToNextRun banks the run's points
+// (tally.fold) before calling this, and startSeries/returnToLobby reset the tally.
 function teardownRun() {
   clearIntermission();
   if (session) { session.dispose(); session = null; }
@@ -936,7 +884,7 @@ function returnToLobby() {
   teardownRun();
   // Abort the series outright: reset the tally so the lobby (and the next series)
   // starts clean.
-  runIndex = 0; seriesOver = false; seriesScores = new Map();
+  tally.reset();
   net.flow.transitionTo(ROOM_STATE.LOBBY);
   net.broadcast({ type: MSG.GAME_END });
   scene.orbit = true;
@@ -1098,7 +1046,7 @@ el('pause-continue') && el('pause-continue').addEventListener('click', resumeRun
 el('pause-newgame') && el('pause-newgame').addEventListener('click', returnToLobby);
 // The big-screen results button shows only on the final board ("Play again" → a
 // brand-new series); mid-series the board auto-advances with no button.
-el('results-again') && el('results-again').addEventListener('click', () => { if (seriesOver) newSeriesFromResults(); });
+el('results-again') && el('results-again').addEventListener('click', () => { if (tally.seriesOver) newSeriesFromResults(); });
 el('results-newgame') && el('results-newgame').addEventListener('click', returnToLobby);
 window.addEventListener('keydown', (e) => {
   if (e.key === 'g' && net.roomState === ROOM_STATE.LOBBY) startSeries(); // dev: start without a phone
@@ -1119,7 +1067,7 @@ if (params.get('test') === '1' || scenario) {
   import('./TestHarness.js').then(({ runDisplayScenario }) => runDisplayScenario(
     // scenarios default to a 4-skier field (solo = you + 3 CPU); ?players=N overrides.
     // `runsTotal`/`seriesOver` stage the results scenario as a mid-series or final board.
-    { scenario: scenario || 'running', players: parseInt(params.get('players'), 10) || 4, host: parseInt(params.get('host'), 10) || 0, cam: params.get('cam'), runsTotal, seriesOver: params.get('over') === '1', intermission: intermissionSeconds },
+    { scenario: scenario || 'running', players: parseInt(params.get('players'), 10) || 4, host: parseInt(params.get('host'), 10) || 0, cam: params.get('cam'), runsTotal: tally.runsTotal, seriesOver: params.get('over') === '1', intermission: intermissionSeconds },
     // Inject the REAL render fns so the harness previews the live DOM path rather
     // than a hand-copy (which drifts — see renderRoster/showResults).
     { scene, slope, AiController, AI_PERSONALITIES, RunSession, renderRoster, renderLevel, renderRuns, showResults, setSeriesPreview, buildReconnectCard, audio, showSoundHint, rerollSlope, lobbyCrossfade }

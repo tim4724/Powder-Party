@@ -6,7 +6,7 @@
 // Returns { centerline, length, slopeWidth, groundY, ramps, obstacles, def }.
 import * as THREE from 'three';
 import { Centerline } from './Centerline.js';
-import { generateSlope } from '../shared/slopes.js';
+import { generateSlope, obstacleRadius } from '../shared/slopes.js';
 
 const DEG = Math.PI / 180;
 const STEP = 2.0; // arclength between centerline samples (Catmull-Rom smooths between)
@@ -107,10 +107,10 @@ export function buildSlope(def) {
   const groundY = minY - 0.4;
 
   const ramps = (def.ramps || []).map((r) => ({
-    s: r.at * length, lat: r.lat || 0, radius: r.radius || 1.5, width: r.width || 2.4,
+    s: r.at * length, lat: r.lat || 0, width: r.width || 2.4,
   }));
   const obstacles = (def.obstacles || []).map((o) => ({
-    s: o.at * length, lat: o.lat || 0, radius: o.radius || (o.kind === 'rock' ? 0.85 : 0.7), kind: o.kind || 'tree',
+    s: o.at * length, lat: o.lat || 0, radius: o.radius || obstacleRadius(o.kind), kind: o.kind || 'tree',
   }));
   // The finish-gate posts (drawn by the renderer's FinishGate) are solid obstacles
   // too: clipping one at the line wipes you out like a tree/rock. At the OUTER piste
