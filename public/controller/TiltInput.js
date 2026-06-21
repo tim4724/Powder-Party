@@ -70,7 +70,8 @@ export class TiltInput {
     this._timer = null;
 
     this._onOrient = this._onOrient.bind(this);
-    this._bindKeys();
+    this._onKeyDown = this._onKeyDown.bind(this);
+    this._onKeyUp = this._onKeyUp.bind(this);
     this._initSurface();
   }
 
@@ -111,10 +112,18 @@ export class TiltInput {
 
   start() {
     if (this._timer) return;
+    if (typeof window !== 'undefined') {
+      window.addEventListener('keydown', this._onKeyDown);
+      window.addEventListener('keyup', this._onKeyUp);
+    }
     const interval = 1000 / SEND_HZ;
     this._timer = setInterval(() => this._tick(), interval);
   }
   stop() {
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('keydown', this._onKeyDown);
+      window.removeEventListener('keyup', this._onKeyUp);
+    }
     clearInterval(this._timer); this._timer = null;
   }
 
@@ -156,22 +165,21 @@ export class TiltInput {
   }
 
   // --- keyboard fallback / testing (works over plain HTTP — no sensors) ---
-  _bindKeys() {
-    if (typeof window === 'undefined') return;
-    const set = (e, down) => {
-      // Never steal keys from a text field (the name input) — the
-      // preventDefault below would swallow "a"/"d"/arrows while typing a name.
-      const t = e.target;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
-      const k = e.key.toLowerCase();
-      if (k === 'arrowleft' || k === 'a') { this._keyL = down; e.preventDefault(); }
-      else if (k === 'arrowright' || k === 'd') { this._keyR = down; e.preventDefault(); }
-      else return;
-      this._key = (this._keyR ? 1 : 0) - (this._keyL ? 1 : 0);
-    };
-    window.addEventListener('keydown', (e) => set(e, true));
-    window.addEventListener('keyup', (e) => set(e, false));
+  // Listeners are added in start() and removed in stop() (symmetric with the
+  // deviceorientation listener), so re-instantiation never leaks handlers.
+  _setKey(e, down) {
+    // Never steal keys from a text field (the name input) — the
+    // preventDefault below would swallow "a"/"d"/arrows while typing a name.
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    const k = e.key.toLowerCase();
+    if (k === 'arrowleft' || k === 'a') { this._keyL = down; e.preventDefault(); }
+    else if (k === 'arrowright' || k === 'd') { this._keyR = down; e.preventDefault(); }
+    else return;
+    this._key = (this._keyR ? 1 : 0) - (this._keyL ? 1 : 0);
   }
+  _onKeyDown(e) { this._setKey(e, true); }
+  _onKeyUp(e) { this._setKey(e, false); }
 
   // Carve is via tilt; the control surface just needs to not scroll/zoom under
   // the player's thumb while they ski (the swipe gestures share this surface).

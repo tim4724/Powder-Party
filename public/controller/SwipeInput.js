@@ -79,10 +79,15 @@ export class SwipeInput {
 
     this._down = this._down.bind(this);
     this._up = this._up.bind(this);
-    this._bindKeys();
+    this._onKeyDown = this._onKeyDown.bind(this);
+    this._onKeyUp = this._onKeyUp.bind(this);
   }
 
   start() {
+    if (typeof window !== 'undefined') {
+      window.addEventListener('keydown', this._onKeyDown);
+      window.addEventListener('keyup', this._onKeyUp);
+    }
     if (!this.surface) return;
     this.surface.addEventListener('pointerdown', this._down);
     this.surface.addEventListener('pointerup', this._up);
@@ -90,6 +95,10 @@ export class SwipeInput {
     this.surface.addEventListener('pointerleave', this._up);
   }
   stop() {
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('keydown', this._onKeyDown);
+      window.removeEventListener('keyup', this._onKeyUp);
+    }
     if (this.surface) {
       this.surface.removeEventListener('pointerdown', this._down);
       this.surface.removeEventListener('pointerup', this._up);
@@ -184,45 +193,43 @@ export class SwipeInput {
   // ArrowDown = front flip, Q = spin-left, E = spin-right. (ArrowLeft/Right + A/D are carve,
   // owned by TiltInput, so they're left alone here.) Each trick key maps to the
   // same gesture angle a real flick would produce.
-  _bindKeys() {
-    if (typeof window === 'undefined') return;
-    // Never steal keys from a text field (the name input): these are
-    // window-level listeners, live from construction, and their preventDefault
-    // would otherwise swallow "s"/space/arrows while typing a name — and fire
-    // phantom brake/flick callbacks (buzz, HUD flashes) on every keystroke.
-    const typing = (e) => {
-      const t = e.target;
-      return !!(t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable));
-    };
-    window.addEventListener('keydown', (e) => {
-      if (typing(e)) return;
-      const k = e.key.toLowerCase();
-      if (k === 's') {
-        // keyboard brake is unambiguous (no flick to disambiguate) — confirm at once
-        if (!this._keyBrake) { this._keyBrake = true; this._braking = true; this._brakeConfirmed = true; this.onBrakeStart(); }
-        e.preventDefault();
-      } else if (k === 'arrowup' || k === ' ') {
-        if (!this._keyUp) { this._keyUp = true; this._fireFlick(Math.PI / 2); }   // back flip (air); nothing on the snow
-        e.preventDefault();
-      } else if (k === 'arrowdown') {
-        if (!this._keyDown) { this._keyDown = true; this._fireFlick(-Math.PI / 2); } // front flip
-        e.preventDefault();
-      } else if (k === 'q') {
-        if (!this._keyLeft) { this._keyLeft = true; this._fireFlick(Math.PI); }   // spin left
-        e.preventDefault();
-      } else if (k === 'e') {
-        if (!this._keyRight) { this._keyRight = true; this._fireFlick(0); }       // spin right
-        e.preventDefault();
-      }
-    });
-    window.addEventListener('keyup', (e) => {
-      if (typing(e)) return;
-      const k = e.key.toLowerCase();
-      if (k === 's') { this._keyBrake = false; this._endBrake(); e.preventDefault(); }
-      else if (k === 'arrowup' || k === ' ') { this._keyUp = false; e.preventDefault(); }
-      else if (k === 'arrowdown') { this._keyDown = false; e.preventDefault(); }
-      else if (k === 'q') { this._keyLeft = false; e.preventDefault(); }
-      else if (k === 'e') { this._keyRight = false; e.preventDefault(); }
-    });
+  // Never steal keys from a text field (the name input): these are
+  // window-level listeners (added in start(), removed in stop() — symmetric
+  // with the pointer listeners), and their preventDefault would otherwise
+  // swallow "s"/space/arrows while typing a name — and fire phantom
+  // brake/flick callbacks (buzz, HUD flashes) on every keystroke.
+  _typing(e) {
+    const t = e.target;
+    return !!(t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable));
+  }
+  _onKeyDown(e) {
+    if (this._typing(e)) return;
+    const k = e.key.toLowerCase();
+    if (k === 's') {
+      // keyboard brake is unambiguous (no flick to disambiguate) — confirm at once
+      if (!this._keyBrake) { this._keyBrake = true; this._braking = true; this._brakeConfirmed = true; this.onBrakeStart(); }
+      e.preventDefault();
+    } else if (k === 'arrowup' || k === ' ') {
+      if (!this._keyUp) { this._keyUp = true; this._fireFlick(Math.PI / 2); }   // back flip (air); nothing on the snow
+      e.preventDefault();
+    } else if (k === 'arrowdown') {
+      if (!this._keyDown) { this._keyDown = true; this._fireFlick(-Math.PI / 2); } // front flip
+      e.preventDefault();
+    } else if (k === 'q') {
+      if (!this._keyLeft) { this._keyLeft = true; this._fireFlick(Math.PI); }   // spin left
+      e.preventDefault();
+    } else if (k === 'e') {
+      if (!this._keyRight) { this._keyRight = true; this._fireFlick(0); }       // spin right
+      e.preventDefault();
+    }
+  }
+  _onKeyUp(e) {
+    if (this._typing(e)) return;
+    const k = e.key.toLowerCase();
+    if (k === 's') { this._keyBrake = false; this._endBrake(); e.preventDefault(); }
+    else if (k === 'arrowup' || k === ' ') { this._keyUp = false; e.preventDefault(); }
+    else if (k === 'arrowdown') { this._keyDown = false; e.preventDefault(); }
+    else if (k === 'q') { this._keyLeft = false; e.preventDefault(); }
+    else if (k === 'e') { this._keyRight = false; e.preventDefault(); }
   }
 }
