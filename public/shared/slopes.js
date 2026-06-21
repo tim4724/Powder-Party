@@ -40,6 +40,17 @@ export function mulberry32(seed) {
   };
 }
 
+// obstacleRadius(kind) — the SINGLE SOURCE OF TRUTH for the per-kind footprint radii
+// of the PROCEDURAL obstacles (rock / tree — snow-contact half-widths). Consumed by
+// SlopeBuilder (it stamps each obstacle's resolved `radius`) and SlopeScenery
+// (hitbox-debug outline). The import-free SkiEngine never imports this — it consumes
+// the builder-supplied radius and keeps only a kind-agnostic fallback for hand-built
+// tracks/tests. (Finish-gate 'post' obstacles aren't procedural: SlopeBuilder injects
+// them with their own explicit radius, so they never fall back to this.)
+export function obstacleRadius(kind) {
+  return kind === 'rock' ? 0.85 : 0.7;
+}
+
 const _clamp = (x, lo, hi) => (x < lo ? lo : x > hi ? hi : x);
 const r1 = (x) => Math.round(x * 10) / 10;     // one decimal
 const r3 = (x) => Math.round(x * 1000) / 1000; // three decimals

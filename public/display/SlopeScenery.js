@@ -5,7 +5,7 @@
 // no renderer state. SceneRenderer owns cameras/lighting/skiers and calls these
 // from setTrack.
 import * as THREE from 'three';
-import { mulberry32 } from '../shared/slopes.js';
+import { mulberry32, obstacleRadius } from '../shared/slopes.js';
 import { hitSL, SKI_HALF } from './engine/SkiEngine.js';
 
 const _up = new THREE.Vector3(0, 1, 0);
@@ -468,7 +468,7 @@ export function addObstacle(group, cl, o, hitboxDebug) {
   g.quaternion.setFromUnitVectors(_up, up);
   group.add(g);
   if (hitboxDebug) {
-    group.add(debugCircle(f, o.lat || 0, o.radius || (o.kind === 'rock' ? 0.7 : 0.8), 0xff2244));
+    group.add(debugCircle(f, o.lat || 0, o.radius || obstacleRadius(o.kind), 0xff2244));
   }
 }
 

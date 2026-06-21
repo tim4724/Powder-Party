@@ -30,6 +30,22 @@ test('generateSlope is deterministic per seed and varies across seeds', async ()
   assert.notDeepStrictEqual(generateSlope(0).pieces, generateSlope(1).pieces, 'seed 0 ≠ seed 1');
 });
 
+test('obstacleRadius is the single source of truth for footprint radii', async () => {
+  const { obstacleRadius, generateSlope } = await load();
+  assert.strictEqual(obstacleRadius('rock'), 0.85, 'rock footprint radius');
+  assert.strictEqual(obstacleRadius('tree'), 0.7, 'tree footprint radius');
+  // Every NON-'post' obstacle on a freshly generated slope resolves to the
+  // per-kind radius obstacleRadius() defines — generated defs carry no explicit
+  // radius, so the builder default (`o.radius || obstacleRadius(o.kind)`) IS this.
+  for (let seed = 0; seed < 50; seed++) {
+    for (const o of generateSlope(seed).obstacles) {
+      if (o.kind === 'post') continue;
+      const radius = o.radius || obstacleRadius(o.kind);
+      assert.strictEqual(radius, obstacleRadius(o.kind), `seed ${seed}: ${o.kind} radius`);
+    }
+  }
+});
+
 test('every piece descends within a sane pitch band', async () => {
   const { generateSlope } = await load();
   for (let seed = 0; seed < 150; seed++) {
