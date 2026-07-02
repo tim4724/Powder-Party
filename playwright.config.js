@@ -36,7 +36,9 @@ module.exports = defineConfig({
     viewport: { width: 1280, height: 720 }, // desktop display by default; controllers resize per page
   },
   webServer: {
-    command: 'node server/index.js',
+    // Build first: E2E exercises the content-hashed bundles — the exact
+    // artifact prod serves — not the raw source modules.
+    command: 'node scripts/build.js && node server/index.js',
     env: { ...process.env, PORT },
     port: Number(PORT),
     reuseExistingServer: false,

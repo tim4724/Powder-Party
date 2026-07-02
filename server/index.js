@@ -34,9 +34,40 @@ const VERSION_LABEL = APP_VERSION + (!IS_PROD && getShortSha(GIT_SHA) ? ' (#' + 
 // version + the CI-provided commit sha), so no escaping needed.
 const VERSION_BADGE = (!IS_PROD && getShortSha(GIT_SHA)) ? (APP_VERSION + ' · #' + getShortSha(GIT_SHA)) : '';
 
+// Content-hashed web bundles (scripts/build.js). With the manifest present the
+// display/controller pages swap their build:scripts / build:entry marker
+// blocks for the hashed bundle tags, and those files are served immutable.
+// Absent (plain `npm run dev`, or USE_BUNDLES=0 forcing source mode past a
+// stale local build), pages serve the raw source modules unchanged.
+function loadWebManifest() {
+  if (process.env.USE_BUNDLES === '0') return null;
+  try {
+    const m = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'dist', 'web-manifest.json'), 'utf8'));
+    for (const app of ['display', 'controller']) {
+      for (const kind of ['boot', 'app']) fs.accessSync(path.join(PUBLIC_DIR, app, m[app][kind]));
+    }
+    return m;
+  } catch (_) { return null; }
+}
+const WEB_MANIFEST = loadWebManifest();
+
+// Swap the dev script blocks for the app's hashed bundle pair. The boot bundle
+// stays a CLASSIC script (its top-level vars are the window globals); the app
+// bundle is the ES-module graph with Three.js resolved in, so the importmap
+// (and its CSP nonce use) disappears from the built page.
+function applyBundles(html, app) {
+  const m = WEB_MANIFEST[app];
+  return html
+    .replace(/<!-- build:scripts -->[\s\S]*?<!-- \/build:scripts -->/,
+      '<script src="/' + app + '/' + m.boot + '"></script>')
+    .replace(/<!-- build:entry -->[\s\S]*?<!-- \/build:entry -->/,
+      '<script type="module" src="/' + app + '/' + m.app + '"></script>');
+}
+
 const MIME_TYPES = {
   '.html': 'text/html',
   '.js': 'text/javascript',
+  '.map': 'application/json',
   '.css': 'text/css',
   '.json': 'application/json',
   '.png': 'image/png',
@@ -96,9 +127,11 @@ function isRoomCode(urlPath) {
 }
 
 // Content-Security-Policy. Vendoring Three.js keeps script-src/connect-src at
-// 'self'. The ONE relaxation the no-build stack needs: the inline <script
+// 'self'. The ONE relaxation source mode needs: the inline <script
 // type="importmap"> is itself a script, so it must carry a per-response nonce.
-// STUN (fastlane iceServers) is UDP and not governed by connect-src.
+// (Bundled pages resolve Three.js at build time and ship no inline script —
+// the nonce goes unused there, which is harmless.) STUN (fastlane iceServers)
+// is UDP and not governed by connect-src.
 function cspHeader(nonce, frameAncestors) {
   return [
     "default-src 'self'",
@@ -174,6 +207,8 @@ const server = http.createServer((req, res) => {
     if (ext === '.html') {
       const nonce = crypto.randomBytes(16).toString('base64');
       let text = data.toString('utf8');
+      if (WEB_MANIFEST && urlPath === '/display/index.html') text = applyBundles(text, 'display');
+      else if (WEB_MANIFEST && urlPath === '/controller/index.html') text = applyBundles(text, 'controller');
       text = text.replace(/__APP_VERSION__/g, VERSION_LABEL)
                  .replace(/__APP_V__/g, APP_VERSION)
                  .replace(/__VERSION_BADGE__/g, VERSION_BADGE)
@@ -183,11 +218,15 @@ const server = http.createServer((req, res) => {
       headers['Content-Security-Policy'] = cspHeader(nonce, iframeable ? "'self'" : "'none'");
     }
 
-    // HTML + JS always no-store (avoid stale-version mismatch). Other static
-    // assets (CSS, images, fonts, GLBs) get a 24h cache in prod; bust with
-    // ?v=__APP_V__ when they change.
+    // Content-hashed bundles (+ maps) are immutable by construction — cache
+    // hard, even in dev. Everything else: HTML + JS always no-store (module
+    // imports can't carry the ?v= buster, so source JS can't long-cache);
+    // other static assets (CSS, images, fonts, GLBs) get a 24h cache in prod,
+    // busted with ?v=__APP_V__ when they change.
+    const isHashed = /\.(boot|app)\.[0-9a-f]{10}\.js(\.map)?$/.test(filePath);
     const noCache = !IS_PROD || ext === '.html' || ext === '.js';
-    headers['Cache-Control'] = noCache ? 'no-store' : 'public, max-age=86400';
+    headers['Cache-Control'] = isHashed ? 'public, max-age=31536000, immutable'
+      : (noCache ? 'no-store' : 'public, max-age=86400');
 
     res.writeHead(200, headers);
     res.end(data);

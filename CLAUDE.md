@@ -9,8 +9,9 @@ npm test                          # Unit tests (node:test) — SkiEngine + party
 node --test tests/engine.test.js  # A single unit test
 npm run test:e2e                  # Playwright E2E (tests/e2e) — REAL pages over the REAL relay
 npx playwright test late          # A single E2E spec (substring match)
-npm start                         # Run the server (node server/index.js), port 4000
-npm run dev                       # Run with --watch (auto-restart)
+npm start                         # Build bundles, then run the server, port 4000
+npm run dev                       # Run with --watch (auto-restart), serves raw source modules
+npm run build                     # esbuild → content-hashed bundle pair per app + dist/web-manifest.json
 ```
 
 E2E needs a browser once: `npx playwright install chromium` (or point
@@ -42,7 +43,13 @@ single-screen previews stay relay-free via `/?test=1&scenario=…` (see README)
 - Browser code is ES modules; the engine is import-free (fully dependency/THREE-free, so the
   Node tests can load it on a lightweight centerline stub). Three.js is vendored
   under `vendor/three/` and served via `/vendor/`, imported through an inline importmap (the
-  one script needing a CSP nonce).
+  one script needing a CSP nonce) in SOURCE mode.
+- **Two serving modes:** `scripts/build.js` (esbuild) emits a content-hashed bundle pair per
+  app (`<app>.boot.<hash>.js` classic globals + `<app>.app.<hash>.js` module graph with Three
+  resolved in, importmap gone) + `dist/web-manifest.json`; when the manifest exists the server
+  swaps each page's `build:scripts`/`build:entry` marker blocks for the hashed tags and serves
+  them immutable (this is what lets prod drop no-store on JS). No manifest (`npm run dev`) or
+  `USE_BUNDLES=0` → raw source modules. E2E builds first, so it tests the shipped bundles.
 - Relay/STUN URLs + the message vocabulary live in `public/shared/protocol.js` (game-side
   config, loaded as a classic `<script>` so its top-level `var`s become `window` globals the
   ES-module `Net.js` reads — the partyplug kit reads no game globals).

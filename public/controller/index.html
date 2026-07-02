@@ -12,10 +12,14 @@
   <link rel="stylesheet" href="/controller/controller.css?v=__APP_V__" />
   <!-- Classic scripts FIRST: they set the window globals (MSG, SKIER_*, RELAY_URL,
        STUN_URL, FASTLANE_TYPES, PartyConnection, PartyFastlane) the ES module
-       below reads. The controller does NOT load RoomFlow (that's display-only). -->
+       below reads. The controller does NOT load RoomFlow (that's display-only).
+       With a bundle build present the server swaps the marker block for the
+       hashed boot bundle (see scripts/build.js). -->
+  <!-- build:scripts -->
   <script src="/shared/protocol.js?v=__APP_V__"></script>
   <script src="/partyplug/PartyConnection.js?v=__APP_V__"></script>
   <script src="/partyplug/PartyFastlane.js?v=__APP_V__"></script>
+  <!-- /build:scripts -->
 </head>
 <body>
   <!-- Name -->
@@ -146,6 +150,8 @@
   <!-- Build stamp — populated by the server only on a preview deployment; :empty (hidden) otherwise. -->
   <div class="build-badge" role="status" aria-label="build version">__VERSION_BADGE__</div>
 
+  <!-- build:entry -->
   <script type="module" src="/controller/main.js?v=__APP_V__"></script>
+  <!-- /build:entry -->
 </body>
 </html>
