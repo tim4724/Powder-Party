@@ -5,5 +5,7 @@ node_modules
 .claude
 .playwright-mcp
 tests
-scripts
+# scripts/build.js must reach the image (Dockerfile build stage); only the
+# artwork capture tool stays out.
+scripts/capture-artwork.js
 test-results

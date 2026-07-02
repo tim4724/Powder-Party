@@ -9,7 +9,9 @@ npm test                          # Unit tests (node:test) — SkiEngine + party
 node --test tests/engine.test.js  # A single unit test
 npm run test:e2e                  # Playwright E2E (tests/e2e) — REAL pages over the REAL relay
 npx playwright test late          # A single E2E spec (substring match)
-npm start                         # Build bundles, then run the server, port 4000
+npm start                         # Build bundles, then run the server, port 4000 (build needs devDeps —
+                                  # a --omit=dev install must prebuild or run `node server/index.js` directly,
+                                  # like the Docker image does)
 npm run dev                       # Run with --watch (auto-restart), serves raw source modules
 npm run build                     # esbuild → content-hashed bundle pair per app + dist/web-manifest.json
 ```
