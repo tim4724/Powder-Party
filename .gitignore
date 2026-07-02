@@ -4,6 +4,12 @@ test-results/
 playwright-report/
 *.log
 .DS_Store
+# Build outputs (scripts/build.js) — content-hashed web bundles + manifest.
+dist/
+public/display/display.boot.*
+public/display/display.app.*
+public/controller/controller.boot.*
+public/controller/controller.app.*
 # Local-only Claude Code state — keeps the .claude/ root committable for shared
 # project settings/hooks while excluding per-user runtime files.
 .claude/worktrees/

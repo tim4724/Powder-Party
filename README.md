@@ -148,7 +148,9 @@ ramp + tree placement — is plain data in `shared/slopes.js`.
 
 ## Tech stack
 
-- **Runtime:** Node.js (static host, no build step, no bundler, no framework)
+- **Runtime:** Node.js (static host, no framework). `npm run build` (esbuild) emits one
+  content-hashed, immutable bundle pair per app — served when present, raw source modules
+  otherwise (`npm run dev`)
 - **3D:** Three.js (vendored)
 - **Relay:** Party-Sockets WebSocket relay (signaling + game events) + WebRTC fastlane for input
 - **Frontend:** vanilla JavaScript + ES modules

@@ -8,8 +8,15 @@
   <link rel="icon" href="data:," />
   <link rel="preload" as="font" type="font/woff2" href="/assets/fonts/fredoka-variable.woff2" crossorigin />
   <link rel="preload" as="font" type="font/woff2" href="/assets/fonts/nunito-variable.woff2" crossorigin />
-  <!-- Three.js (vendored). The inline importmap is the one script needing a CSP
-       nonce; the module entry is external so it's covered by 'self'. -->
+  <link rel="stylesheet" href="/shared/theme.css?v=__APP_V__" />
+  <link rel="stylesheet" href="/display/display.css?v=__APP_V__" />
+
+  <!-- Source-mode scripts. With a bundle build present the server swaps this
+       whole block for the app's hashed boot bundle (see scripts/build.js);
+       without one it serves as-is. Contents: the Three.js importmap (vendored;
+       the ONE inline script, hence the CSP nonce) and the classic transport +
+       protocol scripts that set window globals BEFORE the module entry runs. -->
+  <!-- build:scripts -->
   <script type="importmap" nonce="__CSP_NONCE__">
   {
     "imports": {
@@ -20,15 +27,11 @@
   </script>
   <link rel="modulepreload" href="/vendor/three/three.core.js" />
   <link rel="modulepreload" href="/vendor/three/three.module.js" />
-  <link rel="stylesheet" href="/shared/theme.css?v=__APP_V__" />
-  <link rel="stylesheet" href="/display/display.css?v=__APP_V__" />
-
-  <!-- Transport + shared contract: classic scripts set window globals BEFORE
-       the deferred module entry runs. -->
   <script src="/shared/protocol.js?v=__APP_V__"></script>
   <script src="/partyplug/PartyConnection.js?v=__APP_V__"></script>
   <script src="/partyplug/RoomFlow.js?v=__APP_V__"></script>
   <script src="/partyplug/PartyFastlane.js?v=__APP_V__"></script>
+  <!-- /build:scripts -->
 </head>
 <body>
   <!-- Persistent 3D backdrop. In the lobby it slowly orbits the slope (live
@@ -127,6 +130,8 @@
   <!-- Build stamp — populated by the server only on a preview deployment; :empty (hidden) otherwise. -->
   <div class="build-badge" role="status" aria-label="build version">__VERSION_BADGE__</div>
 
+  <!-- build:entry -->
   <script type="module" src="/display/main.js?v=__APP_V__"></script>
+  <!-- /build:entry -->
 </body>
 </html>

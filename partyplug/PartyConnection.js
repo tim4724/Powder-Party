@@ -30,6 +30,7 @@
 class PartyConnection {
   constructor(relayUrl, options) {
     this.relayUrl = relayUrl;
+    // The relay requires a clientId; generate a session-stable one if omitted.
     this.clientId = (options && options.clientId) || PartyConnection._genClientId();
     this.ws = null;
     this._reconnectTimer = null;
@@ -43,6 +44,7 @@ class PartyConnection {
     this.onError = null;       // () => void
     this.onMessage = null;     // (from: number, data: object) => void
     this.onProtocol = null;    // (type: string, msg: object) => void
+    this.onState = null;       // (data: any) => void, retained host snapshot
   }
 
   // Random, opaque clientId. crypto.randomUUID where available (browsers,
@@ -76,6 +78,13 @@ class PartyConnection {
 
       if (msg.type === 'message') {
         if (this.onMessage) this.onMessage(msg.from, msg.data);
+      } else if (msg.type === 'state') {
+        // Retained host snapshot, replayed right after `joined` on (re)join
+        // and pushed live on each host update. Routed to onState (not
+        // onProtocol) so a host that never sets onState (e.g. the display,
+        // which authors state but doesn't consume it) silently ignores its
+        // own replayed copy.
+        if (this.onState) this.onState(msg.data);
       } else {
         if (this.onProtocol) this.onProtocol(msg.type, msg);
       }
@@ -152,6 +161,15 @@ class PartyConnection {
     this._send({ type: 'send', data: data });
   }
 
+  // Publish a retained state snapshot (host/slot-0 only; the relay rejects it
+  // from anyone else). The relay keeps the latest blob on the room, pushes it
+  // live to current peers (sender excluded), and replays it to any client right
+  // after `joined` on (re)join. Costs exactly one broadcast; there is no silent
+  // retain. `data` must be JSON-serializable and <= 16 KiB serialized.
+  setState(data) {
+    this._send({ type: 'set_state', data: data });
+  }
+
   reconnectNow() {
     clearTimeout(this._reconnectTimer);
     this.connect();
@@ -172,6 +190,7 @@ class PartyConnection {
   }
 }
 
+// Export for both Node.js and browser
 if (typeof window !== 'undefined') {
   window.PartyConnection = PartyConnection;
 }
