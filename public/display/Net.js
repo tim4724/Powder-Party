@@ -21,11 +21,13 @@ const RECONNECT_GRACE_MS = 90000;
 // Zombie-link detection: controllers send a 1 Hz PING (plus ~25 Hz CONTROL in
 // a run), so a "connected" seat that's been silent this long has a dead link
 // the relay hasn't noticed yet (phone slept with the socket half-open). The
-// sweep routes it through the normal drop path — mid-run that's the reconnect
-// QR + grace window, NOT a forfeit. Lobby and results seats are left to the
-// relay's own timeout: a backgrounded phone throttles its timers, and QR-ing a
-// pocketed phone between runs would be worse than a briefly stale roster row.
-// A seat still silent when the next run starts is swept within one tick.
+// last-seen stamps live in RoomFlow (opts.liveness); the sweep below pulls
+// flow.expiredPeers and routes each through the normal drop path — mid-run
+// that's the reconnect QR + grace window, NOT a forfeit. Lobby and results
+// seats are left to the relay's own timeout: a backgrounded phone throttles
+// its timers, and QR-ing a pocketed phone between runs would be worse than a
+// briefly stale roster row. A seat still silent when the next run starts is
+// swept within one tick.
 const LIVENESS_TIMEOUT_MS = 10000;
 const LIVENESS_SWEEP_MS = 2500;
 
@@ -56,11 +58,8 @@ export class DisplayNet extends GameNet {
     this._reconnectSeats = new Map();
     this._reconnectTimers = new Map();
 
-    // peerIndex -> performance.now() of the last relay/fastlane traffic.
-    this._lastSeen = new Map();
+    this.flow = new RoomFlow({ liveness: { timeoutMs: LIVENESS_TIMEOUT_MS } });
     setInterval(() => this._sweepLiveness(), LIVENESS_SWEEP_MS);
-
-    this.flow = new RoomFlow();
     this.roomCode = null;
     this.instance = null;
     this.baseUrlOverride = null;
@@ -69,9 +68,9 @@ export class DisplayNet extends GameNet {
 
     // One announce per mutation: a single roster change can emit BOTH
     // hostchange and rosterchange (RoomFlow fires them back to back — and a
-    // resync can remove several peers in one sweep), which used to push an
-    // identical LOBBY_UPDATE round per event. Coalesce onto a microtask so
-    // each mutation broadcasts once, with the settled roster.
+    // resync can remove several peers in one sweep), which would publish an
+    // identical snapshot per event. Coalesce onto a microtask so each
+    // mutation publishes once, with the settled roster.
     let announcePending = false;
     const announce = () => {
       if (announcePending) return;
@@ -201,9 +200,9 @@ export class DisplayNet extends GameNet {
   }
 
   _addPeer(peerIndex) {
-    this._lastSeen.set(peerIndex, performance.now()); // a join IS traffic — fresh sweep budget
     const existing = this.flow.get(peerIndex);
     if (existing) {
+      this.flow.onSeen(peerIndex, performance.now()); // a join IS traffic — fresh sweep budget
       // Same-device reconnect: the relay keys slots by clientId, so a returning
       // phone lands back on its old index. Flip presence back on and drop its
       // reconnect QR. (A cross-device rejoin gets a NEW index instead and is
@@ -217,6 +216,7 @@ export class DisplayNet extends GameNet {
     if (this.flow.size >= MAX_PLAYERS) return;
     const colorIndex = RoomFlow.lowestFreeSlot(this._usedColors(), MAX_PLAYERS);
     this.flow.addPlayer(peerIndex, { name: 'Player ' + (colorIndex + 1), colorIndex });
+    this.flow.onSeen(peerIndex, performance.now()); // after addPlayer — onSeen ignores seatless peers
   }
 
   _removePeer(peerIndex) {
@@ -240,7 +240,6 @@ export class DisplayNet extends GameNet {
   // for an intentional LEAVE and when the reconnect grace window elapses.
   _expireSeat(peerIndex) {
     this._clearReconnect(peerIndex);
-    this._lastSeen.delete(peerIndex);
     if (!this.flow.has(peerIndex)) return;
     this.fastlane.close(peerIndex);
     this.flow.removePlayer(peerIndex);
@@ -260,7 +259,7 @@ export class DisplayNet extends GameNet {
     // Fresh liveness stamps too — OUR blip starved everyone's, and the sweep
     // must not QR a healthy phone before its next ping lands.
     for (const p of this.flow.list()) {
-      this._lastSeen.set(p.peerIndex, performance.now());
+      this.flow.onSeen(p.peerIndex, performance.now());
       this.party.sendTo(p.peerIndex, this._welcomeFor(p.peerIndex));
     }
   }
@@ -273,7 +272,7 @@ export class DisplayNet extends GameNet {
   // while its P2P fastlane kept delivering CONTROL: the player is still
   // driving, so the seat stays live and no QR interrupts their run.
   _seen(peerIndex) {
-    this._lastSeen.set(peerIndex, performance.now());
+    this.flow.onSeen(peerIndex, performance.now());
     if (this.flow.has(peerIndex) && this.flow.isDisconnected(peerIndex)) {
       this.flow.markReconnected(peerIndex);
       this._clearReconnect(peerIndex);
@@ -281,15 +280,10 @@ export class DisplayNet extends GameNet {
   }
 
   _sweepLiveness() {
-    if (this.roomState === ROOM_STATE.LOBBY || this.roomState === ROOM_STATE.RESULTS) {
-      return; // between runs: see LIVENESS_TIMEOUT_MS
-    }
-    const now = performance.now();
-    for (const p of this.flow.list()) {
-      if (!p.connected) continue; // already dropped — its QR/grace window is running
-      const seen = this._lastSeen.get(p.peerIndex);
-      if (seen != null && now - seen > LIVENESS_TIMEOUT_MS) this._removePeer(p.peerIndex);
-    }
+    // RESULTS gate is host policy (see LIVENESS_TIMEOUT_MS); expiredPeers
+    // itself already skips LOBBY and seats that are flagged disconnected.
+    if (this.roomState === ROOM_STATE.LOBBY || this.roomState === ROOM_STATE.RESULTS) return;
+    for (const id of this.flow.expiredPeers(performance.now())) this._removePeer(id);
   }
 
   // ---- reconnect (dropped-seat) handling ----
@@ -366,14 +360,16 @@ export class DisplayNet extends GameNet {
       ...(extras || {})
     };
   }
+  // Publish the retained room snapshot (Party-Sockets set_state) instead of
+  // fanning out a per-recipient LOBBY_UPDATE: the relay pushes it live to
+  // connected controllers and replays it to any (re)joining peer right after
+  // `joined`, so N messages collapse to one and a briefly-dropped controller
+  // catches up for free. ControllerNet re-shapes it onto the LOBBY_UPDATE
+  // apply path; WELCOME stays the per-recipient identity/screen arbiter. An
+  // EMPTY roster still publishes — the retained snapshot must not keep naming
+  // a departed player (or a stale host) to the next (re)joiner.
   _broadcastLobby() {
-    const payload = {
-      type: MSG.LOBBY_UPDATE,
-      hostPeerIndex: this.flow.host,
-      roomState: this.roomState,
-      players: this.roster()
-    };
-    for (const p of this.flow.list()) this.party.sendTo(p.peerIndex, payload);
+    this.party.setState({ hostPeerIndex: this.flow.host, players: this.roster() });
   }
 
   broadcast(data) { if (this.party) this.party.broadcast(data); }

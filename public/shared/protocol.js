@@ -57,7 +57,10 @@ var MSG = {
                                       // final STANDINGS payload so the phone lands on the board, not the lobby; a
                                       // paused run stamps paused=true so a rejoiner shows the pause overlay.
   ROOM_FULL: 'room_full',             // join refused — no free seat (room full, or every seat held for a reconnect)
-  LOBBY_UPDATE: 'lobby_update',       // roster/host snapshot
+  LOBBY_UPDATE: 'lobby_update',       // roster/host snapshot {hostPeerIndex, players}. Not sent as a message anymore:
+                                      // the display publishes it as the relay's RETAINED room snapshot (set_state, one
+                                      // publish instead of an N-recipient fanout; replayed to every (re)joiner), and
+                                      // ControllerNet re-shapes the snapshot onto this envelope for the apply path.
   PLAYER_STATE: 'player_state',       // {position, of, progress[0..1], airborne, finished} — light HUD feed (~6.5 Hz, see main.js HUD_HZ_MS)
   PONG: 'pong',
 

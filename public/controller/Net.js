@@ -129,6 +129,16 @@ export class ControllerNet extends GameNet {
       if (data.type === MSG.PONG) { this._handlePong(data); return; }
       this.onMessage(data);
     };
+    // Retained room snapshot (roster + host) — pushed live on each display
+    // update and replayed right after `joined` on (re)join, replacing the
+    // LOBBY_UPDATE fanout. Re-shaped onto the LOBBY_UPDATE envelope so the
+    // existing apply path does the work. The replay can land BEFORE our
+    // WELCOME (we may not be in the roster yet); the handler tolerates that,
+    // and WELCOME stays the identity/screen arbiter.
+    this.party.onState = (snap) => {
+      if (!snap || !Array.isArray(snap.players)) return;
+      this.onMessage({ type: MSG.LOBBY_UPDATE, hostPeerIndex: snap.hostPeerIndex, players: snap.players });
+    };
     this.party.onClose = (attempt, max, meta) => {
       this._stopPing();
       if (meta && meta.replaced) { this.onStatus('replaced'); return; }
