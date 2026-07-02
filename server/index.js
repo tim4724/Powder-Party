@@ -37,8 +37,8 @@ const VERSION_BADGE = (!IS_PROD && getShortSha(GIT_SHA)) ? (APP_VERSION + ' · #
 // Content-hashed web bundles (scripts/build.js). With the manifest present the
 // display/controller pages swap their build:scripts / build:entry marker
 // blocks for the hashed bundle tags, and those files are served immutable.
-// Absent (plain `npm run dev`, or USE_BUNDLES=0 forcing source mode past a
-// stale local build), pages serve the raw source modules unchanged.
+// Absent (`npm run dev` pins USE_BUNDLES=0, forcing source mode past a stale
+// local build), pages serve the raw source modules unchanged.
 function loadWebManifest() {
   if (process.env.USE_BUNDLES === '0') return null;
   try {
@@ -50,6 +50,12 @@ function loadWebManifest() {
   } catch (_) { return null; }
 }
 const WEB_MANIFEST = loadWebManifest();
+// Say which mode we booted in — a stale dist/web-manifest.json silently freezing
+// the pages a developer is editing is otherwise invisible until they give up.
+console.log(WEB_MANIFEST
+  ? 'serving hashed bundles from dist/web-manifest.json (USE_BUNDLES=0 for raw source)'
+  : 'serving raw source modules ' + (process.env.USE_BUNDLES === '0'
+      ? '(USE_BUNDLES=0)' : '(no usable bundle manifest)'));
 
 // Swap the dev script blocks for the app's hashed bundle pair. The boot bundle
 // stays a CLASSIC script (its top-level vars are the window globals); the app

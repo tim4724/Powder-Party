@@ -72,7 +72,7 @@ export class DisplayNet extends GameNet {
     // identical snapshot per event. Coalesce onto a microtask so each
     // mutation publishes once, with the settled roster.
     let announcePending = false;
-    const announce = () => {
+    this._announce = () => {
       if (announcePending) return;
       announcePending = true;
       queueMicrotask(() => {
@@ -84,8 +84,8 @@ export class DisplayNet extends GameNet {
         }
       });
     };
-    this.flow.on('rosterchange', announce);
-    this.flow.on('hostchange', announce);
+    this.flow.on('rosterchange', this._announce);
+    this.flow.on('hostchange', this._announce);
   }
 
   async start() {
@@ -134,6 +134,11 @@ export class DisplayNet extends GameNet {
       case 'joined':
         this.roomCode = msg.room;
         this._resyncPeers(msg.peers || []);
+        // Republish the retained snapshot unconditionally: setState calls made
+        // while OUR socket was down were silently dropped (_send no-ops when
+        // closed), so the relay's blob may still name seats that mutated during
+        // the blip. Coalesces with any mutations _resyncPeers just made.
+        this._announce();
         this.party.resetReconnectCount();
         this.onRoomReady({ roomCode: this.roomCode, joinUrl: this._joinUrl() });
         break;

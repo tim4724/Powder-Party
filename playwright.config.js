@@ -9,7 +9,14 @@
 //   npx playwright test late    # one spec
 const { defineConfig } = require('@playwright/test');
 
+// NOTE: the suite binds a PORT PAIR — PW_PORT for the bundled server and
+// PW_SRC_PORT (default PW_PORT+1) for the source-mode one below. Concurrent
+// worktree runs must pick PW_PORTs at least 2 apart (or set PW_SRC_PORT).
 const PORT = process.env.PW_PORT || '4150';
+// Second server in SOURCE mode (importmap + raw modules — what `npm run dev`
+// serves). Only source-mode.spec.js targets it; everything else runs bundled.
+const SRC_PORT = process.env.PW_SRC_PORT || String(Number(PORT) + 1);
+process.env.PW_SRC_PORT = SRC_PORT; // single source of truth — specs read this, never re-derive
 
 module.exports = defineConfig({
   testDir: './tests/e2e',
@@ -35,12 +42,23 @@ module.exports = defineConfig({
     ignoreHTTPSErrors: true,
     viewport: { width: 1280, height: 720 }, // desktop display by default; controllers resize per page
   },
-  webServer: {
-    // Build first: E2E exercises the content-hashed bundles — the exact
-    // artifact prod serves — not the raw source modules.
-    command: 'node scripts/build.js && node server/index.js',
-    env: { ...process.env, PORT },
-    port: Number(PORT),
-    reuseExistingServer: false,
-  },
+  webServer: [
+    {
+      // Build first: E2E exercises the content-hashed bundles — the exact
+      // artifact prod serves — not the raw source modules.
+      command: 'node scripts/build.js && node server/index.js',
+      env: { ...process.env, PORT },
+      port: Number(PORT),
+      reuseExistingServer: false,
+    },
+    {
+      // Source mode (USE_BUNDLES=0): keeps the importmap + marker-block script
+      // tags honest — a broken dev page would otherwise ship with the whole
+      // bundled suite green. Exercised by source-mode.spec.js only.
+      command: 'node server/index.js',
+      env: { ...process.env, PORT: SRC_PORT, USE_BUNDLES: '0' },
+      port: Number(SRC_PORT),
+      reuseExistingServer: false,
+    },
+  ],
 });

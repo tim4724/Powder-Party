@@ -5,8 +5,9 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
+# Only the build's actual inputs — server/ is copied straight into the runtime
+# stage below, so a server-only edit doesn't bust the esbuild+prune layer.
 COPY scripts/ ./scripts/
-COPY server/ ./server/
 COPY public/ ./public/
 COPY partyplug/ ./partyplug/
 COPY vendor/ ./vendor/
@@ -18,7 +19,7 @@ RUN addgroup -g 1001 nodejs && adduser -u 1001 -G nodejs -s /bin/sh -D nodejs
 WORKDIR /app
 COPY --from=builder /app/node_modules ./node_modules
 COPY package.json ./
-COPY --from=builder /app/server ./server/
+COPY server/ ./server/
 # public/ now carries the hashed bundles; dist/ the manifest the server reads.
 COPY --from=builder /app/public ./public/
 COPY --from=builder /app/dist ./dist/

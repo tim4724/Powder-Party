@@ -62,13 +62,28 @@ function writeHashed(app, kind, code, map) {
 
 // Sweep stale content-hashed bundles (+ .map) so repeated local builds don't
 // leave orphans. Source files lack the `.boot.`/`.app.` + hash segment and are
-// untouched. (CI/Docker build from a clean tree, so this only matters locally.)
-function sweepStale(app) {
+// untouched. The bundles named by the CURRENT dist/web-manifest.json are kept:
+// a server that loaded that manifest at boot may still be running, and pulling
+// its files out from under it would 404 every page it serves. They become
+// unreferenced after this build writes the new manifest and are swept by the
+// build after that. (CI/Docker build from a clean tree, so all of this only
+// matters locally.)
+function sweepStale(app, keep) {
   const dir = path.join(ROOT, 'public', app);
   const stale = new RegExp(`^${app}\\.(boot|app)\\.[0-9a-f]{10}\\.js`);
   for (const f of fs.readdirSync(dir)) {
-    if (stale.test(f)) fs.rmSync(path.join(dir, f));
+    if (stale.test(f) && !keep.has(f) && !keep.has(f.replace(/\.map$/, ''))) {
+      fs.rmSync(path.join(dir, f));
+    }
   }
+}
+
+// Filenames the currently-deployed manifest references (empty when absent).
+function liveManifestFiles() {
+  try {
+    const m = JSON.parse(fs.readFileSync(path.join(ROOT, 'dist', 'web-manifest.json'), 'utf8'));
+    return new Set(Object.values(m).flatMap((e) => [e.boot, e.app]));
+  } catch (_) { return new Set(); }
 }
 
 async function buildBoot(app, scripts) {
@@ -96,7 +111,7 @@ async function buildApp(app, entry) {
     target: TARGET,
     minify: true,
     sourcemap: 'external',
-    legalComments: 'none',
+    legalComments: 'eof', // keep the vendored Three.js MIT notice in the shipped bundle
     // The dev importmap's mapping, resolved at build time instead.
     alias: { three: path.join(ROOT, 'vendor', 'three', 'three.module.js') },
     outfile: `${app}.app.js`, // names the outputs; nothing is written (write:false)
@@ -104,8 +119,10 @@ async function buildApp(app, entry) {
   });
   let code = null, map = null;
   for (const out of result.outputFiles) {
+    // sourcemap:'external' emits no sourceMappingURL comment — writeHashed
+    // appends one pointing at the hashed .map name.
     if (out.path.endsWith('.map')) map = out.text;
-    else code = out.text.replace(/\n?\/\/# sourceMappingURL=.*\n?$/, '');
+    else code = out.text;
   }
   return writeHashed(app, 'app', code, map);
 }
@@ -115,8 +132,9 @@ async function main() {
   const manifest = {};
   // Apps are independent (different output dirs) — build them concurrently;
   // `npm start` runs this on every boot, so keep it quick.
+  const keep = liveManifestFiles();
   await Promise.all(Object.entries(APPS).map(async ([app, cfg]) => {
-    sweepStale(app);
+    sweepStale(app, keep);
     const [boot, appFile] = await Promise.all([
       buildBoot(app, cfg.boot),
       buildApp(app, cfg.entry),
