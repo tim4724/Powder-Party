@@ -1,7 +1,14 @@
 # Build stage — full deps (esbuild) to build the content-hashed web bundles
 # (scripts/build.js writes into public/ + dist/), then prune to the production
 # deps (qrcode) for the runtime image.
-FROM node:20-alpine AS builder
+#
+# Pinned to $BUILDPLATFORM: in the multi-arch CI build the arm64 half otherwise
+# runs node/npm under QEMU, which SIGILLs and hangs npm ci for the full 6h job
+# limit (seen on main). Everything this stage emits is arch-independent — the
+# bundles/manifest are static files and the pruned prod tree (qrcode) is pure
+# JS, no install scripts — so building it once on the native host and COPYing
+# into each platform's runtime image is safe.
+FROM --platform=$BUILDPLATFORM node:20-alpine AS builder
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci

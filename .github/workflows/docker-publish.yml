@@ -23,6 +23,9 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # A healthy multi-arch build takes ~2-10 min; without a cap a wedged QEMU
+    # layer (npm under emulation) burns the 6h default before failing.
+    timeout-minutes: 30
     outputs:
       sha_tag: ${{ steps.out.outputs.sha_tag }}
       branch_tag: ${{ steps.out.outputs.branch_tag }}
