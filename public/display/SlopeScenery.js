@@ -71,6 +71,9 @@ export function debugSkierCapsule(radius, halfLen, color) {
 // gate (the chase cam parks up-slope of the grid and must not look into the
 // void) and a little extra past the flat finish apron (so the ground never ends
 // exactly where a skier can coast to). The physics centerline is unchanged.
+// MESH_OUT is that past-the-apron stretch — shared with the bowl forest, which
+// plants trees around the end-bowl centred on this same point.
+const MESH_OUT = 18;
 export function extendMeshSamples(samples) {
   const meshSamples = samples.slice();
   {
@@ -91,9 +94,9 @@ export function extendMeshSamples(samples) {
     flatT.normalize();
     const lateral = flatT.clone().cross(_up).normalize();
     if (lateral.dot(fE.lateral) < 0) lateral.negate(); // align with the run's side → no twist at the join
-    const OUT = 18, STEPS = 4;
+    const STEPS = 4;
     for (let k = 1; k <= STEPS; k++) {
-      const d = (OUT * k) / STEPS;
+      const d = (MESH_OUT * k) / STEPS;
       meshSamples.push({
         pos: new THREE.Vector3(fE.pos.x + flatT.x * d, fE.pos.y, fE.pos.z + flatT.z * d),
         tangent: flatT.clone(), up: _up.clone(), lateral: lateral.clone(),
@@ -189,6 +192,42 @@ export function addTerrain(group, meshSamples, pisteHalf, edgeLat, groundY) {
   addSlopeStrip(group, meshSamples, edgeLat, edgeLat + 26, 0, 14, wallMat);
   addSlopeStrip(group, meshSamples, edgeLat + 26, edgeLat + 72, 14, 48, wallMat);
   addFlanks(group, meshSamples, edgeLat, groundY);
+  addEndBowl(group, meshSamples[meshSamples.length - 1], edgeLat, deepMat, wallMat);
+}
+
+// The end bowl: the valley's cross-profile revolved 180° around the run's end,
+// so the SAME walls that flank the run (same rings, same materials) wrap around
+// and close it — the run dead-ends into its own mountain instead of fog. The
+// seam is the final mesh cross-section: each ±90° spoke reproduces the strip
+// profile it continues (flat shoulder → 14u wall → 48u wall), so the bowl butts
+// onto the strip ends with no overlap and no gap.
+function addEndBowl(group, fE, edgeLat, deepMat, wallMat) {
+  const T = new THREE.Vector3(fE.tangent.x, 0, fE.tangent.z).normalize(); // flat + horizontal by construction (extendMeshSamples)
+  const L = fE.lateral;
+  const K = 24; // spokes across the half-circle
+  const rings = [
+    { rA: 0.5, rB: edgeLat, riseA: 0, riseB: 0, mat: deepMat },           // flat deep-snow apron around the arena
+    { rA: edgeLat, rB: edgeLat + 26, riseA: 0, riseB: 14, mat: wallMat }, // rising walls, mirroring addTerrain
+    { rA: edgeLat + 26, rB: edgeLat + 72, riseA: 14, riseB: 48, mat: wallMat },
+  ];
+  for (const ring of rings) {
+    const pos = new Float32Array((K + 1) * 2 * 3);
+    for (let i = 0; i <= K; i++) {
+      const phi = -Math.PI / 2 + (Math.PI * i) / K;
+      const dx = T.x * Math.cos(phi) + L.x * Math.sin(phi);
+      const dz = T.z * Math.cos(phi) + L.z * Math.sin(phi);
+      const a = i * 6;
+      pos[a] = fE.pos.x + dx * ring.rA; pos[a + 1] = fE.pos.y + ring.riseA; pos[a + 2] = fE.pos.z + dz * ring.rA;
+      pos[a + 3] = fE.pos.x + dx * ring.rB; pos[a + 4] = fE.pos.y + ring.riseB; pos[a + 5] = fE.pos.z + dz * ring.rB;
+    }
+    const idx = [];
+    for (let i = 0; i < K; i++) { const p = i * 2; idx.push(p, p + 1, p + 2, p + 1, p + 3, p + 2); }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    group.add(new THREE.Mesh(g, ring.mat));
+  }
 }
 
 // Mountainside flanks: a strip per side from the outer wall ring (lateral
@@ -317,44 +356,38 @@ function addOuterTrees(group, samples, edgeLat, groundY, rnd) {
   addPineInstances(group, place);
 }
 
-// Both decorative forests, seeded off the slope id (two independent streams so
-// tweaking one doesn't shift the other). `bankGroup` renders always; the
+// Pines over the end bowl's rising walls (addEndBowl), so the closing mountain
+// carries the same forest texture as the side banks instead of reading as one
+// bare clean sheet. Same polar frame as the bowl: centred MESH_OUT past the
+// apron end, r/rise mirroring the bank scatter via the shared riseAt profile.
+function addBowlForest(group, samples, edgeLat, rnd) {
+  const fL = samples[samples.length - 1]; // apron end (the centerline's last sample)
+  const T = new THREE.Vector3(fL.tangent.x, 0, fL.tangent.z);
+  if (T.lengthSq() < 1e-6) T.set(0, 0, 1);
+  T.normalize();
+  const L = new THREE.Vector3().crossVectors(T, _up).normalize();
+  const cx = fL.pos.x + T.x * MESH_OUT, cz = fL.pos.z + T.z * MESH_OUT;
+  const place = [];
+  for (let i = 0; i < 26; i++) {
+    const phi = (rnd() - 0.5) * Math.PI;         // across the half-circle
+    const r = edgeLat + 3 + rnd() * 58;          // same band as the bank scatter
+    const scl = 0.8 + rnd() * 1.9;
+    const rotY = rnd() * Math.PI * 2;
+    const dx = T.x * Math.cos(phi) + L.x * Math.sin(phi);
+    const dz = T.z * Math.cos(phi) + L.z * Math.sin(phi);
+    place.push({ x: cx + dx * r, y: fL.pos.y + riseAt(r, edgeLat), z: cz + dz * r, scl, rotY });
+  }
+  addPineInstances(group, place);
+}
+
+// The decorative forests, seeded off the slope id (independent streams so
+// tweaking one doesn't shift the others). `bankGroup` renders always; the
 // instanced outer forest goes in `lobbyGroup` (overview camera only).
 export function addForests(bankGroup, lobbyGroup, samples, edgeLat, groundY, slopeId) {
   const seed = hashStr(slopeId || 'slope');
   addBankForest(bankGroup, samples, edgeLat, mulberry32(seed));
   addOuterTrees(lobbyGroup, samples, edgeLat, groundY, mulberry32(seed ^ 0x9e3779b9));
-}
-
-// A FULL ring of big low-poly snow peaks encircling the run — the distant range
-// that frames the lobby orbit from every angle. Placed safely beyond the orbit
-// radius and BASED ON THE VALLEY FLOOR so they tower like real mountains rather
-// than float as chips.
-export function addPeaks(group, center, orbitRadius, floorY) {
-  const R = (orbitRadius || 200) * 1.45;        // ring radius — well outside the camera orbit
-  // emissive lifts the shaded faces toward a cool snowy white (distant peaks are
-  // hazy/bright), so they read as snow mountains rather than dark grey pyramids.
-  const snow = new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0xc6d2e0, emissiveIntensity: 0.18, flatShading: true });
-  const N = 16;
-  // ONE instanced unit cone, scaled non-uniformly per peak (a cone is linear, so a
-  // unit cone scaled (r,h,r) is identical to ConeGeometry(r,h,5,1)) → 1 draw call.
-  const im = new THREE.InstancedMesh(new THREE.ConeGeometry(1, 1, 5, 1), snow, N);
-  const q = new THREE.Quaternion(), p = new THREE.Vector3(), sc = new THREE.Vector3(), m4 = new THREE.Matrix4();
-  for (let i = 0; i < N; i++) {
-    // even spacing + alternating jitter → organic but never a gap.
-    const ang = (i / N) * Math.PI * 2 + (i % 2 ? 0.17 : -0.13);
-    const dist = R * (0.92 + (i % 3) * 0.16);
-    const h = 210 + (i % 4) * 50 + (i % 2) * 44;  // ~210..390
-    const r = h * 0.62;
-    p.set(center.x + Math.cos(ang) * dist, floorY + h / 2, center.z + Math.sin(ang) * dist);
-    q.setFromAxisAngle(_up, ang * 1.7);
-    sc.set(r, h, r);
-    m4.compose(p, q, sc);
-    im.setMatrixAt(i, m4);
-  }
-  im.instanceMatrix.needsUpdate = true;
-  im.frustumCulled = false; // the ring encircles the whole scene; an origin-centred bound would wrongly cull it
-  group.add(im);
+  addBowlForest(bankGroup, samples, edgeLat, mulberry32(seed ^ 0x3c6ef372));
 }
 
 // ---- props ----------------------------------------------------------------
@@ -686,5 +719,217 @@ export class FinishGate {
     pos.needsUpdate = true;
     this._bar.geometry.computeVertexNormals();
     this._easing = false;
+  }
+}
+
+// ---- finish arena ----------------------------------------------------------
+// Everything that makes the flat run-out past the line read as a DESTINATION
+// instead of the piste quietly ending: a U of sponsor banners around the stop
+// zone and an instanced crowd behind them that jumps when someone crosses —
+// addEndBowl's walls close the valley behind it and the distance fog does the
+// rest. Purely decorative — the engine's FINISH_BRAKE stops every
+// skier ≥1u before the apron end (see SkiEngine), so nothing here needs a
+// hitbox; the fences sit outside that reachable envelope.
+//
+// Built in the apron's local frame (X cross-slope, Y up, Z down-slope), origin
+// at the APRON END — the apron is dead flat and straight (SlopeBuilder
+// appendOutrun), so one basis places the whole arena. Local -Z runs back toward
+// the finish line at z = -(apron length); +Z is beyond the run's end.
+
+// Banner print, baked once per variant and cached module-wide (same rationale
+// as checkerTexture: _disposeGroup frees materials but not textures, so a
+// per-setTrack bake would leak). Panels repeat trackside like real event
+// sponsor boards — variant A is the game, B the shared "Sunny Circuit" brand.
+const _bannerCache = new Map();
+function bannerTexture(variant) {
+  const cached = _bannerCache.get(variant);
+  if (cached) return cached;
+  const W = 640, H = 200;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+  const dark = '#1c2433', amber = '#f2b134';
+  ctx.fillStyle = variant === 'a' ? dark : amber;
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = variant === 'a' ? amber : dark;
+  ctx.fillRect(0, H - 14, W, 14);                       // base stripe
+  const text = variant === 'a' ? 'POWDER PARTY' : 'SUNNY CIRCUIT';
+  ctx.fillStyle = variant === 'a' ? '#f4f7fb' : dark;
+  let size = 92;                                        // shrink-to-fit inside side pads
+  do { ctx.font = `900 ${size}px system-ui, -apple-system, sans-serif`; size -= 4; }
+  while (size > 40 && ctx.measureText(text).width > W - 90);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(text, W / 2, H / 2 - 4);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  _bannerCache.set(variant, tex);
+  return tex;
+}
+
+const PANEL_W = 3.2, PANEL_H = 1.0, PANEL_PITCH = PANEL_W + 0.5;
+const CHEER_DUR = 3.2;   // s of crowd jumping per finisher (retriggered each crossing)
+const CHEER_FADE = 0.9;  // final s of the cheer eases the jumps back down
+// Jacket/hat palette: the player suit colours plus winter-wear neutrals, so the
+// crowd reads as "everyone's friends watching", not a copy of the field.
+const CROWD_COLORS = [
+  0xe6492d, 0xf2b134, 0x2bb673, 0x2d9cdb, 0x9b51e0, 0xeb5e9c, 0xf2784b, 0x56ccf2,
+  0x3b4a5f, 0x8a97a8, 0xf0e9dc, 0x25303e,
+];
+
+export class FinishArena {
+  constructor(group, cl, finishS, pisteHalf, slopeId) {
+    const apron = cl.length - finishS;                  // flat run-out length (SlopeBuilder FINISH_APRON)
+    const fE = cl.sampleAt(cl.length);                  // apron-end frame: up = world-up, tangent horizontal
+    const up = fE.up.clone().normalize();
+    const tangent = fE.tangent.clone().normalize();
+    const bx = new THREE.Vector3().crossVectors(up, tangent).normalize();
+    const g = new THREE.Group();
+    g.position.copy(fE.pos);
+    g.quaternion.setFromRotationMatrix(_basis.makeBasis(bx, up, tangent));
+    group.add(g);
+    this._t = 0;
+    this._cheerT = 0;
+
+    const rnd = mulberry32(hashStr(slopeId || 'slope') ^ 0x51f15a1e); // own stream — tweaking the forests must not reshuffle the crowd
+    const fenceX = pisteHalf + 1.6;                     // just outside the groomed edge (skiers straighten + brake, they can't drift here)
+
+    // -- banner U: two side runs down the apron edges + a back run past the stop
+    //    zone, each a from→to segment with its print (yaw) turned toward the piste.
+    const zTop = -(apron - 8);                          // start 8u past the line — the apron's first samples still blend off the hill
+    const runs = [
+      { fx: -fenceX, fz: zTop, tx: -fenceX, tz: -0.6, yaw: Math.PI / 2 },  // left edge, facing +X (the piste)
+      { fx: fenceX,  fz: zTop, tx: fenceX,  tz: -0.6, yaw: -Math.PI / 2 }, // right edge, facing -X
+      { fx: -fenceX, fz: 1.4,  tx: fenceX,  tz: 1.4,  yaw: Math.PI },     // back row, facing up-slope
+    ];
+    const panels = { a: [], b: [] };
+    const posts = [];
+    for (const r of runs) {
+      const dx = r.tx - r.fx, dz = r.tz - r.fz;
+      const len = Math.hypot(dx, dz);
+      const ux = dx / len, uz = dz / len;
+      const n = Math.max(1, Math.floor(len / PANEL_PITCH));
+      const start = (len - ((n - 1) * PANEL_PITCH)) / 2; // centre the row of panels along the run
+      for (let i = 0; i < n; i++) {
+        const d = start + i * PANEL_PITCH;
+        const x = r.fx + ux * d, z = r.fz + uz * d;
+        panels[(panels.a.length + panels.b.length) % 2 ? 'b' : 'a'].push({ x, z, yaw: r.yaw });
+        posts.push({ x: x - ux * (PANEL_W / 2 + 0.1), z: z - uz * (PANEL_W / 2 + 0.1) });
+        posts.push({ x: x + ux * (PANEL_W / 2 + 0.1), z: z + uz * (PANEL_W / 2 + 0.1) });
+      }
+    }
+    // Panel base floats a hair above the snow so the bottom edge can't z-fight the flat apron.
+    const panelGeo = new THREE.PlaneGeometry(PANEL_W, PANEL_H).translate(0, PANEL_H / 2 + 0.06, 0);
+    const q = new THREE.Quaternion(), p = new THREE.Vector3(), sc = new THREE.Vector3(1, 1, 1), m4 = new THREE.Matrix4();
+    for (const v of ['a', 'b']) {
+      const list = panels[v];
+      if (!list.length) continue;
+      const im = new THREE.InstancedMesh(panelGeo,
+        new THREE.MeshLambertMaterial({ map: bannerTexture(v), side: THREE.DoubleSide }), list.length);
+      list.forEach((pl, k) => {
+        q.setFromAxisAngle(_up, pl.yaw); p.set(pl.x, 0, pl.z);
+        im.setMatrixAt(k, m4.compose(p, q, sc));
+      });
+      im.instanceMatrix.needsUpdate = true;
+      im.frustumCulled = false;                          // arena-wide spans; convention for every instanced set here
+      g.add(im);
+    }
+    {
+      const im = new THREE.InstancedMesh(
+        new THREE.CylinderGeometry(0.055, 0.055, PANEL_H + 0.22, 6).translate(0, (PANEL_H + 0.22) / 2, 0),
+        new THREE.MeshLambertMaterial({ color: 0x161922 }), posts.length); // charcoal, like the gate frame
+      posts.forEach((po, k) => {
+        p.set(po.x, 0, po.z); q.identity();
+        im.setMatrixAt(k, m4.compose(p, q, sc));
+      });
+      im.instanceMatrix.needsUpdate = true;
+      im.frustumCulled = false;
+      g.add(im);
+    }
+
+    // -- crowd: loose rows behind the fences — two per side, three across the back.
+    //    Same body recipe as the skiers (capsule + head + hat, no arms) so they share
+    //    the game's figure style; base-origin geometry so compose() plants the feet.
+    const spects = [];
+    const addSpect = (x, z, face) => spects.push({
+      x: x + (rnd() - 0.5) * 0.7, z: z + (rnd() - 0.5) * 0.8,
+      yaw: face + (rnd() - 0.5) * 0.9,                  // roughly watching the piste, nobody at parade rest
+      scl: 0.78 + rnd() * 0.34,                         // adults + a few kids
+      jump: 0.14 + rnd() * 0.22, freq: 5 + rnd() * 2.5, phase: rnd() * Math.PI * 2, // per-fan enthusiasm
+    });
+    for (const side of [-1, 1]) {
+      for (let row = 0; row < 2; row++) {
+        const x = side * (fenceX + 1.3 + row * 1.5);
+        for (let z = zTop + 1; z <= -2; z += 1.7) {
+          if (rnd() < 0.28) continue;                    // gaps — a loose crowd, not a rank
+          addSpect(x, z, side > 0 ? -Math.PI / 2 : Math.PI / 2);
+        }
+      }
+    }
+    for (let row = 0; row < 3; row++) {
+      const z = 3.0 + row * 1.4;
+      for (let x = -(pisteHalf + 2.5); x <= pisteHalf + 2.5; x += 1.5) {
+        if (rnd() < 0.2) continue;
+        addSpect(x, z, Math.PI);
+      }
+    }
+    this._spects = spects;
+    const N = spects.length;
+    const white = () => new THREE.MeshLambertMaterial({ color: 0xffffff }); // per-instance colour multiplies the base
+    this._crowdParts = [
+      new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.24, 0.34, 4, 10).translate(0, 0.53, 0), white(), N),
+      new THREE.InstancedMesh(new THREE.SphereGeometry(0.19, 12, 10).translate(0, 0.98, 0),
+        new THREE.MeshLambertMaterial({ color: 0xf0c9a0 }), N),
+      new THREE.InstancedMesh(new THREE.SphereGeometry(0.21, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2).translate(0, 1.02, 0), white(), N),
+    ];
+    const col = new THREE.Color();
+    for (let k = 0; k < N; k++) {
+      this._crowdParts[0].setColorAt(k, col.setHex(CROWD_COLORS[Math.floor(rnd() * CROWD_COLORS.length)]));
+      this._crowdParts[2].setColorAt(k, col.setHex(CROWD_COLORS[Math.floor(rnd() * CROWD_COLORS.length)]));
+    }
+    for (const im of this._crowdParts) { im.frustumCulled = false; g.add(im); }
+    this._pose(0, 0);                                   // plant everyone (also uploads the matrices)
+  }
+
+  // Cheer when a skier's finished flag flips on (called per posed frame from the
+  // renderer, humans and CPU alike). `holder` stashes the seen-flag, FinishGate
+  // poke-style; it clears itself when the next run resets `finished`.
+  poke(s, holder) {
+    if (s.finished && !s.dnf) {
+      if (!holder._cheered) { holder._cheered = true; this.cheer(); }
+    } else holder._cheered = false;
+  }
+
+  cheer() { this._cheerT = CHEER_DUR; }
+
+  // Costs nothing once settled (like FinishGate): matrices only recompose while
+  // a cheer is live, then one final pass plants everyone again.
+  update(dt) {
+    if (this._cheerT <= 0) return;
+    this._t += dt;
+    this._cheerT -= dt;
+    if (this._cheerT <= 0) { this._pose(0, 0); return; }
+    this._pose(Math.min(1, this._cheerT / CHEER_FADE), this._t);
+  }
+
+  // Re-plant every spectator at jump envelope `env` (0 = feet on the snow):
+  // each fan hops on their own frequency/phase so the crowd boils rather than
+  // bouncing in lockstep.
+  _pose(env, t) {
+    const q = new THREE.Quaternion(), p = new THREE.Vector3(), sc = new THREE.Vector3(), m4 = new THREE.Matrix4();
+    for (let k = 0; k < this._spects.length; k++) {
+      const sp = this._spects[k];
+      const y = env > 0 ? env * sp.jump * Math.abs(Math.sin(sp.freq * t + sp.phase)) : 0;
+      q.setFromAxisAngle(_up, sp.yaw); p.set(sp.x, y, sp.z); sc.setScalar(sp.scl);
+      m4.compose(p, q, sc);
+      for (const im of this._crowdParts) im.setMatrixAt(k, m4);
+    }
+    for (const im of this._crowdParts) im.instanceMatrix.needsUpdate = true;
+  }
+
+  // Settle the crowd for a fresh run (called with the poles/gate reset).
+  reset() {
+    if (this._cheerT > 0) this._pose(0, 0);
+    this._cheerT = 0;
   }
 }

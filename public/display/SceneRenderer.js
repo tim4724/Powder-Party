@@ -14,8 +14,8 @@ import { SkiTrails } from './SkiTrails.js';
 import { SKI_HALF } from './engine/SkiEngine.js';
 import { PoleField } from './PoleField.js';
 import {
-  extendMeshSamples, resampleMeshRows, addTerrain, addPeaks, addForests,
-  addRamp, addObstacle, addSnowLine, FinishGate, debugSkierCapsule,
+  extendMeshSamples, resampleMeshRows, addTerrain, addForests,
+  addRamp, addObstacle, addSnowLine, FinishGate, FinishArena, debugSkierCapsule,
 } from './SlopeScenery.js';
 
 // ---- camera + feel constants (starting values) --------------------------
@@ -45,6 +45,13 @@ const CELL_DOLLY = 0.75;    // short-cell compensation: the WHOLE rig (cam + loo
                             // size while preserving the full-screen composition (all angles unchanged —
                             // a lens-zoom was tried instead and cropped the skier at the cell bottom)
 const LOBBY_ORBIT_SPEED = 0.12; // rad/s
+// Ground-level fog curve (chase cells + the lobby 'race' attract follow). The
+// track-scaled lobby curve (setTrack) starts past every gameplay sightline, so
+// from the low cams the world looked fog-FREE — these absolute distances put
+// visible mist down every course: crisp through the ~80u action zone, milky
+// mid-distance, gone by ~360u (the finish arena emerges from the fog on approach).
+const FOG_GROUND_NEAR = 55;
+const FOG_GROUND_FAR = 360;
 
 const BANK_MAX = 0.5;       // body bank (rad) into a full carve
 const AIR_PITCH_GAIN = 1.25;// exaggerate the trajectory pitch a touch so the launch reads on a small cell (1 = physical)
@@ -80,6 +87,7 @@ export class SceneRenderer {
     this.onPoleHit = null;     // (kick 0.35..1.4) — an edge pole snapped off; impact-speed scale for SFX
     this.poles = null;         // PoleField, built per setTrack
     this.finishGate = null;    // FinishGate (post bends when clipped), built per setTrack
+    this.finishArena = null;   // FinishArena (banner U + cheering crowd), built per setTrack
     this.orbit = false;
     this.camMode = 'chase';    // 'chase' (default follow rig) | 'side' (profile rig for the labs — setCamMode)
     // Lobby/attract camera: 'race' (follow the live attract pack — the live lobby's
@@ -176,16 +184,22 @@ export class SceneRenderer {
     // itself needs no further handle now that there's no shadow map to drive.)
     this._sunAway = key.position.clone().negate().normalize();
 
-    // Surrounding snow field (the slope ribbon sits on top of it).
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(1200, 1200),
-      // surrounding off-piste snow: same cool/darker family as the deep-snow shoulders.
-      new THREE.MeshLambertMaterial({ color: 0xbac9dd })
+    // Sky dome — replaces BOTH the flat sky colour and the old floor plane.
+    // A fog-coloured plate still read as a plate: a flat surface meeting a
+    // different-coloured sky in a razor-straight horizon. The dome removes the
+    // surface entirely: solid fog colour everywhere below the horizon, blending
+    // into sky blue above it — so under and beyond the valley there is only
+    // mist, with no edge for the eye to catch. Unlit, un-fogged (the gradient IS
+    // the haze), drawn first and never writing depth so the world always renders
+    // on top. Centred/scaled per track in setTrack.
+    const sky = new THREE.Mesh(
+      new THREE.SphereGeometry(1, 32, 24),
+      new THREE.MeshBasicMaterial({ map: this._makeSkyTexture(), side: THREE.BackSide, fog: false, depthWrite: false })
     );
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -2;
-    scene.add(ground);
-    this.ground = ground;
+    sky.renderOrder = -1;
+    sky.frustumCulled = false; // the camera lives inside it
+    scene.add(sky);
+    this.sky = sky;
 
     this.slopeGroup = new THREE.Group(); scene.add(this.slopeGroup);
     this.propGroup = new THREE.Group(); scene.add(this.propGroup);
@@ -210,6 +224,28 @@ export class SceneRenderer {
     o.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:3;';
     this.container.appendChild(o);
     this.overlay = o;
+  }
+
+  // Vertical gradient for the sky dome: solid fog colour from the nadir up to
+  // just under the equator (the sea of mist), a soft blend band across the
+  // horizon, then clear alpine blue overhead. SphereGeometry maps v=1 at the
+  // top pole; CanvasTexture flipY puts canvas row 0 there — so the canvas is
+  // painted sky-first.
+  _makeSkyTexture() {
+    const H = 256;
+    const c = document.createElement('canvas');
+    c.width = 2; c.height = H;
+    const ctx = c.getContext('2d');
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#bfe3f7');    // zenith: the old flat sky colour
+    g.addColorStop(0.38, '#bfe3f7'); // hold blue well above the horizon
+    g.addColorStop(0.52, '#d4e2f1'); // soft haze band into the fog colour
+    g.addColorStop(1, '#d4e2f1');    // everything below the horizon: mist
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 2, H);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
   }
 
   // Soft radial blob (dark centre fading to transparent) for a subtle contact
@@ -322,6 +358,8 @@ export class SceneRenderer {
     addSnowLine(this.propGroup, cl, track.length - 0.2, pisteHalf, 0x14171d, 0.5); // finish: black snow line under the gate
     // finish: checkered gate at the piste edge — its posts are 'post' obstacles (engine wipes you out); the clipped post bends + stays
     this.finishGate = new FinishGate(this.propGroup, cl, track.length - 0.2, pisteHalf);
+    // finish arena: the banner corral + cheering crowd on the flat apron past the line
+    this.finishArena = new FinishArena(this.propGroup, cl, track.length, pisteHalf, track.def && track.def.id);
     if (decals) { const gf = cl.sampleAt(track.length - 0.2); for (const side of [-1, 1]) this._addContactShadow(gf, side * pisteHalf, 0.4, 0.75); } // two gate-post bases (stretched down-sun)
 
     // Overview framing for the lobby turntable.
@@ -339,19 +377,24 @@ export class SceneRenderer {
     this._ovHeight = ovOff.y;
     this._orbitAngle = Math.atan2(ovOff.z, ovOff.x); // start the orbit where the static frame sits (no first-frame snap)
 
-    // Valley floor: centre the snow plane UNDER the whole run and grow it to cover
-    // out past the peaks. It sits at the finish elevation so the flanks meet it
-    // seamlessly.
-    const groundSpan = Math.max(size.x, size.z) + this._ovRadius * 3;
-    this.ground.position.set(this._trackCenter.x, groundY, this._trackCenter.z);
-    this.ground.scale.set(groundSpan / 1200, groundSpan / 1200, 1);
+    // Sky dome: centre it on the track, comfortably outside every camera (the
+    // lobby orbit reaches ~1.2R) and inside the far planes (max(1200, 4.4R)).
+    // Its lower half is the "valley floor" now — a bowl of solid mist colour.
+    this.sky.position.copy(this._trackCenter);
+    this.sky.scale.setScalar(Math.max(600, this._ovRadius * 3));
 
-    // Scale fog + the far-planes to the ACTUAL track size, keyed off the lobby
-    // orbit radius — so the encircling peaks stay crisp up close and only haze
-    // out in the far distance, on any length of run.
+    // Scale the OVERVIEW fog to the actual track size, keyed off the lobby orbit
+    // radius, so the turntable always shows the whole mountain fading into mist.
+    // The low cameras don't use this curve — _loop swaps in the fixed ground-level
+    // one (FOG_GROUND_*) for chase cells and the attract follow, where a
+    // track-scaled near would start past every sightline and read as no fog at
+    // all. There is NOTHING beyond the valley either way — no peak ring, no
+    // floor plane, just the sky dome's mist gradient (see _initThree) — so
+    // everything outside the slope reads as one sea of fog under the blue sky.
     const R = this._ovRadius || 200;
-    this.scene.fog.near = R * 0.55;
-    this.scene.fog.far = R * 2.9;
+    this._fogLobby = [R * 0.32, R * 1.55];
+    this.scene.fog.near = this._fogLobby[0];
+    this.scene.fog.far = this._fogLobby[1];
     this._camFar = Math.max(1200, R * 4.4);
     this.overview.far = this._camFar;
     this.overview.updateProjectionMatrix();
@@ -360,8 +403,8 @@ export class SceneRenderer {
     // already exist (skiers are normally added after setTrack, but be safe).
     for (const c of this.skiers.values()) { if (c.cam) { c.cam.far = this._camFar; c.cam.updateProjectionMatrix(); } }
 
-    // distant snow peaks + the alpine forests → a snowy mountain
-    addPeaks(this.slopeGroup, this._trackCenter, this._ovRadius, this.ground.position.y);
+    // the alpine forests → a snowy mountain (no distant peak ring — the world
+    // past the valley is deliberately nothing but the fog deck)
     addForests(this.slopeGroup, this.lobbyGroup, samples, edgeLat, groundY, track.def && track.def.id);
   }
 
@@ -577,6 +620,7 @@ export class SceneRenderer {
 
     if (this.poles) this.poles.poke(s, c);
     if (this.finishGate) this.finishGate.poke(s, c);
+    if (this.finishArena) this.finishArena.poke(s, c); // crowd cheers each fresh crossing (humans + CPU)
   }
 
   // Wipe all tracks + stand every knocked pole back up (called at the start of
@@ -585,6 +629,7 @@ export class SceneRenderer {
     if (this.trails) this.trails.clear();
     if (this.poles) this.poles.reset();
     if (this.finishGate) this.finishGate.reset();
+    if (this.finishArena) this.finishArena.reset();
   }
 
   setSkierHud(id, info) {
@@ -762,6 +807,7 @@ export class SceneRenderer {
     if (this.onFrame) this.onFrame(dt);
     if (this.poles) this.poles.update(dt); // after onFrame: same-frame response to this tick's pokes
     if (this.finishGate) this.finishGate.update(dt);
+    if (this.finishArena) this.finishArena.update(dt);
     // Walk the (large, mostly-static) scene graph ONCE per frame. All transform
     // mutations (skier poses, pole/gate animation) happen above; render() no longer
     // auto-walks it per viewport (scene.matrixWorldAutoUpdate is off).
@@ -807,11 +853,19 @@ export class SceneRenderer {
         }
         cam.lookAt(this._ovTarget);
       }
+      // The 'race' attract follows the pack at gameplay height → ground fog;
+      // the wide orbit/static overview keeps the track-scaled curve.
+      const fog = framed && this._followInit ? [FOG_GROUND_NEAR, FOG_GROUND_FAR] : (this._fogLobby || [110, 360]);
+      this.scene.fog.near = fog[0];
+      this.scene.fog.far = fog[1];
       r.render(this.scene, cam);
       requestAnimationFrame((tt) => this._loop(tt));
       return;
     }
 
+    // Split-screen chase cells ride at gameplay height → the ground fog curve.
+    this.scene.fog.near = FOG_GROUND_NEAR;
+    this.scene.fog.far = FOG_GROUND_FAR;
     const { cols, rows } = bestGrid(ids.length, W, H);
     const cw = Math.floor(W / cols), ch = Math.floor(H / rows);
     ids.forEach((id, i) => {
