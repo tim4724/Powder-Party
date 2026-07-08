@@ -1079,10 +1079,16 @@ if (params.get('test') === '1' || scenario) {
   // Goodbye on the way out: closing/navigating the big screen ends the game
   // (a reload creates a brand-new room), so tell the phones NOW — they bail
   // straight to the device chooser instead of sitting out the display-gone
-  // grace window. Best-effort: an unload-time WS send can be dropped (crash,
-  // dead battery, iOS killing the page), which is exactly what the
-  // controller's bail timer still covers.
-  window.addEventListener('pagehide', () => net.broadcast({ type: MSG.DISPLAY_CLOSED }));
+  // grace window — and tear the room down on the relay (closeRoom): every
+  // controller socket gets its terminal 4001 {roomClosed} and GET /room/:code
+  // turns 404, so stale join/claim QRs die with the room. DISPLAY_CLOSED goes
+  // first (same socket, in order) as the app-level goodbye. Best-effort: an
+  // unload-time WS send can be dropped (crash, dead battery, iOS killing the
+  // page), which is exactly what the controller's bail timer still covers.
+  window.addEventListener('pagehide', () => {
+    net.broadcast({ type: MSG.DISPLAY_CLOSED });
+    net.closeRoom();
+  });
 }
 
 // debug hooks

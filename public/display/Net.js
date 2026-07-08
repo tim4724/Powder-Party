@@ -116,7 +116,7 @@ export class DisplayNet extends GameNet {
 
     this.party.onOpen = () => {
       if (this.roomCode) this.party.join(this.roomCode);
-      else this.party.create(MAX_PLAYERS + 1); // +1 for the display itself
+      else this.party.create(MAX_PLAYERS + 1, this._controllerUrlTemplate()); // +1 for the display itself
     };
     this.party.onProtocol = (type, msg) => this._onProtocol(type, msg);
     this.party.onMessage = (from, data) => this._onMessage(from, data);
@@ -149,7 +149,17 @@ export class DisplayNet extends GameNet {
         this._removePeer(msg.index);
         break;
       case 'error':
-        console.warn('[relay]', msg.message);
+        // A rejected CREATE (bad url template, relay hiccup) would otherwise
+        // dead-end silently — the socket is open, so no onclose-driven retry
+        // ever fires. failAttempt() treats it as a failed attempt and drives
+        // the normal backoff/reconnect, which re-creates on the next onOpen.
+        // Join-phase errors (roomCode set) keep the old warn-only behavior.
+        if (!this.roomCode) {
+          console.warn('[relay] create rejected:', msg.message);
+          this.party.failAttempt();
+        } else {
+          console.warn('[relay]', msg.message);
+        }
         break;
     }
   }
@@ -381,10 +391,35 @@ export class DisplayNet extends GameNet {
   sendTo(id, data) { if (this.party) this.party.sendTo(id, data); }
   get roomState() { return this.flow.state; }
 
+  // Goodbye on intentional close/navigate-away: tear the room down on the
+  // relay. Every controller socket gets a 4001 "room closed" (surfaced as
+  // onClose {roomClosed} — their terminal party-over signal) and GET
+  // /room/:code turns 404 right away, so stale rejoin/claim QRs die with the
+  // room. Best-effort on pagehide (bfcache freeze may drop the send); the
+  // DISPLAY_CLOSED broadcast and the controllers' display-gone bail cover
+  // whatever doesn't land. close() last so no auto-reconnect resurrects us.
+  closeRoom() {
+    if (!this.party) return;
+    try { this.party.closeRoom(); } catch (_) {}
+    this.party.close();
+  }
+
   // ---- join URL / QR base ----
   _joinUrl() {
     const base = this.baseUrlOverride || window.location.origin;
     return base + '/' + this.roomCode + (this.instance ? '#' + enc(this.instance) : '');
+  }
+  // Controller-URL template registered with the relay on room create. The relay
+  // fills {room}/{instance} and hands the result to anyone holding only the
+  // room code (native shells via GET /room/:code, controllers in `joined`), so
+  // a code-only join can still resolve which page to load. Mirrors _joinUrl's
+  // shape: instance in the fragment, kept out of request logs. The relay
+  // accepts only absolute https templates and rejects the whole create on an
+  // invalid one, so plain-http origins (local dev, e2e) register none.
+  _controllerUrlTemplate() {
+    const base = (this.baseUrlOverride || window.location.origin).replace(/\/+$/, '');
+    if (!base.startsWith('https://')) return undefined;
+    return base + '/{room}#{instance}';
   }
   async _fetchBaseUrl() {
     const host = window.location.hostname;

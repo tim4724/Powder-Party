@@ -94,6 +94,11 @@ const net = new ControllerNet({
       setStatus('Waiting for the big screen…');
       if (inRoom) showConn('Waiting for the big screen…', 'The host’s screen dropped — hang tight, it’ll reconnect you.', false);
       armBail(); // not back within the grace window → the game has ended (also covers a fresh join into an abandoned room, still on the name screen)
+    } else if (state === 'room_closed') {
+      // The relay closed the whole room (4001) — the display tore it down on
+      // its way out, or its hostless grace expired. Same destination as the
+      // DISPLAY_CLOSED goodbye, minus the wait: the party is over for good.
+      bailTo('game_ended');
     } else if (state === 'replaced') {
       setStatus('Opened on another tab.');
       if (inRoom) showConn('Opened on another tab', 'This seat is now controlled from another tab or device.', false);
