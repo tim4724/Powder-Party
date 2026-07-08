@@ -610,8 +610,8 @@ window.CouchGames = {
     const n = String(name == null ? '' : name).trim().slice(0, 16);
     if (!n || n === myName) return;
     myName = n;
-    el('name-input').value = n;    // keep the (hidden) form coherent for the plain-browser fallback paths
-    el('me-name').textContent = n;      // lobby header — a repaint-in-place;
+    el('name-input').value = n;         // keep the (hidden) form coherent for the plain-browser fallback paths
+    el('me-name').textContent = n;      // lobby + waiting headers repaint in place;
     el('waiting-name').textContent = n; // rosters/boards refresh off the display's echo
     net.rename(n);
   },

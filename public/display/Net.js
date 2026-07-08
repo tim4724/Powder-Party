@@ -12,6 +12,10 @@ const { PartyConnection, RoomFlow, MSG, ROOM_STATE, RELAY_URL, MAX_PLAYERS, SKIE
 
 const enc = encodeURIComponent;
 
+// Player-name clamp shared by HELLO and SET_NAME — same wire, same limit as
+// the controller's 16-char input.
+const cleanName = (raw) => (raw ? String(raw).slice(0, 16) : '');
+
 // How long a mid-run disconnect's seat is held open (showing its reconnect QR)
 // before we give up and forfeit the slot. Long enough to cover PartyConnection's
 // own auto-reconnect run plus a deliberate rescan, short enough that a player
@@ -189,7 +193,7 @@ export class DisplayNet extends GameNet {
         // i.e. it carries a name the seat didn't have (a fresh seat still
         // wears its "Player N" placeholder). The WELCOME always goes out, and
         // after the rename so it carries the right roster.
-        const name = data.name ? String(data.name).slice(0, 16) : '';
+        const name = cleanName(data.name);
         const renamed = !!name && name !== p.name;
         if (renamed) p.name = name;
         this.party.sendTo(from, this._welcomeFor(from));
@@ -210,7 +214,7 @@ export class DisplayNet extends GameNet {
         // in-page rename UI). Same clamp as HELLO's name; the coalesced
         // announce republishes the roster snapshot and repaints the display.
         const p = this.flow.get(from);
-        const name = data.name ? String(data.name).slice(0, 16) : '';
+        const name = cleanName(data.name);
         if (p && name && name !== p.name) { p.name = name; this._announce(); }
         break;
       }
