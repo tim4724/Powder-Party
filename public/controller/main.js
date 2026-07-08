@@ -10,6 +10,18 @@ import { keepScreenOn, letScreenSleep } from '../shared/WakeLock.js';
 
 const { MSG, RUN_STATE_MSGS, RELAY_ERRORS, ROOM_STATE, SKIER_COLORS, LEVELS, DEFAULT_LEVEL, RUN_COUNTS, DEFAULT_RUNS } = window;
 const el = (id) => document.getElementById(id);
+
+// Couch Games shell (Couch-Games-Controller CONTRACT.md): cgv's presence means
+// this page is hosted in the native launcher's WebView. The launcher owns
+// identity (cgName, live renames via window.CouchGames.setName) and session
+// chrome (back/leave, the exit via window.CouchGamesHost.gameEnded) — ALL
+// shell behavior gates on CG_SHELL so the same deployed page keeps working in
+// a plain browser. Presence, not value: an unknown higher version still means
+// "shell present, behave per the highest version we know" (v1).
+const _params = new URLSearchParams(location.search);
+const _scenario = _params.get('scenario');
+const CG_SHELL = _params.get('cgv') != null;
+const CG_NAME = (_params.get('cgName') || '').trim().slice(0, 16);
 const isLevel = (id) => LEVELS.some((l) => l.id === id);
 const isRunCount = (n) => RUN_COUNTS.includes(n);
 
@@ -30,7 +42,9 @@ function show(name) {
   // Push history only when stepping UP a level (name → lobby). Same-level and
   // back transitions don't push, so there's exactly one entry to pop: pressing
   // back from anywhere in the room returns to the name screen in one step.
-  if ((SCREEN_ORDER[name] || 0) > (SCREEN_ORDER[prev] || 0)) history.pushState({ screen: name }, '');
+  // In the Couch Games shell there's no name screen to go back to and the
+  // launcher swallows system back for its own LEAVE bar — push nothing.
+  if (!CG_SHELL && (SCREEN_ORDER[name] || 0) > (SCREEN_ORDER[prev] || 0)) history.pushState({ screen: name }, '');
 }
 
 // haptics — vibrate the phone (ignored where unsupported). The player's eyes are
@@ -100,6 +114,10 @@ const net = new ControllerNet({
       // DISPLAY_CLOSED goodbye, minus the wait: the party is over for good.
       bailTo('game_ended');
     } else if (state === 'replaced') {
+      // In the shell, being replaced is a terminal session end (the launcher
+      // shows "You joined from another device"); in a plain browser the other
+      // tab is usually the same person, so an informative overlay is kinder.
+      if (CG_SHELL) { bailTo('replaced'); return; }
       setStatus('Opened on another tab.');
       if (inRoom) showConn('Opened on another tab', 'This seat is now controlled from another tab or device.', false);
     }
@@ -123,10 +141,23 @@ el('conn-retry').addEventListener('click', () => {
 });
 
 // The one exit ramp off this page: every dead end (stale room, full room,
-// game over) funnels through here, landing on the display page's device
-// chooser with the reason riding along as an allow-listed ?bail= toast.
+// game over) funnels through here. In the Couch Games shell the launcher owns
+// the exit — hand it the reason (CONTRACT.md §3; it tears the WebView down and
+// shows the message) and do NOT also navigate. Plain browser: land on the
+// display page's device chooser with the reason as an allow-listed ?bail= toast.
+// Fire-once: every path here is terminal, and in the shell a second reason
+// must not chase the first (e.g. the room teardown following a DISPLAY_CLOSED
+// goodbye, or a still-pending display-gone bail timer).
+let bailed = false;
 function bailTo(reason) {
+  if (bailed) return;
+  bailed = true;
   net.disconnect();
+  const host = window.CouchGamesHost;
+  if (host && typeof host.gameEnded === 'function') {
+    try { host.gameEnded(reason); } catch (_) {}
+    return;
+  }
   location.replace('/?bail=' + reason);
 }
 
@@ -246,7 +277,9 @@ function handleMessage(data) {
       // lands after the player typed a name — and held seats free up when a
       // reconnect grace expires. Drop the relay connection (frees our
       // placeholder slot) and keep the name screen + room code so they can
-      // simply retry.
+      // simply retry. In the shell there's no name screen to retry from — a
+      // refused join is a terminal session end (launcher shows "Room is full").
+      if (CG_SHELL) { bailTo('game_full'); break; }
       net.disconnect();
       setJoining(false);
       setStatus('Room is full — wait for a seat to open, then try again.');
@@ -518,6 +551,10 @@ function leaveToName() {
   el('name-input').focus();
 }
 window.addEventListener('popstate', () => {
+  // Shell: the launcher swallows system back and shows its own LEAVE bar; our
+  // back-to-name-entry affordance would fight it (and shell mode never pushes
+  // the history entry this pop would land on — see `show`).
+  if (CG_SHELL) return;
   if (currentScreen && currentScreen !== 'name') leaveToName();
 });
 
@@ -525,7 +562,10 @@ el('name-form').addEventListener('submit', (e) => {
   e.preventDefault();
   const n = el('name-input').value.trim().slice(0, 16) || 'Skier';
   myName = n;
-  saveName(n);
+  // Shell: never persist — the launcher-injected name arrives fresh on every
+  // launch/rename, and storing it would leak into the standalone experience.
+  // (The form is hidden in the shell; this is belt-and-suspenders.)
+  if (!CG_SHELL) saveName(n);
   // Request motion permission within this user gesture (iOS requirement; HTTPS is
   // required for the sensors on a real phone — desktop falls back to keys).
   tilt.enableMotion();
@@ -560,11 +600,38 @@ show('name');
 // to simulate a zombie link for the display's liveness sweep).
 window.__net = net;
 
+// Couch Games shell contract §2 — the launcher calls this on a live rename
+// (and belt-and-suspenders on every page load with the current name). Apply
+// exactly like an in-game rename would: local UI + broadcast to the display.
+// Never persisted — the launcher is the identity authority. Defined
+// unconditionally (the launcher's call is guarded; nobody else calls it).
+window.CouchGames = {
+  setName(name) {
+    const n = String(name == null ? '' : name).trim().slice(0, 16);
+    if (!n || n === myName) return;
+    myName = n;
+    el('name-input').value = n;    // keep the (hidden) form coherent for the plain-browser fallback paths
+    el('me-name').textContent = n;      // lobby header — a repaint-in-place;
+    el('waiting-name').textContent = n; // rosters/boards refresh off the display's echo
+    net.rename(n);
+  },
+};
+
+// Shell mode: skip the name screen (§1) — the launcher owns identity, so join
+// at once with the injected cgName. The name form is hidden via .cg-shell
+// (controller.css); the title + status line stay up as a joining splash.
+if (CG_SHELL) document.documentElement.classList.add('cg-shell');
+if (CG_SHELL && !_scenario && net.roomCode) {
+  myName = CG_NAME || 'Skier'; // guaranteed non-blank ≤16 by the launcher; defend anyway
+  el('name-input').value = myName;
+  setJoining(true);
+  tilt.enableMotion(); // outside a user gesture this only matters on iOS; the shell is Android
+  net.connect(myName);
+}
+
 // Gallery / test mode: ?scenario=… lays out a single screen from fake data
 // without connecting to the relay (the controller never auto-connects, so
 // there's nothing to suppress — we just drive the screens directly).
-const _params = new URLSearchParams(location.search);
-const _scenario = _params.get('scenario');
 if (_scenario) {
   const _int = (v, def) => { const n = parseInt(v, 10); return isNaN(n) ? def : n; };
   import('./TestHarness.js').then(({ runControllerScenario }) => runControllerScenario({

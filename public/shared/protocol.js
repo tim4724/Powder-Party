@@ -44,6 +44,7 @@ var MSG = {
   PAUSE_GAME: 'pause_game',           // request a pause (any player, mid-countdown/run)
   RESUME_GAME: 'resume_game',         // request resume from the pause overlay
   LEAVE: 'leave',                     // intentional exit (back-out) — display frees the seat at once (no reconnect QR)
+  SET_NAME: 'set_name',               // {name} live rename (the Couch Games shell's rename bar via window.CouchGames.setName) — display clamps like HELLO's name and republishes the roster
   PING: 'ping',
 
   // Display -> specific controller

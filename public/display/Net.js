@@ -205,6 +205,15 @@ export class DisplayNet extends GameNet {
         // Intentional back-out: free the seat outright (no reconnect QR).
         this._expireSeat(from);
         break;
+      case MSG.SET_NAME: {
+        // Live rename (the Couch Games shell's rename bar — this game has no
+        // in-page rename UI). Same clamp as HELLO's name; the coalesced
+        // announce republishes the roster snapshot and repaints the display.
+        const p = this.flow.get(from);
+        const name = data.name ? String(data.name).slice(0, 16) : '';
+        if (p && name && name !== p.name) { p.name = name; this._announce(); }
+        break;
+      }
       case MSG.PING:
         this.party.sendTo(from, { type: MSG.PONG, t: data.t });
         break;

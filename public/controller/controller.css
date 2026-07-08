@@ -3,6 +3,23 @@
    as snow). Tokens + reusable bits live in /shared/theme.css. --car is the
    player's livery colour, set at runtime by controller/main.js (applyLivery). */
 
+/* Safe zone — the larger of the platform's own display cutout and the Couch
+   Games launcher chrome (CONTRACT.md §5: the shell hosts the page edge-to-edge
+   and floats its LEAVE bar / name chip on top, publishing --cg-safe-* on <html>;
+   0px in a plain browser). Visuals may bleed under the chrome — interactive UI
+   pads by these. */
+:root {
+  --safe-top:    max(var(--cg-safe-top, 0px),    env(safe-area-inset-top, 0px));
+  --safe-right:  max(var(--cg-safe-right, 0px),  env(safe-area-inset-right, 0px));
+  --safe-bottom: max(var(--cg-safe-bottom, 0px), env(safe-area-inset-bottom, 0px));
+  --safe-left:   max(var(--cg-safe-left, 0px),   env(safe-area-inset-left, 0px));
+}
+
+/* Hosted in the Couch Games shell: the launcher owns identity, so there is no
+   name entry (main.js joins with the injected cgName) — the title + status
+   line stay up as a joining splash. */
+.cg-shell #name-form, .cg-shell #name .sub { display: none; }
+
 html, body {
   margin: 0; min-height: 100%;
   /* bluebird sky fading to a clean snowfield at the foot */
@@ -33,11 +50,11 @@ section {
   position: relative; z-index: 1;
   flex: 1; display: flex; flex-direction: column;
   padding:
-    calc(7vh + env(safe-area-inset-top)) calc(8vw + env(safe-area-inset-right))
-    calc(7vh + env(safe-area-inset-bottom)) calc(8vw + env(safe-area-inset-left));
+    calc(7vh + var(--safe-top)) calc(8vw + var(--safe-right))
+    calc(7vh + var(--safe-bottom)) calc(8vw + var(--safe-left));
 }
 /* the join screen is sparse — center it so it isn't top-heavy */
-#name { justify-content: center; padding-bottom: calc(12vh + env(safe-area-inset-bottom)); }
+#name { justify-content: center; padding-bottom: calc(12vh + var(--safe-bottom)); }
 
 h1 {
   font-family: var(--font-display); font-weight: 700;
@@ -215,8 +232,8 @@ input[type=text]:disabled { opacity: 0.6; }
    .latency--fastlane (P2P DataChannel carrying the input/ping path). */
 .latency {
   position: fixed;
-  right: calc(0.55rem + env(safe-area-inset-right));
-  bottom: calc(0.5rem + env(safe-area-inset-bottom));
+  right: calc(0.55rem + var(--safe-right));
+  bottom: calc(0.5rem + var(--safe-bottom));
   z-index: 20;
   display: inline-flex; align-items: center; gap: 3px;
   padding: 0.26rem 0.55rem;
@@ -241,8 +258,8 @@ input[type=text]:disabled { opacity: 0.6; }
    toy-button look. */
 #pause-btn {
   position: fixed; z-index: 8;
-  top: calc(0.6rem + env(safe-area-inset-top));
-  right: calc(0.6rem + env(safe-area-inset-right));
+  top: calc(0.6rem + var(--safe-top));
+  right: calc(0.6rem + var(--safe-right));
   width: 3.2rem; height: 3.2rem;
 }
 
@@ -253,8 +270,8 @@ input[type=text]:disabled { opacity: 0.6; }
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 1rem;
   padding:
-    calc(7vh + env(safe-area-inset-top)) calc(10vw + env(safe-area-inset-right))
-    calc(7vh + env(safe-area-inset-bottom)) calc(10vw + env(safe-area-inset-left));
+    calc(7vh + var(--safe-top)) calc(10vw + var(--safe-right))
+    calc(7vh + var(--safe-bottom)) calc(10vw + var(--safe-left));
   background: rgba(233, 248, 255, 0.82); backdrop-filter: blur(8px);
 }
 #pause-overlay h2 {
@@ -269,8 +286,8 @@ input[type=text]:disabled { opacity: 0.6; }
   position: fixed; inset: 0; z-index: 30;
   display: flex; align-items: center; justify-content: center;
   padding:
-    calc(7vh + env(safe-area-inset-top)) calc(10vw + env(safe-area-inset-right))
-    calc(7vh + env(safe-area-inset-bottom)) calc(10vw + env(safe-area-inset-left));
+    calc(7vh + var(--safe-top)) calc(10vw + var(--safe-right))
+    calc(7vh + var(--safe-bottom)) calc(10vw + var(--safe-left));
   background: rgba(233, 248, 255, 0.92); backdrop-filter: blur(8px);
   text-align: center;
 }
@@ -350,8 +367,8 @@ input[type=text]:disabled { opacity: 0.6; }
 @media (orientation: landscape) {
   section {
     padding:
-      calc(4vh + env(safe-area-inset-top)) calc(6vw + env(safe-area-inset-right))
-      calc(4vh + env(safe-area-inset-bottom)) calc(6vw + env(safe-area-inset-left));
+      calc(4vh + var(--safe-top)) calc(6vw + var(--safe-right))
+      calc(4vh + var(--safe-bottom)) calc(6vw + var(--safe-left));
   }
   #drive-hud { gap: 0.6rem; }
   .play { min-height: 9rem; padding-bottom: 4.9rem; }

@@ -168,6 +168,15 @@ export class ControllerNet extends GameNet {
     this.peerIndex = null;
   }
 
+  // Live rename (the Couch Games shell's window.CouchGames.setName). Adopt the
+  // name for future HELLOs — a reconnect re-introduces us with it — and tell
+  // the display so the roster updates everywhere. A no-op while disconnected
+  // (send() drops without a party; the adopted name still rides the next join).
+  rename(name) {
+    this.playerName = name;
+    this.send(MSG.SET_NAME, { name });
+  }
+
   // Send to the display. FASTLANE_TYPES messages ride the WebRTC DataChannel
   // when it's open; everything else (and fallback) goes over the WS relay.
   send(type, payload) {
