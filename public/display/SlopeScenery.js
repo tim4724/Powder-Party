@@ -104,6 +104,30 @@ export function extendMeshSamples(samples) {
   return meshSamples;
 }
 
+// Fine mesh rows resampled from the spline the ENGINE rides (Centerline.sampleAt),
+// not the raw ~2u build samples. Skier poses are glued to the smooth Catmull-Rom
+// surface; strips built straight from the coarse samples are chords of it, and the
+// chord–curve gap grows with |lat| (turning frames swing offset points on wider
+// arcs, and the wide off-piste quads crease when the frame twists) — past the
+// piste edge it clears the few-cm epsilons the contact-shadow blobs and ski bases
+// sit on, so the ground pokes through them. Rows every MESH_STEP hug the spline
+// closely enough to stay under those epsilons everywhere a skier can be; ONE row
+// list feeds every strip (piste, shoulders, walls, flanks) so there are no seams.
+// 0.5 measured worst-case ~1.2cm mesh-above-surface across black-tier seeds (2.0
+// was ~4.5cm — past the 4cm blob lift); halving again buys little (crease-local
+// spline curvature dominates) and the strips are static, so this is the knee.
+const MESH_STEP = 0.5;
+export function resampleMeshRows(centerline) {
+  const rows = [];
+  const n = Math.max(2, Math.ceil(centerline.length / MESH_STEP));
+  for (let i = 0; i <= n; i++) {
+    const s = (centerline.length * i) / n;
+    const f = centerline.sampleAt(s);
+    rows.push({ pos: f.pos, tangent: f.tangent, up: f.up, lateral: f.lateral, s });
+  }
+  return rows;
+}
+
 // One snow strip from lateral offset offA→offB, optionally rising in world-Y
 // (riseA→riseB) to form mountainside terrain. computeVertexNormals so the flat
 // piste AND the tilted walls both light correctly.
@@ -149,8 +173,17 @@ export function addTerrain(group, meshSamples, pisteHalf, edgeLat, groundY) {
     const b = -pisteHalf + (2 * pisteHalf) * ((p + 1) / NB);
     addSlopeStrip(group, meshSamples, a, b, 0, 0, p % 2 === 0 ? passMat : grooveMat);
   }
-  addSlopeStrip(group, meshSamples, -edgeLat, -pisteHalf, 0, 0, deepMat); // deep-snow shoulders
-  addSlopeStrip(group, meshSamples, pisteHalf, edgeLat, 0, 0, deepMat);
+  // Deep-snow shoulders, split into sub-strips: one edgeLat-wide quad per row
+  // goes visibly non-planar where the frame twists (turn + pitch changing at
+  // once) and its triangulation creases — bumps the flat analytic shoulder the
+  // skier pose rides doesn't have. Narrower quads keep the crease sub-epsilon.
+  const SHOULDER_SUBS = 3;
+  for (let k = 0; k < SHOULDER_SUBS; k++) {
+    const a = pisteHalf + (edgeLat - pisteHalf) * (k / SHOULDER_SUBS);
+    const b = pisteHalf + (edgeLat - pisteHalf) * ((k + 1) / SHOULDER_SUBS);
+    addSlopeStrip(group, meshSamples, -b, -a, 0, 0, deepMat);
+    addSlopeStrip(group, meshSamples, a, b, 0, 0, deepMat);
+  }
   addSlopeStrip(group, meshSamples, -(edgeLat + 26), -edgeLat, 14, 0, wallMat); // mountainside walls
   addSlopeStrip(group, meshSamples, -(edgeLat + 72), -(edgeLat + 26), 48, 14, wallMat);
   addSlopeStrip(group, meshSamples, edgeLat, edgeLat + 26, 0, 14, wallMat);

@@ -14,7 +14,7 @@ import { SkiTrails } from './SkiTrails.js';
 import { SKI_HALF } from './engine/SkiEngine.js';
 import { PoleField } from './PoleField.js';
 import {
-  extendMeshSamples, addTerrain, addPeaks, addForests,
+  extendMeshSamples, resampleMeshRows, addTerrain, addPeaks, addForests,
   addRamp, addObstacle, addSnowLine, FinishGate, debugSkierCapsule,
 } from './SlopeScenery.js';
 
@@ -292,8 +292,11 @@ export class SceneRenderer {
 
     // Terrain ribbon + valley walls/flanks (renderer-extended samples), the
     // breakable edge poles, then the props — all collidable footprints match
-    // what the engine resolves from the same track data.
-    addTerrain(this.slopeGroup, extendMeshSamples(samples), pisteHalf, edgeLat, groundY);
+    // what the engine resolves from the same track data. The strips are built
+    // from FINE spline-resampled rows (not the coarse build samples) so the
+    // rendered snow hugs the surface the engine glues skiers to — see
+    // resampleMeshRows for why coarse chords poke through skis/shadows off-piste.
+    addTerrain(this.slopeGroup, extendMeshSamples(resampleMeshRows(track.centerline)), pisteHalf, edgeLat, groundY);
     this.poles = new PoleField(this.slopeGroup, samples, pisteHalf, track.centerline, track.length, this._hitboxDebug, opts.poleColor);
     this.poles.onHit = (kick) => { if (this.onPoleHit) this.onPoleHit(kick); };
 
@@ -302,7 +305,8 @@ export class SceneRenderer {
     // _disposeGroup with propGroup on the next setTrack (recreated here each time). ?gfx=low
     // skips the prop decals entirely (the skier blobs always stay — they read position).
     this._decalGeo = new THREE.PlaneGeometry(1, 1);
-    this._decalMat = new THREE.MeshBasicMaterial({ map: this._blobTex, transparent: true, opacity: 0.4, depthWrite: false, toneMapped: false });
+    this._decalMat = new THREE.MeshBasicMaterial({ map: this._blobTex, transparent: true, opacity: 0.4, depthWrite: false, toneMapped: false,
+      polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }); // same depth bias as the skier blobs (see addSkier)
     const decals = !this._gfxLow;
     for (const r of (track.ramps || [])) {
       addRamp(this.propGroup, cl, r, this._hitboxDebug);
@@ -397,10 +401,15 @@ export class SceneRenderer {
     const cam = new THREE.PerspectiveCamera(BASE_FOV, 1, 0.1, this._camFar || 1200);
 
     // soft contact shadow — a faded sprite laid flush on the slope each frame
-    // (oriented in setSkierPose so it can't clip through the tilted surface)
+    // (oriented in setSkierPose so it can't clip through the tilted surface).
+    // polygonOffset: the blob rides the ENGINE's analytic surface while the snow
+    // is a triangle mesh of it — where the mesh sits a hair proud (worst off-piste),
+    // the negative depth bias keeps the decal winning the depth test instead of
+    // being sliced by the snow. Bias-only: metres-closer geometry still occludes it.
     const blob = new THREE.Mesh(
       new THREE.PlaneGeometry(1.5, 1.5),
-      new THREE.MeshBasicMaterial({ map: this._blobTex, transparent: true, opacity: 0.45, depthWrite: false, toneMapped: false })
+      new THREE.MeshBasicMaterial({ map: this._blobTex, transparent: true, opacity: 0.45, depthWrite: false, toneMapped: false,
+        polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 })
     );
 
     this.scene.add(group);
