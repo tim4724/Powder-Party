@@ -3,22 +3,22 @@
    as snow). Tokens + reusable bits live in /shared/theme.css. --car is the
    player's livery colour, set at runtime by controller/main.js (applyLivery). */
 
-/* Safe zone — the larger of the platform's own display cutout and the Couch
-   Games launcher chrome (CONTRACT.md §5: the shell hosts the page edge-to-edge
-   and floats its LEAVE bar / name chip on top, publishing --cg-safe-* on <html>;
+/* Safe zone — the larger of the platform's own display cutout and the CouchPad
+   launcher chrome (CONTRACT.md §5: the shell hosts the page edge-to-edge and
+   floats its LEAVE bar / name chip on top, publishing --cp-safe-* on <html>;
    0px in a plain browser). Visuals may bleed under the chrome — interactive UI
    pads by these. */
 :root {
-  --safe-top:    max(var(--cg-safe-top, 0px),    env(safe-area-inset-top, 0px));
-  --safe-right:  max(var(--cg-safe-right, 0px),  env(safe-area-inset-right, 0px));
-  --safe-bottom: max(var(--cg-safe-bottom, 0px), env(safe-area-inset-bottom, 0px));
-  --safe-left:   max(var(--cg-safe-left, 0px),   env(safe-area-inset-left, 0px));
+  --safe-top:    max(var(--cp-safe-top, 0px),    env(safe-area-inset-top, 0px));
+  --safe-right:  max(var(--cp-safe-right, 0px),  env(safe-area-inset-right, 0px));
+  --safe-bottom: max(var(--cp-safe-bottom, 0px), env(safe-area-inset-bottom, 0px));
+  --safe-left:   max(var(--cp-safe-left, 0px),   env(safe-area-inset-left, 0px));
 }
 
-/* Hosted in the Couch Games shell: the launcher owns identity, so there is no
-   name entry (main.js joins with the injected cgName) — the title + status
+/* Hosted in the CouchPad shell: the launcher owns identity, so there is no
+   name entry (main.js joins with the injected cpName) — the title + status
    line stay up as a joining splash. */
-.cg-shell #name-form, .cg-shell #name .sub { display: none; }
+.cp-shell #name-form, .cp-shell #name .sub { display: none; }
 
 html, body {
   margin: 0; min-height: 100%;

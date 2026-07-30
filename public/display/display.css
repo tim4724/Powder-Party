@@ -69,7 +69,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #cfeaf8; }
 
 /* Join-URL chip — pinned to the bottom-centre of the page, and a <button>: a
    click (or Enter/Space) copies the full join link, confirmed by the .toast.
-   min-width reserves the production URL's footprint (powder.couch-games.com/<code>
+   min-width reserves the production URL's footprint (powder.couchpad.games/<code>
    ≈ 30rem on a big screen) so the "…" placeholder already sits at final size,
    instead of the chip expanding from the centre when the room code + URL arrive.
    Transparent border (border-box) holds the box steady as :hover tints it. */

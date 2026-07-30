@@ -71,6 +71,7 @@ export class ControllerNet extends GameNet {
     this.playerName = '';
     this._pingTimer = null;
     this._lastPong = 0;
+    this._suspended = false; // parked while the page is backgrounded (see suspend/resume)
   }
 
   // Probe the relay over HTTP for this room's existence/occupancy, so a stale
@@ -92,6 +93,7 @@ export class ControllerNet extends GameNet {
 
   connect(playerName) {
     this.playerName = playerName || this.playerName;
+    this._suspended = false; // any explicit connect (retry button, resume) leaves the parked state
     if (this.party) this.party.close();
     if (this.fastlane) this.fastlane.closeAll();
     const url = RELAY_URL + '/' + enc(this.roomCode) + (this.instance ? '?instance=' + enc(this.instance) : '');
@@ -162,13 +164,37 @@ export class ControllerNet extends GameNet {
   // the player backs out of the room to the name screen.
   disconnect() {
     this._stopPing();
+    this._suspended = false; // a terminal exit outranks a pending resume()
     try { if (this.party) this.party.sendTo(0, { type: MSG.LEAVE }); } catch (_) {}
     if (this.fastlane) { this.fastlane.closeAll(); this.fastlane = null; }
     if (this.party) { this.party.close(); this.party = null; }
     this.peerIndex = null;
   }
 
-  // Live rename (the Couch Games shell's window.CouchGames.setName). Adopt the
+  // Park the connection while the page is backgrounded (CONTRACT.md §7 — the
+  // CouchPad shell's synthetic `pagehide`, or a browser's own bfcache freeze).
+  // Deliberately NOT a disconnect(): no LEAVE, so the display holds our seat
+  // open behind its reconnect QR instead of freeing it — this is "back in a
+  // moment", not "I'm out". PartyConnection.close() detaches its handlers
+  // before closing, so no onClose fires and the UI shows no false
+  // "reconnecting" while we're away. A no-op before the first join.
+  suspend() {
+    if (!this.party || this._suspended) return;
+    this._suspended = true;
+    this._stopPing();
+    if (this.fastlane) this.fastlane.closeAll();
+    this.party.close();
+  }
+
+  // Back in the foreground: rejoin. The same clientId reclaims the same relay
+  // slot, and HELLO re-introduces us under the name we already carry, so the
+  // display re-seats us exactly like any other dropped-and-returned phone.
+  // Only ever undoes a suspend() — an ordinary tab-switch back is a no-op.
+  resume() {
+    if (this._suspended) this.connect(); // connect() clears the flag
+  }
+
+  // Live rename (the CouchPad shell's window.CouchPad.setName). Adopt the
   // name for future HELLOs — a reconnect re-introduces us with it — and tell
   // the display so the roster updates everywhere. A no-op while disconnected
   // (send() drops without a party; the adopted name still rides the next join).

@@ -50,11 +50,13 @@ jobs:
           set -euo pipefail
           SAFE_BRANCH=$(echo "$BRANCH_RAW" | tr '[:upper:]' '[:lower:]' | sed 's#[^a-z0-9-]#-#g' | cut -c1-50 | sed 's/-*$//')
           NS="powder-${SAFE_BRANCH}"
-          # All preview hosts sit under *.couch-games.com (covered by the
+          # All preview hosts sit under *.couchpad.games (covered by the
           # existing wildcard TLS + DNS). main deploys to powder-main,
-          # branches to powder-<branch>; a bare powder.couch-games.com is
-          # reserved for the eventual production deploy.
-          HOST="powder-${SAFE_BRANCH}.couch-games.com"
+          # branches to powder-<branch>; a bare powder.couchpad.games is
+          # reserved for the eventual production deploy. The pre-rename
+          # *.couch-games.com hosts stay served by the hand-managed
+          # powder-legacy-{http,https} routes this workflow never touches.
+          HOST="powder-${SAFE_BRANCH}.couchpad.games"
 
           kubectl get ns "$NS" >/dev/null 2>&1 || kubectl create ns "$NS"
 
@@ -121,15 +123,15 @@ jobs:
               - protocol: TCP
           NETPOL
 
-          # Copy the *.couch-games.com wildcard TLS into the preview namespace.
-          TLS_CRT=$(kubectl get secret couch-games-wildcard-tls -n default -o jsonpath='{.data.tls\.crt}')
-          TLS_KEY=$(kubectl get secret couch-games-wildcard-tls -n default -o jsonpath='{.data.tls\.key}')
+          # Copy the *.couchpad.games wildcard TLS into the preview namespace.
+          TLS_CRT=$(kubectl get secret couchpad-wildcard-tls -n default -o jsonpath='{.data.tls\.crt}')
+          TLS_KEY=$(kubectl get secret couchpad-wildcard-tls -n default -o jsonpath='{.data.tls\.key}')
 
           cat <<EOS | kubectl apply -n "$NS" -f -
           apiVersion: v1
           kind: Secret
           metadata:
-            name: couch-games-wildcard-tls
+            name: couchpad-wildcard-tls
           type: kubernetes.io/tls
           data:
             tls.crt: ${TLS_CRT}
@@ -200,7 +202,7 @@ jobs:
                   - name: powder
                     port: 4000
             tls:
-              secretName: couch-games-wildcard-tls
+              secretName: couchpad-wildcard-tls
           ---
           apiVersion: traefik.io/v1alpha1
           kind: IngressRoute
@@ -224,7 +226,7 @@ jobs:
           BRANCH_RAW: ${{ github.ref_name }}
         run: |
           SAFE_BRANCH=$(echo "$BRANCH_RAW" | tr '[:upper:]' '[:lower:]' | sed 's#[^a-z0-9-]#-#g' | cut -c1-50 | sed 's/-*$//')
-          HOST="powder-${SAFE_BRANCH}.couch-games.com"
+          HOST="powder-${SAFE_BRANCH}.couchpad.games"
           {
             echo "### Preview"
             echo "- URL: https://${HOST}"

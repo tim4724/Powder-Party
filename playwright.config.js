@@ -1,7 +1,7 @@
 // @ts-check
 // E2E suite — real pages, real relay. The webServer below boots the actual
 // game server; specs open the display page (which creates a live room on
-// wss://ws.couch-games.com) and join phone-viewport controller pages to it by
+// wss://ws.couchpad.games) and join phone-viewport controller pages to it by
 // room code, mirroring HexStacker-Party's E2E setup. Browsers via
 // `npx playwright install chromium` (or PLAYWRIGHT_BROWSERS_PATH).
 //

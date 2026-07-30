@@ -13,11 +13,11 @@
 // ============================================================================
 
 // Party-Server relay URL (signaling + game-event fallback).
-var RELAY_URL = 'wss://ws.couch-games.com';
+var RELAY_URL = 'wss://ws.couchpad.games';
 
 // STUN server for the WebRTC fastlane (server-reflexive candidates so
 // cross-network peers connect). STUN is UDP and ignored by CSP connect-src.
-var STUN_URL = 'stun:stun.couch-games.com:3478';
+var STUN_URL = 'stun:stun.couchpad.games:3478';
 
 // Message types carried inside the Party-Server `data` field. Every message is
 // a plain object with a `.type` drawn from here.
@@ -44,7 +44,7 @@ var MSG = {
   PAUSE_GAME: 'pause_game',           // request a pause (any player, mid-countdown/run)
   RESUME_GAME: 'resume_game',         // request resume from the pause overlay
   LEAVE: 'leave',                     // intentional exit (back-out) — display frees the seat at once (no reconnect QR)
-  SET_NAME: 'set_name',               // {name} live rename (the Couch Games shell's rename bar via window.CouchGames.setName) — display clamps like HELLO's name and republishes the roster
+  SET_NAME: 'set_name',               // {name} live rename (the CouchPad shell's rename bar via window.CouchPad.setName) — display clamps like HELLO's name and republishes the roster
   PING: 'ping',
 
   // Display -> specific controller

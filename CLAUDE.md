@@ -60,6 +60,15 @@ single-screen previews stay relay-free via `/?test=1&scenario=…` (see README)
 - PartyPlug (`partyplug/`) is the reusable transport kit shared across the sibling games;
   Three.js (`vendor/`) is vendored — both live OUTSIDE `public/` and are served via route
   remaps in `server/index.js`, so update the Dockerfile + CSP when changing them.
+- **CouchPad shell contract** (`CONTRACT.md` in the sibling `CouchPad-Controller` repo, v1):
+  the same deployed controller page is also the game page inside the native CouchPad
+  launcher. `?cpv=1` means "hosted in the shell" and EVERY shell behaviour gates on
+  `CP_SHELL`, so the page keeps working untouched in a plain browser — skip name entry and
+  join as `cpName` (never persisted), `window.CouchPad.setName` renames live, terminal ends
+  call `window.CouchPadHost.gameEnded(reason)` instead of the `?bail=` navigation,
+  interactive UI pads by `--cp-safe-*`, and `pagehide`/`visibilitychange` park + rejoin the
+  relay socket (`ControllerNet.suspend`/`resume`). Covered end-to-end by
+  `tests/e2e/couchpad-shell.spec.js`.
 - **Series, not single runs:** a session is N runs (host picks 3/5/7 in the lobby, like the
   difficulty switch — `SET_RUNS`/`RUNS_UPDATE`). The SkiEngine stays run-only (no series
   concept); the series tally lives in `display/SeriesTally.js` (run index/length/over-flag,

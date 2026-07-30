@@ -210,7 +210,7 @@ export class DisplayNet extends GameNet {
         this._expireSeat(from);
         break;
       case MSG.SET_NAME: {
-        // Live rename (the Couch Games shell's rename bar — this game has no
+        // Live rename (the CouchPad shell's rename bar — this game has no
         // in-page rename UI). Same clamp as HELLO's name; the coalesced
         // announce republishes the roster snapshot and repaints the display.
         const p = this.flow.get(from);
