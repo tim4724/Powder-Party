@@ -1,9 +1,18 @@
 name: Preview Cleanup
 
 on:
+  # delete fires for tags too and takes no branches filter, so the branch check
+  # lives in the job condition below.
   delete:
-    branches:
-      - '**'
+
+# Join Preview Deploy's group and cancel its in-flight run. Otherwise
+# push-then-merge races: this deletes the namespace while the last push's deploy
+# is still building, and that deploy then recreates it for a branch that no
+# longer exists. Delete events carry the short branch name in event.ref, hence
+# the spelled-out refs/heads/ to match preview's github.ref.
+concurrency:
+  group: preview-refs/heads/${{ github.event.ref }}
+  cancel-in-progress: true
 
 jobs:
   cleanup:
@@ -14,7 +23,7 @@ jobs:
       - name: Install kubectl
         uses: azure/setup-kubectl@v5
         with:
-          version: v1.30.0
+          version: v1.35.9
 
       - name: Write kubeconfig
         run: |
@@ -24,9 +33,15 @@ jobs:
           KUBECONFIG_B64: ${{ secrets.KUBECONFIG_B64 }}
 
       - name: Delete preview namespace
+        env:
+          # Through the environment, never `${{ }}` in the script: a ref may
+          # legally contain `$(...)`, and this job holds the kubeconfig.
+          BRANCH_RAW: ${{ github.event.ref }}
         run: |
           set -euo pipefail
-          BRANCH_RAW="${{ github.event.ref }}"
-          SAFE_BRANCH=$(echo "$BRANCH_RAW" | tr '[:upper:]' '[:lower:]' | sed 's#[^a-z0-9-]#-#g')
+          # Must stay identical to the slug pipeline in preview.yml — a shorter
+          # pipeline here computes a different namespace for long branch names,
+          # deletes nothing (--ignore-not-found stays green) and leaks the ns.
+          SAFE_BRANCH=$(echo "$BRANCH_RAW" | tr '[:upper:]' '[:lower:]' | sed 's#[^a-z0-9-]#-#g' | cut -c1-50 | sed 's/-*$//')
           NS="powder-${SAFE_BRANCH}"
           kubectl delete namespace "$NS" --ignore-not-found
