@@ -53,9 +53,7 @@ jobs:
           # All preview hosts sit under *.paperballoon.games (covered by the
           # existing wildcard TLS + DNS). main deploys to powder-main,
           # branches to powder-<branch>; a bare powder.paperballoon.games is
-          # reserved for the eventual production deploy. The pre-rename
-          # *.couch-games.com hosts stay served by the hand-managed
-          # powder-legacy-{http,https} routes this workflow never touches.
+          # reserved for the eventual production deploy.
           HOST="powder-${SAFE_BRANCH}.paperballoon.games"
 
           kubectl get ns "$NS" >/dev/null 2>&1 || kubectl create ns "$NS"
