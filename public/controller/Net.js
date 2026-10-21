@@ -172,7 +172,7 @@ export class ControllerNet extends GameNet {
   }
 
   // Park the connection while the page is backgrounded (CONTRACT.md §7 — the
-  // CouchPad shell's synthetic `pagehide`, or a browser's own bfcache freeze).
+  // Paper Balloon shell's synthetic `pagehide`, or a browser's own bfcache freeze).
   // Deliberately NOT a disconnect(): no LEAVE, so the display holds our seat
   // open behind its reconnect QR instead of freeing it — this is "back in a
   // moment", not "I'm out". PartyConnection.close() detaches its handlers
@@ -194,7 +194,7 @@ export class ControllerNet extends GameNet {
     if (this._suspended) this.connect(); // connect() clears the flag
   }
 
-  // Live rename (the CouchPad shell's window.CouchPad.setName). Adopt the
+  // Live rename (the Paper Balloon shell's window.PaperBalloon.setName). Adopt the
   // name for future HELLOs — a reconnect re-introduces us with it — and tell
   // the display so the roster updates everywhere. A no-op while disconnected
   // (send() drops without a party; the adopted name still rides the next join).

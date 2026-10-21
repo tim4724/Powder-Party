@@ -3,22 +3,22 @@
    as snow). Tokens + reusable bits live in /shared/theme.css. --car is the
    player's livery colour, set at runtime by controller/main.js (applyLivery). */
 
-/* Safe zone — the larger of the platform's own display cutout and the CouchPad
+/* Safe zone — the larger of the platform's own display cutout and the Paper Balloon
    launcher chrome (CONTRACT.md §5: the shell hosts the page edge-to-edge and
-   floats its LEAVE bar / name chip on top, publishing --cp-safe-* on <html>;
+   floats its LEAVE bar / name chip on top, publishing --pb-safe-* on <html>;
    0px in a plain browser). Visuals may bleed under the chrome — interactive UI
    pads by these. */
 :root {
-  --safe-top:    max(var(--cp-safe-top, 0px),    env(safe-area-inset-top, 0px));
-  --safe-right:  max(var(--cp-safe-right, 0px),  env(safe-area-inset-right, 0px));
-  --safe-bottom: max(var(--cp-safe-bottom, 0px), env(safe-area-inset-bottom, 0px));
-  --safe-left:   max(var(--cp-safe-left, 0px),   env(safe-area-inset-left, 0px));
+  --safe-top:    max(var(--pb-safe-top, 0px),    env(safe-area-inset-top, 0px));
+  --safe-right:  max(var(--pb-safe-right, 0px),  env(safe-area-inset-right, 0px));
+  --safe-bottom: max(var(--pb-safe-bottom, 0px), env(safe-area-inset-bottom, 0px));
+  --safe-left:   max(var(--pb-safe-left, 0px),   env(safe-area-inset-left, 0px));
 }
 
-/* Hosted in the CouchPad shell: the launcher owns identity, so there is no
-   name entry (main.js joins with the injected cpName) — the title + status
+/* Hosted in the Paper Balloon shell: the launcher owns identity, so there is no
+   name entry (main.js joins with the injected pbName) — the title + status
    line stay up as a joining splash. */
-.cp-shell #name-form, .cp-shell #name .sub { display: none; }
+.pb-shell #name-form, .pb-shell #name .sub { display: none; }
 
 html, body {
   margin: 0; min-height: 100%;

@@ -1,8 +1,8 @@
 // @ts-check
-// CouchPad shell contract (CouchPad-Controller CONTRACT.md v1): with
-// ?cpv=1&cpName=… the controller skips name entry and joins as the injected
-// name (never persisting it), window.CouchPad.setName renames live, terminal
-// session ends land on window.CouchPadHost.gameEnded(reason) instead of the
+// Paper Balloon shell contract (PaperBalloon-Controller CONTRACT.md v1): with
+// ?pbv=1&pbName=… the controller skips name entry and joins as the injected
+// name (never persisting it), window.PaperBalloon.setName renames live, terminal
+// session ends land on window.PaperBalloonHost.gameEnded(reason) instead of the
 // plain-browser ?bail= navigation, and backgrounding the launcher (a synthetic
 // persisted `pagehide`) drops the relay socket at once.
 const { test, expect } = require('@playwright/test');
@@ -14,10 +14,10 @@ const { createRoom, newPhone, visible } = require('./helpers');
 async function shellController(context, path, name) {
   const page = await context.newPage();
   await page.addInitScript(() => {
-    window.__cpEnded = [];
-    window.CouchPadHost = { gameEnded: (reason) => window.__cpEnded.push(String(reason)) };
+    window.__pbEnded = [];
+    window.PaperBalloonHost = { gameEnded: (reason) => window.__pbEnded.push(String(reason)) };
   });
-  await page.goto(path + '?cpv=1&cpName=' + encodeURIComponent(name));
+  await page.goto(path + '?pbv=1&pbName=' + encodeURIComponent(name));
   return page;
 }
 
@@ -26,7 +26,7 @@ test('shell join skips name entry, renames live, and hands the end to the launch
   const phone = await newPhone(browser, baseURL);
   const ctrl = await shellController(phone, '/' + roomCode, 'Mia');
 
-  // §1 — no name entry: straight to the lobby as cpName, with the form hidden.
+  // §1 — no name entry: straight to the lobby as pbName, with the form hidden.
   await ctrl.waitForSelector(visible('lobby'));
   await expect(ctrl.locator('#me-name')).toHaveText('Mia');
   await expect(ctrl.locator('#name-form')).toBeHidden();
@@ -38,7 +38,7 @@ test('shell join skips name entry, renames live, and hands the end to the launch
   }, null, { timeout: 20000 });
 
   // §2 — live rename from the launcher: local UI + broadcast to the display.
-  await ctrl.evaluate(() => window.CouchPad.setName('Zoe'));
+  await ctrl.evaluate(() => window.PaperBalloon.setName('Zoe'));
   await expect(ctrl.locator('#me-name')).toHaveText('Zoe');
   await page.waitForFunction(() => {
     const net = /** @type {any} */ (window).__net;
@@ -49,8 +49,8 @@ test('shell join skips name entry, renames live, and hands the end to the launch
   // gameEnded('game_ended'), and the page must NOT also navigate itself (in a
   // plain browser this same goodbye redirects to the device chooser).
   await page.goto('about:blank'); // fires the display's pagehide goodbye
-  await ctrl.waitForFunction(() => window.__cpEnded.length > 0, null, { timeout: 20000 });
-  expect(await ctrl.evaluate(() => window.__cpEnded)).toEqual(['game_ended']);
+  await ctrl.waitForFunction(() => window.__pbEnded.length > 0, null, { timeout: 20000 });
+  expect(await ctrl.evaluate(() => window.__pbEnded)).toEqual(['game_ended']);
   expect(new URL(ctrl.url()).pathname).toBe('/' + roomCode);
   await phone.close();
 });
@@ -58,8 +58,8 @@ test('shell join skips name entry, renames live, and hands the end to the launch
 test('a stale room in the shell reports room_not_found without navigating', async ({ browser, baseURL }) => {
   const phone = await newPhone(browser, baseURL);
   const ctrl = await shellController(phone, '/E2E-no-such-room', 'Mia');
-  await ctrl.waitForFunction(() => window.__cpEnded.length > 0, null, { timeout: 20000 });
-  expect(await ctrl.evaluate(() => window.__cpEnded)).toEqual(['room_not_found']);
+  await ctrl.waitForFunction(() => window.__pbEnded.length > 0, null, { timeout: 20000 });
+  expect(await ctrl.evaluate(() => window.__pbEnded)).toEqual(['room_not_found']);
   expect(new URL(ctrl.url()).pathname).toBe('/E2E-no-such-room');
   await phone.close();
 });
@@ -94,6 +94,6 @@ test('backgrounding the launcher drops the seat at once, and returning takes it 
   }, null, { timeout: 20000 });
   await ctrl.waitForSelector(visible('lobby'));
   // A background is not a session end — the launcher was told nothing.
-  expect(await ctrl.evaluate(() => window.__cpEnded)).toEqual([]);
+  expect(await ctrl.evaluate(() => window.__pbEnded)).toEqual([]);
   await phone.close();
 });

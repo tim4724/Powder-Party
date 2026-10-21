@@ -5,7 +5,7 @@ shared screen is the slope. A couch party game for 1–4 players on one display.
 
 ![4-player split-screen](artwork/splitscreen-4p.png)
 
-**▶ [Play it live](https://powder.couchpad.games/)** · **[UI gallery](https://powder-main.couchpad.games/gallery.html)**
+**▶ [Play it live](https://powder.paperballoon.games/)** · **[UI gallery](https://powder-main.paperballoon.games/gallery.html)**
 
 ## The idea
 
