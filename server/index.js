@@ -3,7 +3,7 @@
 // Powder Party static host. Like the reference games, this server runs NO game
 // logic and NO WebSocket: it serves static files + a few JSON endpoints.
 // Realtime multiplayer runs off-box through the Party-Server relay
-// (wss://ws.couchpad.games) plus the optional WebRTC fastlane. The display
+// (wss://ws.paperballoon.games) plus the optional WebRTC fastlane. The display
 // browser is authoritative; phones are thin controllers. See
 // public/shared/protocol.js for the relay config.
 
@@ -144,7 +144,7 @@ function cspHeader(nonce, frameAncestors) {
     "script-src 'self' 'nonce-" + nonce + "'",
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self'",
-    "connect-src 'self' wss://ws.couchpad.games https://ws.couchpad.games",
+    "connect-src 'self' wss://ws.paperballoon.games https://ws.paperballoon.games",
     "img-src 'self' data:",
     "object-src 'none'",
     "frame-src 'self'",

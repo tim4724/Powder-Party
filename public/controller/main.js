@@ -11,18 +11,18 @@ import { keepScreenOn, letScreenSleep } from '../shared/WakeLock.js';
 const { MSG, RUN_STATE_MSGS, RELAY_ERRORS, ROOM_STATE, SKIER_COLORS, LEVELS, DEFAULT_LEVEL, RUN_COUNTS, DEFAULT_RUNS } = window;
 const el = (id) => document.getElementById(id);
 
-// CouchPad shell (CouchPad-Controller CONTRACT.md): cpv's presence means
+// Paper Balloon shell (PaperBalloon-Controller CONTRACT.md): pbv's presence means
 // this page is hosted in the native launcher's WebView (Android WebView / iOS
-// WKWebView — identical here). The launcher owns identity (cpName, live
-// renames via window.CouchPad.setName) and session chrome (back/leave, the
-// exit via window.CouchPadHost.gameEnded) — ALL shell behavior gates on
-// CP_SHELL so the same deployed page keeps working in a plain browser.
+// WKWebView — identical here). The launcher owns identity (pbName, live
+// renames via window.PaperBalloon.setName) and session chrome (back/leave, the
+// exit via window.PaperBalloonHost.gameEnded) — ALL shell behavior gates on
+// PB_SHELL so the same deployed page keeps working in a plain browser.
 // Presence, not value: an unknown higher version still means "shell present,
 // behave per the highest version we know" (v1).
 const _params = new URLSearchParams(location.search);
 const _scenario = _params.get('scenario');
-const CP_SHELL = _params.get('cpv') != null;
-const CP_NAME = (_params.get('cpName') || '').trim().slice(0, 16);
+const PB_SHELL = _params.get('pbv') != null;
+const PB_NAME = (_params.get('pbName') || '').trim().slice(0, 16);
 const isLevel = (id) => LEVELS.some((l) => l.id === id);
 const isRunCount = (n) => RUN_COUNTS.includes(n);
 
@@ -43,9 +43,9 @@ function show(name) {
   // Push history only when stepping UP a level (name → lobby). Same-level and
   // back transitions don't push, so there's exactly one entry to pop: pressing
   // back from anywhere in the room returns to the name screen in one step.
-  // In the CouchPad shell there's no name screen to go back to and the
+  // In the Paper Balloon shell there's no name screen to go back to and the
   // launcher swallows system back for its own LEAVE bar — push nothing.
-  if (!CP_SHELL && (SCREEN_ORDER[name] || 0) > (SCREEN_ORDER[prev] || 0)) history.pushState({ screen: name }, '');
+  if (!PB_SHELL && (SCREEN_ORDER[name] || 0) > (SCREEN_ORDER[prev] || 0)) history.pushState({ screen: name }, '');
 }
 
 // haptics — vibrate the phone (ignored where unsupported). The player's eyes are
@@ -118,7 +118,7 @@ const net = new ControllerNet({
       // In the shell, being replaced is a terminal session end (the launcher
       // shows "You joined from another device"); in a plain browser the other
       // tab is usually the same person, so an informative overlay is kinder.
-      if (CP_SHELL) { bailTo('replaced'); return; }
+      if (PB_SHELL) { bailTo('replaced'); return; }
       setStatus('Opened on another tab.');
       if (inRoom) showConn('Opened on another tab', 'This seat is now controlled from another tab or device.', false);
     }
@@ -142,7 +142,7 @@ el('conn-retry').addEventListener('click', () => {
 });
 
 // The one exit ramp off this page: every dead end (stale room, full room,
-// game over) funnels through here. In the CouchPad shell the launcher owns
+// game over) funnels through here. In the Paper Balloon shell the launcher owns
 // the exit — hand it the reason (CONTRACT.md §3; it tears the WebView down and
 // shows the message) and do NOT also navigate. Plain browser: land on the
 // display page's device chooser with the reason as an allow-listed ?bail= toast.
@@ -154,7 +154,7 @@ function bailTo(reason) {
   if (bailed) return;
   bailed = true;
   net.disconnect();
-  const host = window.CouchPadHost;
+  const host = window.PaperBalloonHost;
   if (host && typeof host.gameEnded === 'function') {
     try { host.gameEnded(reason); } catch (_) {}
     return;
@@ -280,7 +280,7 @@ function handleMessage(data) {
       // placeholder slot) and keep the name screen + room code so they can
       // simply retry. In the shell there's no name screen to retry from — a
       // refused join is a terminal session end (launcher shows "Room is full").
-      if (CP_SHELL) { bailTo('game_full'); break; }
+      if (PB_SHELL) { bailTo('game_full'); break; }
       net.disconnect();
       setJoining(false);
       setStatus('Room is full — wait for a seat to open, then try again.');
@@ -555,7 +555,7 @@ window.addEventListener('popstate', () => {
   // Shell: the launcher swallows system back and shows its own LEAVE bar; our
   // back-to-name-entry affordance would fight it (and shell mode never pushes
   // the history entry this pop would land on — see `show`).
-  if (CP_SHELL) return;
+  if (PB_SHELL) return;
   if (currentScreen && currentScreen !== 'name') leaveToName();
 });
 
@@ -566,7 +566,7 @@ el('name-form').addEventListener('submit', (e) => {
   // Shell: never persist — the launcher-injected name arrives fresh on every
   // launch/rename, and storing it would leak into the standalone experience.
   // (The form is hidden in the shell; this is belt-and-suspenders.)
-  if (!CP_SHELL) saveName(n);
+  if (!PB_SHELL) saveName(n);
   // Request motion permission within this user gesture (iOS requirement; HTTPS is
   // required for the sensors on a real phone — desktop falls back to keys).
   tilt.enableMotion();
@@ -601,12 +601,12 @@ show('name');
 // to simulate a zombie link for the display's liveness sweep).
 window.__net = net;
 
-// CouchPad shell contract §2 — the launcher calls this on a live rename
+// Paper Balloon shell contract §2 — the launcher calls this on a live rename
 // (and belt-and-suspenders on every page load with the current name). Apply
 // exactly like an in-game rename would: local UI + broadcast to the display.
 // Never persisted — the launcher is the identity authority. Defined
 // unconditionally (the launcher's call is guarded; nobody else calls it).
-window.CouchPad = {
+window.PaperBalloon = {
   setName(name) {
     const n = String(name == null ? '' : name).trim().slice(0, 16);
     if (!n || n === myName) return;
@@ -625,7 +625,7 @@ window.CouchPad = {
 // socket only when the OS freezes the process; iOS's out-of-process WebKit
 // networking keeps answering pings while suspended, leaving a zombie skier).
 // Coming back is the ordinary `visibilitychange` → visible. Both are plain web
-// events, so this is equally correct in a browser — no CP_SHELL gate. See
+// events, so this is equally correct in a browser — no PB_SHELL gate. See
 // ControllerNet.suspend/resume for why it isn't a disconnect().
 window.addEventListener('pagehide', () => net.suspend());
 document.addEventListener('visibilitychange', () => {
@@ -633,11 +633,11 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // Shell mode: skip the name screen (§1) — the launcher owns identity, so join
-// at once with the injected cpName. The name form is hidden via .cp-shell
+// at once with the injected pbName. The name form is hidden via .pb-shell
 // (controller.css); the title + status line stay up as a joining splash.
-if (CP_SHELL) document.documentElement.classList.add('cp-shell');
-if (CP_SHELL && !_scenario && net.roomCode) {
-  myName = CP_NAME || 'Skier'; // guaranteed non-blank ≤16 by the launcher; defend anyway
+if (PB_SHELL) document.documentElement.classList.add('pb-shell');
+if (PB_SHELL && !_scenario && net.roomCode) {
+  myName = PB_NAME || 'Skier'; // guaranteed non-blank ≤16 by the launcher; defend anyway
   el('name-input').value = myName;
   setJoining(true);
   tilt.enableMotion();
