@@ -129,6 +129,11 @@ jobs:
           spec:
             revisionHistoryLimit: 3
             replicas: 1
+            # With the readinessProbe below, the old pod keeps serving until the
+            # new one answers, so an image that can't boot never takes the host down.
+            strategy:
+              rollingUpdate:
+                maxUnavailable: 0
             selector:
               matchLabels:
                 app: powder
@@ -163,6 +168,12 @@ jobs:
                     ports:
                       - containerPort: 4000
                         name: http
+                    readinessProbe:
+                      httpGet:
+                        path: /health
+                        port: 4000
+                      periodSeconds: 5
+                      failureThreshold: 3
           ---
           apiVersion: v1
           kind: Service
