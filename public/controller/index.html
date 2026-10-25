@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <!-- Paper Balloon shell theming hints (CONTRACT.md §4) — the launcher tints its
-       floating chrome from these; a plain browser uses theme-color as usual and
-       ignores pb-accent-color. Values mirror theme.css: the sky the page tops
-       out at (--sky-1) and the brand green (--car-green). -->
+  <!-- Light page: the Paper Balloon launcher draws dark status-bar icons over it
+       (CONTRACT.md §4), and its name sheet (§2) takes its surface from theme-color
+       — the sky the page tops out at (theme.css --sky-1) — and its accent from
+       :root's accent-color (controller.css). -->
+  <meta name="color-scheme" content="light" />
   <meta name="theme-color" content="#a8e2ff" />
-  <meta name="pb-accent-color" content="#2bb673" />
   <meta name="app-version" content="__APP_VERSION__" />
   <title>Powder Party</title>
   <link rel="icon" href="data:," />
@@ -48,6 +48,8 @@
     <div class="lobby-me">
       <span id="me-dot" class="dot"></span>
       <span id="me-name" class="lobby-me__name"></span>
+      <!-- Paper Balloon shell only: opens the launcher's name sheet (CONTRACT.md §2). -->
+      <button id="rename-btn" type="button" class="lobby-rename hidden" aria-label="Change name"></button>
     </div>
     <div id="level-select" class="level-select hidden" role="group" aria-label="Run difficulty">
       <span class="level-select__cap">Difficulty</span>
@@ -145,6 +147,11 @@
       <button id="conn-retry" type="button" class="btn btn--brand hidden">Try again</button>
     </div>
   </div>
+
+  <!-- Paper Balloon shell only: the player's own way out (CONTRACT.md §3), above
+       every overlay. main.js hides it while the touch-pad is live — mid-run it
+       shows behind the pause / connection overlays. -->
+  <button id="pb-close" type="button" class="icon-btn hidden" aria-label="Leave game"><span class="close-glyph"></span></button>
 
   <!-- Latency chip — one-way (RTT/2), pinned bottom-right across all screens.
        Hidden until the first reading lands (post-join). The bolt shows only

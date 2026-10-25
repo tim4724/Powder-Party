@@ -44,7 +44,7 @@ var MSG = {
   PAUSE_GAME: 'pause_game',           // request a pause (any player, mid-countdown/run)
   RESUME_GAME: 'resume_game',         // request resume from the pause overlay
   LEAVE: 'leave',                     // intentional exit (back-out) — display frees the seat at once (no reconnect QR)
-  SET_NAME: 'set_name',               // {name} live rename (the Paper Balloon shell's rename bar via window.PaperBalloon.setName) — display clamps like HELLO's name and republishes the roster
+  SET_NAME: 'set_name',               // {name} live rename (the Paper Balloon launcher's name sheet via PaperBalloonHost.editName()) — display clamps like HELLO's name and republishes the roster
   PING: 'ping',
 
   // Display -> specific controller

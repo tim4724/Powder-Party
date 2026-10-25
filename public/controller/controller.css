@@ -3,22 +3,24 @@
    as snow). Tokens + reusable bits live in /shared/theme.css. --car is the
    player's livery colour, set at runtime by controller/main.js (applyLivery). */
 
-/* Safe zone — the larger of the platform's own display cutout and the Paper Balloon
-   launcher chrome (CONTRACT.md §5: the shell hosts the page edge-to-edge and
-   floats its LEAVE bar / name chip on top, publishing --pb-safe-* on <html>;
-   0px in a plain browser). Visuals may bleed under the chrome — interactive UI
-   pads by these. */
+/* Safe zone — the platform's own insets (status bar, display cutout, home
+   indicator, and the Android navigation bar while the Paper Balloon launcher
+   shows it — CONTRACT.md §5; viewport-fit=cover in index.html makes them
+   non-zero). Visuals bleed to the edges; interactive UI pads by these. */
 :root {
-  --safe-top:    max(var(--pb-safe-top, 0px),    env(safe-area-inset-top, 0px));
-  --safe-right:  max(var(--pb-safe-right, 0px),  env(safe-area-inset-right, 0px));
-  --safe-bottom: max(var(--pb-safe-bottom, 0px), env(safe-area-inset-bottom, 0px));
-  --safe-left:   max(var(--pb-safe-left, 0px),   env(safe-area-inset-left, 0px));
+  --safe-top:    env(safe-area-inset-top, 0px);
+  --safe-right:  env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left:   env(safe-area-inset-left, 0px);
+  /* The launcher's name sheet (CONTRACT.md §2) takes its Save button + field
+     accent from here; native form controls pick up the brand green too. */
+  accent-color: var(--car-green);
 }
 
-/* Hosted in the Paper Balloon shell: the launcher owns identity, so there is no
-   name entry (main.js joins with the injected pbName) — the title + status
-   line stay up as a joining splash. */
-.pb-shell #name-form, .pb-shell #name .sub { display: none; }
+/* Hosted in the Paper Balloon launcher with its player name: no name entry
+   (main.js joins as PaperBalloonHost.name) — the title + status line stay up
+   as a joining splash. */
+.pb-autojoin #name-form, .pb-autojoin #name .sub { display: none; }
 
 html, body {
   margin: 0; min-height: 100%;
@@ -88,6 +90,15 @@ input[type=text]:disabled { opacity: 0.6; }
   color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 #me-dot { width: 1rem; height: 1rem; flex: none; background: var(--car); }
+/* Rename (shell only) — a quiet pencil beside the name; the launcher's sheet
+   does the editing. Padded out to a thumb-sized target. */
+.lobby-rename {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 2.6rem; height: 2.6rem; margin: -0.6rem -0.6rem -0.6rem -0.2rem; padding: 0;
+  background: none; border: 0; color: var(--ink-2); cursor: pointer;
+}
+.lobby-rename::before { content: "\270E\FE0E"; font-size: 1.3rem; line-height: 1; }  /* ✎ as monochrome text */
+.lobby-rename:active { transform: translateY(1px); }
 
 #wait-host { color: var(--ink-2); font-weight: 700; text-align: center; margin-top: 1rem; }
 /* Host name in the wait text — tinted in their livery colour (set inline from
@@ -262,6 +273,22 @@ input[type=text]:disabled { opacity: 0.6; }
   right: calc(0.6rem + var(--safe-right));
   width: 3.2rem; height: 3.2rem;
 }
+
+/* Leave (shell only) — top-left, mirroring the pause button, above every
+   overlay (incl. #conn) so a stuck player always has the way out. */
+#pb-close {
+  position: fixed; z-index: 31;
+  top: calc(0.6rem + var(--safe-top));
+  left: calc(0.6rem + var(--safe-left));
+  width: 3.2rem; height: 3.2rem;
+}
+.close-glyph { position: relative; width: 18px; height: 18px; }
+.close-glyph::before, .close-glyph::after {
+  content: ''; position: absolute; left: 7px; top: 0;
+  width: 4px; height: 18px; border-radius: 2px; background: currentColor;
+}
+.close-glyph::before { transform: rotate(45deg); }
+.close-glyph::after  { transform: rotate(-45deg); }
 
 /* Pause overlay — frosted glass, the same Continue / New run choices the big
    screen shows. Buttons fill the column like the rest of the phone UI. */

@@ -11,18 +11,22 @@ import { keepScreenOn, letScreenSleep } from '../shared/WakeLock.js';
 const { MSG, RUN_STATE_MSGS, RELAY_ERRORS, ROOM_STATE, SKIER_COLORS, LEVELS, DEFAULT_LEVEL, RUN_COUNTS, DEFAULT_RUNS } = window;
 const el = (id) => document.getElementById(id);
 
-// Paper Balloon shell (PaperBalloon-Controller CONTRACT.md): pbv's presence means
-// this page is hosted in the native launcher's WebView (Android WebView / iOS
-// WKWebView — identical here). The launcher owns identity (pbName, live
-// renames via window.PaperBalloon.setName) and session chrome (back/leave, the
-// exit via window.PaperBalloonHost.gameEnded) — ALL shell behavior gates on
-// PB_SHELL so the same deployed page keeps working in a plain browser.
-// Presence, not value: an unknown higher version still means "shell present,
-// behave per the highest version we know" (v1).
+// Paper Balloon shell (PaperBalloon-Controller CONTRACT.md): window.PaperBalloonHost
+// exists only inside the native launcher's web view (Android WebView / iOS
+// WKWebView — identical here), defined before this script runs. The launcher
+// owns identity (PaperBalloonHost.name, renames via editName()) and the way out
+// (leave(), gameEnded(reason), system back via setBackMode) — ALL shell behavior
+// gates on PB_SHELL so the same deployed page keeps working in a plain browser.
+// Every member is feature-detected on its own (pbCall): an Android WebView too
+// old for document-start scripts has the host but neither name nor editName.
 const _params = new URLSearchParams(location.search);
 const _scenario = _params.get('scenario');
-const PB_SHELL = _params.get('pbv') != null;
-const PB_NAME = (_params.get('pbName') || '').trim().slice(0, 16);
+const PB_HOST = window.PaperBalloonHost || null;
+const PB_SHELL = !!PB_HOST;
+const pbHas = (fn) => !!PB_HOST && typeof PB_HOST[fn] === 'function';
+const pbCall = (fn, ...args) => { if (pbHas(fn)) { try { return PB_HOST[fn](...args); } catch (_) {} } };
+// Non-blank ≤16 per the contract; trimmed + clamped anyway, like any input.
+const pbName = () => { try { return String((PB_HOST && PB_HOST.name) || '').trim().slice(0, 16); } catch (_) { return ''; } };
 const isLevel = (id) => LEVELS.some((l) => l.id === id);
 const isRunCount = (n) => RUN_COUNTS.includes(n);
 
@@ -43,9 +47,27 @@ function show(name) {
   // Push history only when stepping UP a level (name → lobby). Same-level and
   // back transitions don't push, so there's exactly one entry to pop: pressing
   // back from anywhere in the room returns to the name screen in one step.
-  // In the Paper Balloon shell there's no name screen to go back to and the
-  // launcher swallows system back for its own LEAVE bar — push nothing.
+  // In the Paper Balloon shell system back belongs to the launcher (setBackMode
+  // below) and never reaches the page's history — push nothing.
   if (!PB_SHELL && (SCREEN_ORDER[name] || 0) > (SCREEN_ORDER[prev] || 0)) history.pushState({ screen: name }, '');
+  syncShellExit();
+}
+
+// Shell exits (CONTRACT.md §3 + §9). While a run is on the whole #game surface
+// is the touch-pad, edges included, so system back is 'off' (a stray Android
+// back gesture or iOS edge swipe must not yank the player off the slope) and the
+// close button stays out from under the thumbs — it surfaces only behind the
+// pause / connection overlays, where the pad is covered anyway. Every other
+// screen (joining splash, lobby, late-join wait, results) has nothing on the
+// edges: back there leaves like leave(), and the close button is up.
+let shellBackMode = null;
+function syncShellExit() {
+  if (!PB_SHELL) return;
+  const racing = currentScreen === 'game';
+  const mode = racing ? 'off' : 'leave';
+  if (mode !== shellBackMode) { shellBackMode = mode; pbCall('setBackMode', mode); }
+  const covered = !el('pause-overlay').classList.contains('hidden') || !el('conn').classList.contains('hidden');
+  el('pb-close').classList.toggle('hidden', !pbHas('leave') || (racing && !covered));
 }
 
 // haptics — vibrate the phone (ignored where unsupported). The player's eyes are
@@ -133,8 +155,9 @@ function showConn(title, msg, retry) {
   el('conn-msg').textContent = msg || '';
   el('conn-retry').classList.toggle('hidden', !retry);
   el('conn').classList.remove('hidden');
+  syncShellExit();
 }
-function hideConn() { el('conn').classList.add('hidden'); }
+function hideConn() { el('conn').classList.add('hidden'); syncShellExit(); }
 el('conn-retry').addEventListener('click', () => {
   buzz(15);
   showConn('Reconnecting…', '', false);
@@ -324,7 +347,7 @@ function handleMessage(data) {
       el('result-intermission') && el('result-intermission').classList.add('hidden'); // a fresh run ends the intermission
       show('game');
       el('drive-hud').classList.remove('hidden'); // full HUD up front — the countdown lives on the display
-      if (data.n >= 0) buzz(data.n > 0 ? 20 : [0, 90]); // haptic tick on counts, stronger on GO
+      if (data.n >= 0) buzz(data.n > 0 ? 20 : 90); // haptic tick on counts, stronger on GO
       setPauseOverlay(false);          // a fresh countdown clears any stale pause UI
       el('pause-btn').classList.remove('hidden');
       startDriving();                  // stream input during the countdown (display reacts)
@@ -552,9 +575,9 @@ function leaveToName() {
   el('name-input').focus();
 }
 window.addEventListener('popstate', () => {
-  // Shell: the launcher swallows system back and shows its own LEAVE bar; our
-  // back-to-name-entry affordance would fight it (and shell mode never pushes
-  // the history entry this pop would land on — see `show`).
+  // Shell: system back belongs to the launcher (setBackMode — leave, or off
+  // mid-run) and shell mode never pushes the history entry this pop would land
+  // on (see `show`); back-to-name-entry is a browser-only affordance.
   if (PB_SHELL) return;
   if (currentScreen && currentScreen !== 'name') leaveToName();
 });
@@ -563,10 +586,9 @@ el('name-form').addEventListener('submit', (e) => {
   e.preventDefault();
   const n = el('name-input').value.trim().slice(0, 16) || 'Skier';
   myName = n;
-  // Shell: never persist — the launcher-injected name arrives fresh on every
-  // launch/rename, and storing it would leak into the standalone experience.
-  // (The form is hidden in the shell; this is belt-and-suspenders.)
-  if (!PB_SHELL) saveName(n);
+  // Only ever a name the player typed: the launcher's name never lands here
+  // (an auto-join hides this form), so it can't leak into the browser game.
+  saveName(n);
   // Request motion permission within this user gesture (iOS requirement; HTTPS is
   // required for the sensors on a real phone — desktop falls back to keys).
   tilt.enableMotion();
@@ -585,6 +607,7 @@ function setPauseOverlay(on) {
   if (on) tapGuard(el('pause-overlay'));
   el('pause-overlay').classList.toggle('hidden', !on);
   el('pause-btn').disabled = on;
+  syncShellExit();
 }
 el('pause-btn').addEventListener('click', () => { buzz(15); net.send(MSG.PAUSE_GAME); });
 el('pause-continue').addEventListener('click', () => { buzz(15); net.send(MSG.RESUME_GAME); });
@@ -601,22 +624,34 @@ show('name');
 // to simulate a zombie link for the display's liveness sweep).
 window.__net = net;
 
-// Paper Balloon shell contract §2 — the launcher calls this on a live rename
-// (and belt-and-suspenders on every page load with the current name). Apply
-// exactly like an in-game rename would: local UI + broadcast to the display.
-// Never persisted — the launcher is the identity authority. Defined
-// unconditionally (the launcher's call is guarded; nobody else calls it).
-window.PaperBalloon = {
-  setName(name) {
-    const n = String(name == null ? '' : name).trim().slice(0, 16);
-    if (!n || n === myName) return;
-    myName = n;
-    el('name-input').value = n;         // keep the (hidden) form coherent for the plain-browser fallback paths
-    el('me-name').textContent = n;      // lobby + waiting headers repaint in place;
-    el('waiting-name').textContent = n; // rosters/boards refresh off the display's echo
-    net.rename(n);
-  },
-};
+// Shell contract §3 — the player's own exit. Tell the display we're out (a LEAVE
+// frees the seat at once instead of holding it behind the reconnect QR), then
+// hand over to the launcher, which closes the web view. Never navigate too.
+el('pb-close').addEventListener('click', () => {
+  if (bailed) return;
+  bailed = true;   // no gameEnded may chase the player's own leave
+  buzz(15);
+  disarmBail();
+  net.disconnect();
+  pbCall('leave');
+});
+
+// Shell contract §2 — rename through the launcher's own name sheet (it owns the
+// name and its rules). The resolved name is already valid and is from then on
+// PaperBalloonHost.name; null means dismissed. Applied like any live rename:
+// local UI + SET_NAME to the display. Never persisted — the launcher owns it.
+el('rename-btn').addEventListener('click', async () => {
+  buzz(15);
+  let n = null;
+  try { n = await PB_HOST.editName(); } catch (_) {}
+  n = String(n || '').trim().slice(0, 16);
+  if (!n || n === myName) return;
+  myName = n;
+  el('me-name').textContent = n;      // lobby + waiting headers repaint in place;
+  el('waiting-name').textContent = n; // rosters/boards refresh off the display's echo
+  net.rename(n);
+});
+el('rename-btn').classList.toggle('hidden', !pbHas('editName'));
 
 // Contract §7 — leaving the launcher (home, app switch, lock) arrives as a
 // synthetic persisted `pagehide`, the same event a browser fires when freezing
@@ -633,11 +668,14 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // Shell mode: skip the name screen (§1) — the launcher owns identity, so join
-// at once with the injected pbName. The name form is hidden via .pb-shell
-// (controller.css); the title + status line stay up as a joining splash.
-if (PB_SHELL) document.documentElement.classList.add('pb-shell');
-if (PB_SHELL && !_scenario && net.roomCode) {
-  myName = PB_NAME || 'Skier'; // guaranteed non-blank ≤16 by the launcher; defend anyway
+// at once as PaperBalloonHost.name. The name form is hidden via .pb-autojoin
+// (controller.css); the title + status line stay up as a joining splash. A host
+// with no name (that too-old Android WebView) falls back to the browser flow:
+// the player types one, and the shell exits above still apply.
+const PB_NAME = pbName();
+if (PB_NAME && !_scenario && net.roomCode) {
+  document.documentElement.classList.add('pb-autojoin');
+  myName = PB_NAME;
   el('name-input').value = myName;
   setJoining(true);
   tilt.enableMotion();

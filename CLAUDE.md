@@ -62,12 +62,14 @@ single-screen previews stay relay-free via `/?test=1&scenario=…` (see README)
   remaps in `server/index.js`, so update the Dockerfile + CSP when changing them.
 - **Paper Balloon shell contract** (`CONTRACT.md` in the sibling `PaperBalloon-Controller` repo, v1):
   the same deployed controller page is also the game page inside the native Paper Balloon
-  launcher. `?pbv=1` means "hosted in the shell" and EVERY shell behaviour gates on
-  `PB_SHELL`, so the page keeps working untouched in a plain browser — skip name entry and
-  join as `pbName` (never persisted), `window.PaperBalloon.setName` renames live, terminal ends
-  call `window.PaperBalloonHost.gameEnded(reason)` instead of the `?bail=` navigation,
-  interactive UI pads by `--pb-safe-*`, and `pagehide`/`visibilitychange` park + rejoin the
-  relay socket (`ControllerNet.suspend`/`resume`). Covered end-to-end by
+  launcher. `window.PaperBalloonHost` means "hosted in the shell" and EVERY shell behaviour
+  gates on `PB_SHELL` (each member feature-detected), so the page keeps working untouched in a
+  plain browser — skip name entry and join as `PaperBalloonHost.name` (never persisted), the
+  lobby pencil renames via `editName()`, a top-left close calls `leave()`, terminal ends call
+  `gameEnded(reason)` instead of the `?bail=` navigation, system back is `setBackMode('off')`
+  while the run's touch-pad is up and `'leave'` everywhere else, `<meta name="color-scheme">`
+  is `light`, interactive UI pads by `env(safe-area-inset-*)`, and `pagehide`/
+  `visibilitychange` park + rejoin the relay socket (`ControllerNet.suspend`/`resume`). Covered end-to-end by
   `tests/e2e/paperballoon-shell.spec.js`.
 - **Series, not single runs:** a session is N runs (host picks 3/5/7 in the lobby, like the
   difficulty switch — `SET_RUNS`/`RUNS_UPDATE`). The SkiEngine stays run-only (no series

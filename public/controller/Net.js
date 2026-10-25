@@ -194,7 +194,7 @@ export class ControllerNet extends GameNet {
     if (this._suspended) this.connect(); // connect() clears the flag
   }
 
-  // Live rename (the Paper Balloon shell's window.PaperBalloon.setName). Adopt the
+  // Live rename (the Paper Balloon launcher's PaperBalloonHost.editName()). Adopt the
   // name for future HELLOs — a reconnect re-introduces us with it — and tell
   // the display so the roster updates everywhere. A no-op while disconnected
   // (send() drops without a party; the adopted name still rides the next join).
