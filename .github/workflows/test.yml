@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
       - run: npm ci
       - run: npm test
@@ -28,12 +28,12 @@ jobs:
     container:
       # Keep this tag in sync with @playwright/test in package-lock.json —
       # the image ships the matching browsers preinstalled.
-      image: mcr.microsoft.com/playwright:v1.56.1-noble
+      image: mcr.microsoft.com/playwright:v1.64.1-noble
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
       - run: npm ci
       - name: Run E2E tests (real pages over the real relay)
