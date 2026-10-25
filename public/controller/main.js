@@ -25,8 +25,10 @@ const PB_HOST = window.PaperBalloonHost || null;
 const PB_SHELL = !!PB_HOST;
 const pbHas = (fn) => !!PB_HOST && typeof PB_HOST[fn] === 'function';
 const pbCall = (fn, ...args) => { if (pbHas(fn)) { try { return PB_HOST[fn](...args); } catch (_) {} } };
-// Non-blank ≤16 per the contract; trimmed + clamped anyway, like any input.
-const pbName = () => { try { return String((PB_HOST && PB_HOST.name) || '').trim().slice(0, 16); } catch (_) { return ''; } };
+// The launcher's name (§1): non-blank ≤16 by contract, and the display clamps
+// every HELLO/SET_NAME name anyway — so only its presence is checked here.
+const PB_NAME = (PB_HOST && typeof PB_HOST.name === 'string') ? PB_HOST.name : '';
+const PB_AUTOJOIN = !!PB_NAME && !_scenario;
 const isLevel = (id) => LEVELS.some((l) => l.id === id);
 const isRunCount = (n) => RUN_COUNTS.includes(n);
 
@@ -169,20 +171,22 @@ el('conn-retry').addEventListener('click', () => {
 // the exit — hand it the reason (CONTRACT.md §3; it tears the WebView down and
 // shows the message) and do NOT also navigate. Plain browser: land on the
 // display page's device chooser with the reason as an allow-listed ?bail= toast.
-// Fire-once: every path here is terminal, and in the shell a second reason
-// must not chase the first (e.g. the room teardown following a DISPLAY_CLOSED
-// goodbye, or a still-pending display-gone bail timer).
+// Fire-once (exitRoom): every path here is terminal, and in the shell a second
+// reason must not chase the first (e.g. the room teardown following a
+// DISPLAY_CLOSED goodbye, or a still-pending display-gone bail timer) — nor
+// chase the player's own leave().
 let bailed = false;
-function bailTo(reason) {
-  if (bailed) return;
+function exitRoom() {
+  if (bailed) return false;
   bailed = true;
-  net.disconnect();
-  const host = window.PaperBalloonHost;
-  if (host && typeof host.gameEnded === 'function') {
-    try { host.gameEnded(reason); } catch (_) {}
-    return;
-  }
-  location.replace('/?bail=' + reason);
+  disarmBail();
+  net.disconnect(); // LEAVE: the display frees the seat at once
+  return true;
+}
+function bailTo(reason) {
+  if (!exitRoom()) return;
+  if (pbHas('gameEnded')) pbCall('gameEnded', reason);
+  else location.replace('/?bail=' + reason);
 }
 
 // ---- "game ended" bail ----
@@ -624,15 +628,11 @@ show('name');
 // to simulate a zombie link for the display's liveness sweep).
 window.__net = net;
 
-// Shell contract §3 — the player's own exit. Tell the display we're out (a LEAVE
-// frees the seat at once instead of holding it behind the reconnect QR), then
-// hand over to the launcher, which closes the web view. Never navigate too.
+// Shell contract §3 — the player's own exit: free the seat (rather than hold it
+// behind the reconnect QR), then the launcher closes the web view. Never navigate too.
 el('pb-close').addEventListener('click', () => {
-  if (bailed) return;
-  bailed = true;   // no gameEnded may chase the player's own leave
+  if (!exitRoom()) return;
   buzz(15);
-  disarmBail();
-  net.disconnect();
   pbCall('leave');
 });
 
@@ -643,9 +643,8 @@ el('pb-close').addEventListener('click', () => {
 el('rename-btn').addEventListener('click', async () => {
   buzz(15);
   let n = null;
-  try { n = await PB_HOST.editName(); } catch (_) {}
-  n = String(n || '').trim().slice(0, 16);
-  if (!n || n === myName) return;
+  try { n = await pbCall('editName'); } catch (_) {}
+  if (typeof n !== 'string' || !n || n === myName) return;
   myName = n;
   el('me-name').textContent = n;      // lobby + waiting headers repaint in place;
   el('waiting-name').textContent = n; // rosters/boards refresh off the display's echo
@@ -672,11 +671,9 @@ document.addEventListener('visibilitychange', () => {
 // (controller.css); the title + status line stay up as a joining splash. A host
 // with no name (that too-old Android WebView) falls back to the browser flow:
 // the player types one, and the shell exits above still apply.
-const PB_NAME = pbName();
-if (PB_NAME && !_scenario && net.roomCode) {
+if (PB_AUTOJOIN && net.roomCode) {
   document.documentElement.classList.add('pb-autojoin');
   myName = PB_NAME;
-  el('name-input').value = myName;
   setJoining(true);
   tilt.enableMotion();
   // iOS 13+ only hands over DeviceOrientation from a requestPermission() call
@@ -709,8 +706,10 @@ if (_scenario) {
 // rejoin swaps into its own existing relay slot, so "full" isn't fatal there).
 // A slow probe racing a successful join must not evict the player, so the
 // verdict is dropped once we've moved past the name screen. Gallery previews
-// (?scenario=) never touch the relay, and a code-less page can't be probed.
-if (!_scenario && net.roomCode) {
+// (?scenario=) never touch the relay, and a code-less page can't be probed. A
+// shell auto-join has no name to invest: its own join hears the same verdict
+// from the relay (RELAY_ERRORS in onStatus), so there's nothing to probe for.
+if (!_scenario && !PB_AUTOJOIN && net.roomCode) {
   net.probeRoom().then((state) => {
     // Already past the name screen, or a join is in flight (disabled form):
     // the display/relay's own answer wins over a possibly-stale probe.
