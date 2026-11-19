@@ -77,4 +77,4 @@ jobs:
 
             Only resolve threads where you are confident the issue is fixed. Do not resolve threads from human reviewers. If there are no stale bot threads, exit immediately.
           claude_args: |
-            --model claude-haiku-4-5 --allowedTools "Read,Grep,Bash(gh api:*)"
+            --model claude-haiku-5-5 --allowedTools "Read,Grep,Bash(gh api:*)"
