@@ -8,7 +8,7 @@
 # bundles/manifest are static files and the pruned prod tree (qrcode) is pure
 # JS, no install scripts — so building it once on the native host and COPYing
 # into each platform's runtime image is safe.
-FROM --platform=$BUILDPLATFORM node:26-alpine AS builder
+FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS builder
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -21,7 +21,7 @@ COPY vendor/ ./vendor/
 RUN node scripts/build.js && npm prune --omit=dev
 
 # Production stage
-FROM node:26-alpine
+FROM node:26-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5
 RUN addgroup -g 1001 nodejs && adduser -u 1001 -G nodejs -s /bin/sh -D nodejs
 WORKDIR /app
 COPY --from=builder /app/node_modules ./node_modules
