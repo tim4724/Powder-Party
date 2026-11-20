@@ -1,0 +1,14 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["github>tim4724/renovate-config"],
+  "packageRules": [
+    {
+      "description": "The game serves vendor/three, a hand-made copy of node_modules/three.",
+      "matchPackageNames": ["three"],
+      "groupName": "three",
+      "groupSlug": "three",
+      "automerge": false,
+      "prBodyNotes": ["Copy `node_modules/three` into `vendor/three` before merging: the game serves the vendored copy."]
+    }
+  ]
+}

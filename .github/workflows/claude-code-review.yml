@@ -10,6 +10,9 @@ concurrency:
 
 jobs:
   claude-review:
+    # Renovate PRs carry upstream release notes, which would reach a token-holding
+    # agent as instructions, and a lockfile diff gains little from review.
+    if: ${{ !startsWith(github.head_ref, 'renovate/') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
